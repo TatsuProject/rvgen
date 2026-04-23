@@ -651,6 +651,45 @@ def test_resolve_cov_goals_unknown_target_only_baseline():
     assert not any("_target_not_shipped_" in p for p in out)
 
 
+def test_ci_summary_writes_github_output(tmp_path: Path, monkeypatch):
+    """_emit_ci_summary writes GITHUB_OUTPUT lines when the env var is set."""
+    from chipforge_inst_gen.cli import _emit_ci_summary
+    gh_out = tmp_path / "gh_out"
+    gh_sum = tmp_path / "gh_sum"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(gh_out))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(gh_sum))
+
+    db = new_db()
+    db[CG_OPCODE] = {"ADD": 10, "SUB": 5}
+
+    g = tmp_path / "g.yaml"
+    g.write_text("opcode_cg:\n  ADD: 5\n  SUB: 10\n")
+    goals = load_goals(g)
+
+    _emit_ci_summary(db, goals, tmp_path / "report.txt", test_count=2)
+
+    out = gh_out.read_text()
+    assert "unique_bins=2" in out
+    assert "goals_met=1" in out    # ADD met, SUB not
+    assert "goals_total=2" in out
+    assert "missing_bins=1" in out
+    assert "tests=2" in out
+
+    summary = gh_sum.read_text()
+    assert "chipforge-inst-gen coverage" in summary
+    assert "Goals met" in summary
+    assert "SUB" in summary  # missing bin listed
+
+
+def test_ci_summary_silent_without_env(tmp_path: Path, monkeypatch):
+    """Without GITHUB_OUTPUT env, _emit_ci_summary is a no-op."""
+    from chipforge_inst_gen.cli import _emit_ci_summary
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    # Should not raise.
+    _emit_ci_summary(new_db(), None, tmp_path / "r.txt", test_count=0)
+
+
 def test_auto_regress_convergence_counts():
     from chipforge_inst_gen.auto_regress import _count_unique_bins, _convergence_stamp
     db = new_db()

@@ -353,11 +353,82 @@ def main(argv: list[str] | None = None) -> int:
         report_path.write_text(report + "\n")
         _LOG.info("Coverage report: %s", report_path)
 
+        # CI integration: emit GITHUB_OUTPUT / GITHUB_STEP_SUMMARY when
+        # running under GitHub Actions (and similar under --ci_summary).
+        _emit_ci_summary(existing, goals, report_path, test_count=len(tests))
+
         if goals is not None and not cov_goals_met(existing, goals):
             _LOG.warning("Coverage goals NOT met — see %s", report_path)
             return 3
 
     return 0
+
+
+def _emit_ci_summary(
+    db: "CoverageDB", goals, report_path: Path, *, test_count: int
+) -> None:
+    """Emit CI-friendly outputs when running under a CI system.
+
+    Honors:
+
+    - ``$GITHUB_OUTPUT`` — writes ``key=value`` lines consumed by
+      subsequent steps via ``${{ steps.X.outputs.Y }}``.
+    - ``$GITHUB_STEP_SUMMARY`` — writes a markdown table to the Job
+      Summary panel. Makes every PR show the coverage delta inline.
+
+    Silent when neither env var is set. Safe to call with goals=None.
+    """
+    import os as _os
+    from chipforge_inst_gen.coverage.cgf import missing_bins
+
+    total_unique = sum(
+        1 for cg in db for bn, cnt in db.get(cg, {}).items() if cnt > 0
+    )
+    total_hits = sum(sum(b.values()) for b in db.values())
+    miss = missing_bins(db, goals) if goals else {}
+    total_missing = sum(len(v) for v in miss.values())
+    required = sum(1 for b in goals.data.values() for v in b.values() if v > 0) if goals else 0
+    met = required - total_missing
+    pct = (met / required * 100.0) if required else 100.0
+
+    gh_output = _os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        try:
+            with open(gh_output, "a") as f:
+                f.write(f"unique_bins={total_unique}\n")
+                f.write(f"total_hits={total_hits}\n")
+                f.write(f"goals_met={met}\n")
+                f.write(f"goals_total={required}\n")
+                f.write(f"goals_pct={pct:.1f}\n")
+                f.write(f"missing_bins={total_missing}\n")
+                f.write(f"tests={test_count}\n")
+        except OSError:
+            pass  # CI env may sandbox writes; don't crash.
+
+    gh_summary = _os.environ.get("GITHUB_STEP_SUMMARY")
+    if gh_summary:
+        try:
+            with open(gh_summary, "a") as f:
+                f.write("### chipforge-inst-gen coverage\n\n")
+                f.write(f"- Tests run: **{test_count}**\n")
+                f.write(f"- Unique bins hit: **{total_unique}**\n")
+                f.write(f"- Total samples: **{total_hits}**\n")
+                if goals:
+                    f.write(
+                        f"- Goals met: **{met} / {required}** "
+                        f"({pct:.1f}%) &mdash; "
+                        f"{'✅' if total_missing == 0 else f'❌ {total_missing} missing'}\n"
+                    )
+                    if miss:
+                        f.write("\n<details><summary>Missing bins</summary>\n\n")
+                        for cg, bins in sorted(miss.items()):
+                            f.write(f"- **{cg}**: " +
+                                    ", ".join(f"`{bn}` ({o}/{r})"
+                                              for bn, (o, r) in sorted(bins.items())) + "\n")
+                        f.write("\n</details>\n")
+                f.write(f"\nFull report: `{report_path}`\n")
+        except OSError:
+            pass
 
 
 # Target → (isa, mabi) mapping matching run.py::load_config's dispatch.
