@@ -10,7 +10,7 @@ from rvgen.isa.enums import (
     RiscvInstrGroup,
     SatpMode,
 )
-from rvgen.targets import TargetCfg, get_target, target_names
+from rvgen.targets import BUILTIN_TARGETS, TargetCfg, get_target, target_names
 
 
 def test_all_expected_targets_present():
@@ -33,7 +33,10 @@ def test_all_expected_targets_present():
         "coralnpu", "rv32imc_zve32x", "rv32imfc_zve32f",
         "rv64imc_zve64x", "rv64imafdc_zve64d",
     }
-    assert set(target_names()) == expected
+    # Compare against BUILTIN_TARGETS rather than target_names() so the
+    # test is insensitive to whichever user-area targets happen to be
+    # discoverable at test time (e.g. user/targets/chipforge-mcu.yaml).
+    assert set(BUILTIN_TARGETS) == expected
 
 
 def test_rv32i_config():

@@ -1,0 +1,65 @@
+# chipforge-mcu — example user target.
+#
+# Derived from the built-in rv32imc_zkn target, but with a custom CLINT
+# memory map reflecting a hypothetical SoC integration where the timer
+# is not at SiFive CLINT's default 0x02000000 base.
+#
+# Use:
+#   python -m rvgen --target chipforge-mcu \
+#       --test riscv_rand_instr_test \
+#       --steps gen \
+#       --output out/
+#
+# Or from outside the rvgen checkout:
+#   export RVGEN_USER_DIR=/path/to/rvgen/user
+#   python -m rvgen --target chipforge-mcu ...
+
+name: chipforge-mcu
+xlen: 32
+
+# RV32IMC + ratified crypto (Zkn umbrella, matching the chipforge MCU).
+supported_isa:
+  - RV32I
+  - RV32M
+  - RV32C
+  - RV32ZBKB
+  - RV32ZBKC
+  - RV32ZBKX
+  - RV32ZKND
+  - RV32ZKNE
+  - RV32ZKNH
+
+supported_privileged_mode:
+  - MACHINE_MODE
+
+satp_mode: BARE
+support_sfence: false
+support_unaligned_load_store: true
+num_harts: 1
+
+# Custom CLINT location — placeholder illustrating how a real SoC
+# might relocate the timer. Replace with your actual memory map.
+clint:
+  base: 0x10010000
+  mtime_offset: 0xBFF8
+  mtimecmp_offset: 0x4000
+  msip_offset: 0x0
+
+# GCC + spike ISA string. zicsr + zifencei are needed for CSR ops /
+# fence.i that the generator may emit.
+isa_string: rv32imc_zbkb_zbkc_zbkx_zkn_zicsr_zifencei
+mabi: ilp32
+
+# The MCU implements SHA-256 only — SHA-512 split-pair opcodes must
+# be excluded even though they're part of Zkn.
+unsupported_instr:
+  - SHA512SIG0L
+  - SHA512SIG0H
+  - SHA512SIG1L
+  - SHA512SIG1H
+  - SHA512SUM0R
+  - SHA512SUM1R
+
+implemented_csr: MMODE_CSRS
+implemented_interrupt: MMODE_INTERRUPTS
+implemented_exception: MMODE_EXCEPTIONS

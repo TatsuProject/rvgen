@@ -280,7 +280,7 @@ rv64imc_zve64x  rv64imafdc_zve64d
 coralnpu     ml            multi_harts
 ```
 
-Targets are declarative — adding a new one is a single `TargetCfg(...)` entry plus a `(isa, mabi)` pair in `cli.py`.
+Targets are declarative — adding a new one for a custom SoC is a single YAML file in the [user area](docs/user-area.md) (no framework edit required). Built-in targets also live on `TargetCfg`, now split across `rvgen/targets/core_setting.py` (dataclass), `presets.py` (CSR/interrupt/exception tuples), and `builtin.py` (the 27 definitions). Each target carries its own CLINT memory map so generated timer-IRQ code targets the right addresses on any SoC.
 
 ---
 

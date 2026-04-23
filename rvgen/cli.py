@@ -20,7 +20,15 @@ from pathlib import Path
 
 from rvgen.config import make_config
 from rvgen.seeding import SeedGen
-from rvgen.targets import get_target, target_names
+from rvgen.targets import (
+    BUILTIN_TARGETS,
+    TargetCfg,
+    get_target,
+    load_target_yaml,
+    resolve_user_dir,
+    set_user_dir,
+    target_names,
+)
 from rvgen.testlist import load_testlist
 
 
@@ -37,8 +45,21 @@ def build_parser() -> argparse.ArgumentParser:
         description="Pure-Python re-implementation of riscv-dv — CLI.",
     )
     # Test selection
-    p.add_argument("--target", default="rv32imc", choices=target_names(),
-                   help="Target processor configuration (default: rv32imc).")
+    p.add_argument("--target", default="rv32imc",
+                   help="Target processor configuration (default: rv32imc). "
+                        "Resolved against built-in targets first, then against "
+                        "YAML files under <user_dir>/targets/. Run with "
+                        "--help_targets to list everything known.")
+    p.add_argument("--target_config", default="",
+                   help="Path to a standalone target-config YAML. If set, "
+                        "overrides --target completely — the YAML's 'name' "
+                        "field is the effective target name for this run.")
+    p.add_argument("--user_dir", default="",
+                   help="User-area directory (targets/, testlists/, streams/, "
+                        "coverage/). Default: $RVGEN_USER_DIR → ./user if it "
+                        "exists → disabled.")
+    p.add_argument("--help_targets", action="store_true",
+                   help="List every known target (built-in + user area) and exit.")
     p.add_argument("-tl", "--testlist", default="",
                    help="Path to a regression testlist YAML. "
                         "Defaults to <riscv_dv_root>/target/<target>/testlist.yaml.")
@@ -129,7 +150,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _infer_testlist_path(target: str, riscv_dv_root: Path) -> Path:
-    return riscv_dv_root / "target" / target / "testlist.yaml"
+    """Resolve a default testlist path when ``--testlist`` isn't given.
+
+    Search order:
+      1. ``<user_dir>/testlists/<target>.yaml`` — target-specific user testlist.
+      2. ``<user_dir>/testlists/base_testlist.yaml`` — shared user baseline.
+      3. ``<riscv_dv_root>/target/<target>/testlist.yaml`` — riscv-dv default.
+      4. ``<riscv_dv_root>/yaml/base_testlist.yaml`` — riscv-dv common base.
+    """
+    user_dir = resolve_user_dir()
+    if user_dir is not None:
+        per_target = user_dir / "testlists" / f"{target}.yaml"
+        if per_target.exists():
+            return per_target
+        base = user_dir / "testlists" / "base_testlist.yaml"
+        if base.exists():
+            return base
+    rd_per_target = riscv_dv_root / "target" / target / "testlist.yaml"
+    if rd_per_target.exists():
+        return rd_per_target
+    return riscv_dv_root / "yaml" / "base_testlist.yaml"
 
 
 def _infer_output(out: str) -> Path:
@@ -147,17 +187,45 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    # Resolve the user area BEFORE any target lookup — YAML-declared
+    # targets live under <user_dir>/targets/ and the lookup needs to
+    # know where to search.
+    if args.user_dir:
+        set_user_dir(Path(args.user_dir))
+    user_dir = resolve_user_dir()
+
+    if args.help_targets:
+        print(f"User area: {user_dir or '(none — set $RVGEN_USER_DIR or --user_dir)'}")
+        print()
+        print("Built-in targets:")
+        for n in sorted(BUILTIN_TARGETS):
+            print(f"  {n}")
+        user_only = [n for n in target_names() if n not in BUILTIN_TARGETS]
+        if user_only:
+            print()
+            print("User-area targets:")
+            for n in user_only:
+                print(f"  {n}")
+        return 0
+
     riscv_dv_root = Path(args.riscv_dv_root)
     if not riscv_dv_root.exists():
         _LOG.warning("riscv_dv_root %s does not exist; testlist imports may fail", riscv_dv_root)
+
+    # Resolve the target. --target_config wins if given; otherwise
+    # look up by name across built-ins + user area.
+    target_cfg = _resolve_target(args)
+    # The downstream code paths read args.target in a few places
+    # (testlist inference, coverage-goal auto-resolution). Keep that
+    # surface consistent by refreshing args.target from the resolved
+    # target name — necessary when --target_config was used.
+    args.target = target_cfg.name
 
     testlist_path = Path(args.testlist) if args.testlist else _infer_testlist_path(args.target, riscv_dv_root)
     output_dir = _infer_output(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     asm_dir = output_dir / "asm_test"
     asm_dir.mkdir(exist_ok=True)
-
-    target_cfg = get_target(args.target)
 
     # Build the seed generator. --seed forces iterations=1 (run.py semantics).
     if args.seed is not None:
@@ -263,8 +331,8 @@ def main(argv: list[str] | None = None) -> int:
     gcc_results: list = []
     if "gcc_compile" in steps:
         from rvgen.gcc import default_link_script, gcc_compile
-        isa = args.isa or _infer_isa(args.target)
-        mabi = args.mabi or _infer_mabi(args.target)
+        isa = args.isa or _infer_isa(target_cfg)
+        mabi = args.mabi or _infer_mabi(target_cfg)
         link_script = default_link_script(output_dir)
         gcc_results = gcc_compile(
             tests,
@@ -284,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     iss_results: list = []
     if "iss_sim" in steps and gcc_results:
         from rvgen.iss import run_iss
-        isa = args.isa or _infer_isa(args.target)
+        isa = args.isa or _infer_isa(target_cfg)
         iss_results = run_iss(
             args.iss,
             [r for r in gcc_results if r.returncode == 0],
@@ -484,18 +552,59 @@ _TARGET_ISA_MABI: dict[str, tuple[str, str]] = {
 }
 
 
-def _infer_isa(target: str) -> str:
+def _infer_isa(target: TargetCfg) -> str:
+    """Return the ``-march`` / spike ``--isa`` string for ``target``.
+
+    Preference order:
+      1. ``target.isa_string`` if populated — authoritative for YAML
+         targets (and can be set on Python targets too once they
+         migrate).
+      2. ``_TARGET_ISA_MABI[target.name][0]`` — built-in fallback table.
+    """
+    if target.isa_string:
+        return target.isa_string
     try:
-        return _TARGET_ISA_MABI[target][0]
+        return _TARGET_ISA_MABI[target.name][0]
     except KeyError:
-        raise SystemExit(f"Cannot infer ISA for target {target!r}; pass --isa.")
+        raise SystemExit(
+            f"Cannot infer ISA for target {target.name!r}; pass --isa, or "
+            f"set isa_string in the target's YAML config."
+        )
 
 
-def _infer_mabi(target: str) -> str:
+def _infer_mabi(target: TargetCfg) -> str:
+    if target.mabi:
+        return target.mabi
     try:
-        return _TARGET_ISA_MABI[target][1]
+        return _TARGET_ISA_MABI[target.name][1]
     except KeyError:
-        raise SystemExit(f"Cannot infer mabi for target {target!r}; pass --mabi.")
+        raise SystemExit(
+            f"Cannot infer mabi for target {target.name!r}; pass --mabi, or "
+            f"set mabi in the target's YAML config."
+        )
+
+
+def _resolve_target(args) -> TargetCfg:
+    """Resolve the active target from CLI args.
+
+    Priority: ``--target_config <yaml>`` (standalone) → ``--target <name>``
+    (looked up via :func:`get_target`, which hits built-ins then the
+    user area).
+    """
+    if args.target_config:
+        path = Path(args.target_config)
+        if not path.exists():
+            raise SystemExit(f"--target_config file not found: {path}")
+        try:
+            return load_target_yaml(path)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise SystemExit(
+                f"Failed to load target config {path}: {exc}"
+            ) from exc
+    try:
+        return get_target(args.target)
+    except KeyError as exc:
+        raise SystemExit(str(exc)) from None
 
 
 def _resolve_cov_goals(explicit: list[str], target: str) -> list[str]:
