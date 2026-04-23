@@ -1,10 +1,10 @@
-"""Tests for chipforge_inst_gen.seeding."""
+"""Tests for rvgen.seeding."""
 
 from __future__ import annotations
 
 import pytest
 
-from chipforge_inst_gen.seeding import SeedGen
+from rvgen.seeding import SeedGen
 
 
 def test_fixed_seed_returns_same_value():

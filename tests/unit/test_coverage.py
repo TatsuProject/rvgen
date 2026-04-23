@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from chipforge_inst_gen.coverage import (
+from rvgen.coverage import (
     CoverageDB,
     goals_met,
     load_goals,
@@ -16,7 +16,7 @@ from chipforge_inst_gen.coverage import (
     sample_instr,
     sample_sequence,
 )
-from chipforge_inst_gen.coverage.collectors import (
+from rvgen.coverage.collectors import (
     ALL_COVERGROUPS,
     CG_CATEGORY,
     CG_FMT_X_CAT,
@@ -30,9 +30,9 @@ from chipforge_inst_gen.coverage.collectors import (
     CG_RS2,
     new_db,
 )
-from chipforge_inst_gen.isa import rv32i  # noqa: F401  (register ops)
-from chipforge_inst_gen.isa.enums import RiscvInstrName, RiscvReg
-from chipforge_inst_gen.isa.factory import get_instr
+from rvgen.isa import rv32i  # noqa: F401  (register ops)
+from rvgen.isa.enums import RiscvInstrName, RiscvReg
+from rvgen.isa.factory import get_instr
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ def test_sample_addi_imm_sign_negative():
 
 
 def test_sample_csr_instr():
-    from chipforge_inst_gen.isa.enums import PrivilegedReg
+    from rvgen.isa.enums import PrivilegedReg
     db = new_db()
     instr = get_instr(RiscvInstrName.CSRRW)
     instr.rs1 = RiscvReg.T0
@@ -228,7 +228,7 @@ def test_load_goals_basic(tmp_path: Path):
 
 def test_load_goals_baseline_file_parses():
     # Ensure the shipped baseline goals file is well-formed.
-    p = Path(__file__).parent.parent.parent / "chipforge_inst_gen" / "coverage" / "goals" / "baseline.yaml"
+    p = Path(__file__).parent.parent.parent / "rvgen" / "coverage" / "goals" / "baseline.yaml"
     goals = load_goals(p)
     assert "opcode_cg" in goals.covergroup_names()
     assert goals.covergroup("opcode_cg")["ADD"] > 0
@@ -315,7 +315,7 @@ def test_render_report_goals_met_banner(tmp_path: Path):
 
 
 def test_mem_align_word_aligned_bin():
-    from chipforge_inst_gen.coverage.collectors import CG_MEM_ALIGN, CG_LS_WIDTH
+    from rvgen.coverage.collectors import CG_MEM_ALIGN, CG_LS_WIDTH
     db = new_db()
     instr = get_instr(RiscvInstrName.LW)
     instr.rs1 = RiscvReg.T0
@@ -328,7 +328,7 @@ def test_mem_align_word_aligned_bin():
 
 
 def test_mem_align_half_unaligned_bin():
-    from chipforge_inst_gen.coverage.collectors import CG_MEM_ALIGN
+    from rvgen.coverage.collectors import CG_MEM_ALIGN
     db = new_db()
     instr = get_instr(RiscvInstrName.LH)
     instr.rs1 = RiscvReg.T0
@@ -340,7 +340,7 @@ def test_mem_align_half_unaligned_bin():
 
 
 def test_category_transition_sampled():
-    from chipforge_inst_gen.coverage.collectors import CG_CAT_TRANS
+    from rvgen.coverage.collectors import CG_CAT_TRANS
     db = new_db()
     seq = [
         _make(RiscvInstrName.ADD, rd=RiscvReg.T0, rs1=RiscvReg.A0, rs2=RiscvReg.A1),
@@ -354,7 +354,7 @@ def test_category_transition_sampled():
 
 
 def test_opcode_transition_sampled():
-    from chipforge_inst_gen.coverage.collectors import CG_OP_TRANS
+    from rvgen.coverage.collectors import CG_OP_TRANS
     db = new_db()
     seq = [
         _make(RiscvInstrName.ADD, rd=RiscvReg.T0, rs1=RiscvReg.A0, rs2=RiscvReg.A1),
@@ -365,7 +365,7 @@ def test_opcode_transition_sampled():
 
 
 def test_imm_range_walking_one():
-    from chipforge_inst_gen.coverage.collectors import CG_IMM_EXT
+    from rvgen.coverage.collectors import CG_IMM_EXT
     db = new_db()
     instr = get_instr(RiscvInstrName.ADDI)
     instr.rs1 = RiscvReg.ZERO
@@ -378,7 +378,7 @@ def test_imm_range_walking_one():
 
 
 def test_imm_range_zero_and_all_ones():
-    from chipforge_inst_gen.coverage.collectors import CG_IMM_EXT
+    from rvgen.coverage.collectors import CG_IMM_EXT
     db = new_db()
     i0 = get_instr(RiscvInstrName.ADDI)
     i0.rs1 = RiscvReg.ZERO
@@ -404,8 +404,8 @@ def test_imm_range_zero_and_all_ones():
 
 
 def test_runtime_trace_parse_branch_direction(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_BRANCH_DIR
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_BRANCH_DIR
 
     # Tiny synthetic spike trace: 2 branches, one taken, one not-taken.
     trace = tmp_path / "tiny.trace"
@@ -423,8 +423,8 @@ def test_runtime_trace_parse_branch_direction(tmp_path: Path):
 
 
 def test_runtime_trace_parse_pc_reach(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_PC_REACH, CG_EXCEPTION
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_PC_REACH, CG_EXCEPTION
 
     trace = tmp_path / "tiny.trace"
     trace.write_text(
@@ -442,8 +442,8 @@ def test_runtime_trace_parse_pc_reach(tmp_path: Path):
 
 
 def test_runtime_trace_privilege_mret(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_PRIV_MODE
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_PRIV_MODE
 
     trace = tmp_path / "tiny.trace"
     trace.write_text(
@@ -457,7 +457,7 @@ def test_runtime_trace_privilege_mret(tmp_path: Path):
 
 
 def test_runtime_trace_missing_file_silent(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
+    from rvgen.coverage import sample_trace_file
 
     db = new_db()
     # Non-existent path — should not raise, return zeros.
@@ -476,7 +476,7 @@ def _dump(path: Path, db):
 
 
 def test_tools_merge_combines_bins(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_merge
+    from rvgen.coverage.tools import cmd_merge
     a = tmp_path / "a.json"
     b = tmp_path / "b.json"
     _dump(a, {"opcode_cg": {"ADD": 3, "SUB": 1}})
@@ -491,7 +491,7 @@ def test_tools_merge_combines_bins(tmp_path: Path):
 
 
 def test_tools_diff_reports_delta(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import _compute_diff
+    from rvgen.coverage.tools import _compute_diff
     a = {"opcode_cg": {"ADD": 3, "SUB": 1}}
     b = {"opcode_cg": {"ADD": 5, "JAL": 7}}
     diff = _compute_diff(a, b)
@@ -499,7 +499,7 @@ def test_tools_diff_reports_delta(tmp_path: Path):
 
 
 def test_tools_attribute_first_closer(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_attribute
+    from rvgen.coverage.tools import cmd_attribute
     g = tmp_path / "g.yaml"
     g.write_text("opcode_cg:\n  ADD: 3\n  SUB: 2\n")
     a = tmp_path / "a.json"
@@ -518,7 +518,7 @@ def test_tools_attribute_first_closer(tmp_path: Path):
 
 
 def test_tools_export_csv(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_export
+    from rvgen.coverage.tools import cmd_export
     a = tmp_path / "a.json"
     _dump(a, {"opcode_cg": {"ADD": 3}})
     out = tmp_path / "o.csv"
@@ -531,7 +531,7 @@ def test_tools_export_csv(tmp_path: Path):
 
 
 def test_tools_export_html(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_export
+    from rvgen.coverage.tools import cmd_export
     a = tmp_path / "a.json"
     _dump(a, {"opcode_cg": {"ADD": 3}})
     out = tmp_path / "o.html"
@@ -550,7 +550,7 @@ def test_tools_export_html(tmp_path: Path):
 
 
 def test_directed_drops_no_fence_when_fence_missing(tmp_path: Path):
-    from chipforge_inst_gen.coverage.directed import directed_gen_opts
+    from rvgen.coverage.directed import directed_gen_opts
     p = tmp_path / "g.yaml"
     p.write_text("opcode_cg:\n  FENCE: 5\n")
     goals = load_goals(p)
@@ -562,7 +562,7 @@ def test_directed_drops_no_fence_when_fence_missing(tmp_path: Path):
 
 
 def test_directed_injects_stream_when_load_byte_missing(tmp_path: Path):
-    from chipforge_inst_gen.coverage.directed import directed_gen_opts
+    from rvgen.coverage.directed import directed_gen_opts
     p = tmp_path / "g.yaml"
     p.write_text("opcode_cg:\n  LB: 3\n")
     goals = load_goals(p)
@@ -573,7 +573,7 @@ def test_directed_injects_stream_when_load_byte_missing(tmp_path: Path):
 
 
 def test_directed_no_change_when_goals_met(tmp_path: Path):
-    from chipforge_inst_gen.coverage.directed import directed_gen_opts
+    from rvgen.coverage.directed import directed_gen_opts
     p = tmp_path / "g.yaml"
     p.write_text("opcode_cg:\n  ADD: 3\n")
     goals = load_goals(p)
@@ -585,7 +585,7 @@ def test_directed_no_change_when_goals_met(tmp_path: Path):
 
 
 def test_jalr_instr_stream_registered():
-    from chipforge_inst_gen.streams import get_stream
+    from rvgen.streams import get_stream
     cls = get_stream("riscv_jalr_instr")
     assert cls.__name__ == "JalrInstr"
 
@@ -596,7 +596,7 @@ def test_jalr_instr_stream_registered():
 
 
 def test_load_goals_layered_last_writer_wins(tmp_path: Path):
-    from chipforge_inst_gen.coverage import load_goals_layered
+    from rvgen.coverage import load_goals_layered
     a = tmp_path / "a.yaml"
     b = tmp_path / "b.yaml"
     a.write_text("opcode_cg:\n  ADD: 5\n  SUB: 3\n")
@@ -607,7 +607,7 @@ def test_load_goals_layered_last_writer_wins(tmp_path: Path):
 
 
 def test_load_goals_layered_adds_new_covergroups(tmp_path: Path):
-    from chipforge_inst_gen.coverage import load_goals_layered
+    from rvgen.coverage import load_goals_layered
     a = tmp_path / "a.yaml"
     b = tmp_path / "b.yaml"
     a.write_text("opcode_cg:\n  ADD: 5\n")
@@ -619,10 +619,10 @@ def test_load_goals_layered_adds_new_covergroups(tmp_path: Path):
 
 def test_shipped_overlay_goals_parse():
     """Every overlay goals YAML we ship must parse cleanly."""
-    from chipforge_inst_gen.coverage import load_goals
+    from rvgen.coverage import load_goals
     goals_dir = (
         Path(__file__).parent.parent.parent
-        / "chipforge_inst_gen" / "coverage" / "goals"
+        / "rvgen" / "coverage" / "goals"
     )
     for p in sorted(goals_dir.glob("*.yaml")):
         g = load_goals(p)
@@ -630,13 +630,13 @@ def test_shipped_overlay_goals_parse():
 
 
 def test_resolve_cov_goals_uses_explicit_when_given(tmp_path: Path):
-    from chipforge_inst_gen.cli import _resolve_cov_goals
+    from rvgen.cli import _resolve_cov_goals
     out = _resolve_cov_goals(["/a.yaml", "/b.yaml"], "rv32imc")
     assert out == ["/a.yaml", "/b.yaml"]
 
 
 def test_resolve_cov_goals_falls_back_to_shipped():
-    from chipforge_inst_gen.cli import _resolve_cov_goals
+    from rvgen.cli import _resolve_cov_goals
     out = _resolve_cov_goals([], "rv32imcb")
     # Should pick baseline.yaml + rv32imcb.yaml.
     assert any("baseline.yaml" in p for p in out)
@@ -644,7 +644,7 @@ def test_resolve_cov_goals_falls_back_to_shipped():
 
 
 def test_resolve_cov_goals_unknown_target_only_baseline():
-    from chipforge_inst_gen.cli import _resolve_cov_goals
+    from rvgen.cli import _resolve_cov_goals
     out = _resolve_cov_goals([], "_target_not_shipped_")
     # Baseline is always there; target-specific file absent.
     assert any("baseline.yaml" in p for p in out)
@@ -652,7 +652,7 @@ def test_resolve_cov_goals_unknown_target_only_baseline():
 
 
 def test_rs1_eq_rs2_cg_equal_bumped():
-    from chipforge_inst_gen.coverage.collectors import CG_RS1_EQ_RS2
+    from rvgen.coverage.collectors import CG_RS1_EQ_RS2
     db = new_db()
     instr = get_instr(RiscvInstrName.ADD)
     instr.rs1 = RiscvReg.T0
@@ -664,8 +664,8 @@ def test_rs1_eq_rs2_cg_equal_bumped():
 
 
 def test_runtime_trace_csr_value_bin(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_CSR_VAL
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_CSR_VAL
 
     trace = tmp_path / "t.trace"
     trace.write_text(
@@ -682,8 +682,8 @@ def test_runtime_trace_csr_value_bin(tmp_path: Path):
 
 
 def test_runtime_gpr_write_corners(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_RS_VAL_CORNER
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_RS_VAL_CORNER
 
     trace = tmp_path / "t.trace"
     trace.write_text(
@@ -699,8 +699,8 @@ def test_runtime_gpr_write_corners(tmp_path: Path):
 
 
 def test_bit_activity_from_gpr_write(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_BIT_ACTIVITY
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_BIT_ACTIVITY
     trace = tmp_path / "t.trace"
     trace.write_text(
         # Values 0x5 (bits 0, 2) and 0x80000000 (bit 31).
@@ -717,7 +717,7 @@ def test_bit_activity_from_gpr_write(tmp_path: Path):
 
 
 def test_lint_goals_clean(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    from rvgen.coverage.tools import cmd_lint_goals
     p = tmp_path / "g.yaml"
     p.write_text("opcode_cg:\n  ADD: 5\n  SUB: 5\nhazard_cg:\n  raw: 10\n")
     import argparse, io, contextlib
@@ -729,7 +729,7 @@ def test_lint_goals_clean(tmp_path: Path):
 
 
 def test_lint_goals_catches_typo(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    from rvgen.coverage.tools import cmd_lint_goals
     p = tmp_path / "g.yaml"
     p.write_text("opcode_cg:\n  AD: 5\n")  # typo: should be ADD
     import argparse, io, contextlib
@@ -743,7 +743,7 @@ def test_lint_goals_catches_typo(tmp_path: Path):
 
 
 def test_lint_goals_flags_unknown_covergroup(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    from rvgen.coverage.tools import cmd_lint_goals
     p = tmp_path / "g.yaml"
     p.write_text("bogus_cg:\n  foo: 5\n")
     import argparse, io, contextlib
@@ -768,13 +768,13 @@ def test_golden_coverage_rv32imc_fixed_seed(tmp_path: Path):
     keeps passing.
     """
     import random as _rnd
-    from chipforge_inst_gen.asm_program_gen import AsmProgramGen
-    from chipforge_inst_gen.config import make_config
-    from chipforge_inst_gen.isa import enums  # noqa: F401 — ensure registrations
-    from chipforge_inst_gen.isa.filtering import create_instr_list
-    from chipforge_inst_gen.targets import get_target
-    from chipforge_inst_gen.coverage import sample_sequence
-    from chipforge_inst_gen.coverage.collectors import (
+    from rvgen.asm_program_gen import AsmProgramGen
+    from rvgen.config import make_config
+    from rvgen.isa import enums  # noqa: F401 — ensure registrations
+    from rvgen.isa.filtering import create_instr_list
+    from rvgen.targets import get_target
+    from rvgen.coverage import sample_sequence
+    from rvgen.coverage.collectors import (
         CG_CATEGORY, CG_FORMAT, CG_HAZARD, CG_OPCODE, CG_RS1, CG_RD,
     )
 
@@ -821,10 +821,10 @@ def test_golden_coverage_rv32imc_fixed_seed(tmp_path: Path):
 
 def test_shipped_overlays_lint_clean():
     """Every shipped goals overlay must pass the linter with --strict=error."""
-    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    from rvgen.coverage.tools import cmd_lint_goals
     goals_dir = (
         Path(__file__).parent.parent.parent
-        / "chipforge_inst_gen" / "coverage" / "goals"
+        / "rvgen" / "coverage" / "goals"
     )
     import argparse, io, contextlib
     for p in sorted(goals_dir.glob("*.yaml")):
@@ -837,7 +837,7 @@ def test_shipped_overlays_lint_clean():
 
 def test_suggest_seeds_ranks(tmp_path: Path):
     """suggest-seeds proposes historical seeds that closed still-missing bins."""
-    from chipforge_inst_gen.coverage.tools import cmd_suggest_seeds
+    from rvgen.coverage.tools import cmd_suggest_seeds
 
     # Build a prior convergence.json.
     conv = tmp_path / "convergence.json"
@@ -871,7 +871,7 @@ def test_suggest_seeds_ranks(tmp_path: Path):
 
 
 def test_baseline_check_tool(tmp_path: Path):
-    from chipforge_inst_gen.coverage.tools import cmd_baseline_check
+    from rvgen.coverage.tools import cmd_baseline_check
     baseline = tmp_path / "base.json"
     observed = tmp_path / "obs.json"
     _dump(baseline, {"opcode_cg": {"ADD": 10, "SUB": 5}})
@@ -895,8 +895,8 @@ def test_baseline_check_tool(tmp_path: Path):
 
 
 def test_runtime_trace_priv_mode_from_commit(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_PRIV_MODE
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_PRIV_MODE
 
     trace = tmp_path / "t.trace"
     trace.write_text(
@@ -912,7 +912,7 @@ def test_runtime_trace_priv_mode_from_commit(tmp_path: Path):
 
 
 def test_coverage_grade_empty():
-    from chipforge_inst_gen.coverage import compute_grade
+    from rvgen.coverage import compute_grade
     # Empty DB, no goals: goals=1.0 (no penalty), hazard=0 (nothing observed),
     # opcode=0 (no distinct opcodes). Grade = 0.6*1 + 0.2*0 + 0.2*0 = 60.
     g = compute_grade(new_db(), None)
@@ -920,8 +920,8 @@ def test_coverage_grade_empty():
 
 
 def test_coverage_grade_high(tmp_path: Path):
-    from chipforge_inst_gen.coverage import compute_grade
-    from chipforge_inst_gen.coverage.collectors import CG_HAZARD, CG_OPCODE
+    from rvgen.coverage import compute_grade
+    from rvgen.coverage.collectors import CG_HAZARD, CG_OPCODE
     # Balanced hazards + plenty of distinct static opcodes + no goals
     # should produce a near-100 grade.
     db = new_db()
@@ -932,8 +932,8 @@ def test_coverage_grade_high(tmp_path: Path):
 
 
 def test_coverage_grade_penalises_missing_hazard():
-    from chipforge_inst_gen.coverage import compute_grade
-    from chipforge_inst_gen.coverage.collectors import CG_HAZARD
+    from rvgen.coverage import compute_grade
+    from rvgen.coverage.collectors import CG_HAZARD
     db = new_db()
     # Missing WAW entirely → hazard_score = 0 → loses 20 points.
     db[CG_HAZARD] = {"raw": 100, "war": 100, "none": 50}
@@ -942,8 +942,8 @@ def test_coverage_grade_penalises_missing_hazard():
 
 
 def test_csr_access_read_write_cg():
-    from chipforge_inst_gen.coverage.collectors import CG_CSR_ACCESS
-    from chipforge_inst_gen.isa.enums import PrivilegedReg
+    from rvgen.coverage.collectors import CG_CSR_ACCESS
+    from rvgen.isa.enums import PrivilegedReg
     db = new_db()
     # CSRRW is always a write.
     w = get_instr(RiscvInstrName.CSRRW)
@@ -963,7 +963,7 @@ def test_csr_access_read_write_cg():
 
 
 def test_load_store_offset_bins():
-    from chipforge_inst_gen.coverage.collectors import CG_LS_OFFSET
+    from rvgen.coverage.collectors import CG_LS_OFFSET
     db = new_db()
     # Positive small.
     i = get_instr(RiscvInstrName.LW)
@@ -985,7 +985,7 @@ def test_load_store_offset_bins():
 
 
 def test_directed_stream_cg_from_comment():
-    from chipforge_inst_gen.coverage.collectors import CG_STREAM
+    from rvgen.coverage.collectors import CG_STREAM
     db = new_db()
     # Fake an instr with the "Start <name>" comment stamped by
     # DirectedInstrStream.finalize().
@@ -999,7 +999,7 @@ def test_directed_stream_cg_from_comment():
 
 
 def test_rs1_eq_rd_cg_distinct_bumped():
-    from chipforge_inst_gen.coverage.collectors import CG_RS1_EQ_RD
+    from rvgen.coverage.collectors import CG_RS1_EQ_RD
     db = new_db()
     instr = get_instr(RiscvInstrName.ADD)
     instr.rs1 = RiscvReg.T0
@@ -1012,9 +1012,9 @@ def test_rs1_eq_rd_cg_distinct_bumped():
 
 def test_vtype_dyn_bumped_when_vector_cfg_given():
     import random as _rnd
-    from chipforge_inst_gen.coverage.collectors import CG_VTYPE_DYN
-    from chipforge_inst_gen.isa import rv32v  # noqa: F401 — register vector
-    from chipforge_inst_gen.vector_config import VectorConfig, Vtype
+    from rvgen.coverage.collectors import CG_VTYPE_DYN
+    from rvgen.isa import rv32v  # noqa: F401 — register vector
+    from rvgen.vector_config import VectorConfig, Vtype
     db = new_db()
     vcfg = VectorConfig(vtype=Vtype(vlmul=2, vsew=32), vlen=512, elen=32)
     vadd = get_instr(RiscvInstrName.VADD)
@@ -1024,8 +1024,8 @@ def test_vtype_dyn_bumped_when_vector_cfg_given():
 
 
 def test_runtime_branch_per_mnem(tmp_path: Path):
-    from chipforge_inst_gen.coverage import sample_trace_file
-    from chipforge_inst_gen.coverage.collectors import CG_BR_PER_MNEM
+    from rvgen.coverage import sample_trace_file
+    from rvgen.coverage.collectors import CG_BR_PER_MNEM
     trace = tmp_path / "t.trace"
     trace.write_text(
         "core   0: 0x80000000 (0x00108093) addi    ra, ra, 1\n"
@@ -1039,7 +1039,7 @@ def test_runtime_branch_per_mnem(tmp_path: Path):
 
 def test_ci_summary_writes_github_output(tmp_path: Path, monkeypatch):
     """_emit_ci_summary writes GITHUB_OUTPUT lines when the env var is set."""
-    from chipforge_inst_gen.cli import _emit_ci_summary
+    from rvgen.cli import _emit_ci_summary
     gh_out = tmp_path / "gh_out"
     gh_sum = tmp_path / "gh_sum"
     monkeypatch.setenv("GITHUB_OUTPUT", str(gh_out))
@@ -1062,14 +1062,14 @@ def test_ci_summary_writes_github_output(tmp_path: Path, monkeypatch):
     assert "tests=2" in out
 
     summary = gh_sum.read_text()
-    assert "chipforge-inst-gen coverage" in summary
+    assert "rvgen coverage" in summary
     assert "Goals met" in summary
     assert "SUB" in summary  # missing bin listed
 
 
 def test_ci_summary_silent_without_env(tmp_path: Path, monkeypatch):
     """Without GITHUB_OUTPUT env, _emit_ci_summary is a no-op."""
-    from chipforge_inst_gen.cli import _emit_ci_summary
+    from rvgen.cli import _emit_ci_summary
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     # Should not raise.
@@ -1077,7 +1077,7 @@ def test_ci_summary_silent_without_env(tmp_path: Path, monkeypatch):
 
 
 def test_auto_regress_convergence_counts():
-    from chipforge_inst_gen.auto_regress import _count_unique_bins, _convergence_stamp
+    from rvgen.auto_regress import _count_unique_bins, _convergence_stamp
     db = new_db()
     db[CG_OPCODE] = {"ADD": 1, "SUB": 2, "JAL": 0}
     assert _count_unique_bins(db) == 2  # JAL at 0 doesn't count
@@ -1103,7 +1103,7 @@ def test_auto_regress_convergence_counts():
 def test_per_test_tool_ranks_tests(tmp_path: Path):
     """Smoke test for the per-test attribution CLI."""
     import json as _j
-    from chipforge_inst_gen.coverage.tools import cmd_per_test
+    from rvgen.coverage.tools import cmd_per_test
     per_test = {
         "test_a": {"opcode_cg": {"ADD": 10, "JAL": 5}},
         "test_b": {"opcode_cg": {"ADD": 2, "SUB": 7}},

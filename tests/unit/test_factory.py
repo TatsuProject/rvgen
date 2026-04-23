@@ -1,19 +1,19 @@
-"""Tests for chipforge_inst_gen.isa.factory — registry and get_instr."""
+"""Tests for rvgen.isa.factory — registry and get_instr."""
 
 from __future__ import annotations
 
 import pytest
 
-from chipforge_inst_gen.isa import rv32i
-from chipforge_inst_gen.isa.base import Instr
-from chipforge_inst_gen.isa.enums import (
+from rvgen.isa import rv32i
+from rvgen.isa.base import Instr
+from rvgen.isa.enums import (
     ImmType,
     RiscvInstrCategory,
     RiscvInstrFormat,
     RiscvInstrGroup,
     RiscvInstrName,
 )
-from chipforge_inst_gen.isa.factory import (
+from rvgen.isa.factory import (
     define_instr,
     get_instr,
     is_registered,

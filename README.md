@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/hero.svg" alt="chipforge-inst-gen" width="780">
+  <img src="docs/images/hero.svg" alt="rvgen" width="780">
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 
 ---
 
-chipforge-inst-gen replaces Google's [riscv-dv](https://github.com/chipsalliance/riscv-dv) at the generator layer with a small, single-dependency (PyYAML) Python package. Every riscv-dv testlist YAML runs unchanged. On top of that parity, the project adds a first-class **functional-coverage subsystem** — covergroups, CGF-style goal files, coverage-directed auto-regression, per-test attribution, HTML dashboards, CI integration — that in the SV world you'd normally assemble from a UVM flow, riscv-isac, and a simulator licence.
+rvgen replaces Google's [riscv-dv](https://github.com/chipsalliance/riscv-dv) at the generator layer with a small, single-dependency (PyYAML) Python package. Every riscv-dv testlist YAML runs unchanged. On top of that parity, the project adds a first-class **functional-coverage subsystem** — covergroups, CGF-style goal files, coverage-directed auto-regression, per-test attribution, HTML dashboards, CI integration — that in the SV world you'd normally assemble from a UVM flow, riscv-isac, and a simulator licence.
 
 **Who this is for:** verification engineers bringing up RISC-V cores who want the power of random instruction generation without SystemVerilog, UVM, or a simulator licence between them and their `.S` files.
 
@@ -34,7 +34,7 @@ chipforge-inst-gen replaces Google's [riscv-dv](https://github.com/chipsalliance
 
 - [See it in action](#see-it-in-action)
 - [Highlights](#highlights)
-- [Why chipforge-inst-gen?](#why-chipforge-inst-gen)
+- [Why rvgen?](#why-rvgen)
 - [Install](#install)
 - [Quick start — 30 seconds](#quick-start--30-seconds)
 - [Quick start — with coverage (2 minutes)](#quick-start--with-coverage-2-minutes)
@@ -57,7 +57,7 @@ chipforge-inst-gen replaces Google's [riscv-dv](https://github.com/chipsalliance
 **Generate, simulate, and collect coverage in one command:**
 
 ```bash
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
     --output out/ --start_seed 100 -i 1
@@ -89,7 +89,7 @@ covergroups: 35    unique bins hit: 2970    total samples: 299604    grade: 87/1
     ! JALR                             0 / 5
 ```
 
-**The HTML dashboard** (`python -m chipforge_inst_gen.coverage.tools export out/coverage.json --html cov.html`):
+**The HTML dashboard** (`python -m rvgen.coverage.tools export out/coverage.json --html cov.html`):
 
 See a real rendered example at **[`docs/examples/coverage-report.html`](docs/examples/coverage-report.html)** (self-contained, no JS, ~5k lines).
 
@@ -111,9 +111,9 @@ See a real rendered example at **[`docs/examples/coverage-report.html`](docs/exa
 
 ---
 
-## Why chipforge-inst-gen?
+## Why rvgen?
 
-| | chipforge-inst-gen | riscv-dv (SV/UVM) | force-riscv | riscv-isac |
+| | rvgen | riscv-dv (SV/UVM) | force-riscv | riscv-isac |
 |---|---|---|---|---|
 | Language | **Python 3.11+** | SystemVerilog + UVM + Python glue | C++ + Python | Python |
 | Simulator licence | — (open-source spike) | VCS / Questa typically required for SV | — | — |
@@ -129,15 +129,15 @@ See a real rendered example at **[`docs/examples/coverage-report.html`](docs/exa
 | CI integration (GITHUB_OUTPUT + grade) | ✓ | — | — | — |
 | New-test creation | edit YAML | edit YAML + possibly SV class | edit XML | n/a |
 
-**The summary:** if you already have a commercial SV flow, riscv-dv is still the richest framework. If you don't — or if you're running a CI workflow where "pip install + run" matters — chipforge-inst-gen gives you random instruction generation, the same testlist format, **and a complete coverage workflow** in one open-source package.
+**The summary:** if you already have a commercial SV flow, riscv-dv is still the richest framework. If you don't — or if you're running a CI workflow where "pip install + run" matters — rvgen gives you random instruction generation, the same testlist format, **and a complete coverage workflow** in one open-source package.
 
 ---
 
 ## Install
 
 ```bash
-git clone https://github.com/<org>/chipforge-inst-gen.git
-cd chipforge-inst-gen
+git clone https://github.com/<org>/rvgen.git
+cd rvgen
 pip install -e ".[test]"
 ```
 
@@ -159,7 +159,7 @@ Toolchain setup guides: [SiFive freedom-tools](https://github.com/sifive/freedom
 Just generate an assembly file (skip GCC and spike):
 
 ```bash
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_arithmetic_basic_test \
     --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
     --steps gen --output out/ --start_seed 100 -i 1
@@ -177,7 +177,7 @@ End-to-end: generate → assemble → simulate → collect static + runtime cove
 export RISCV_GCC=/path/to/riscv64-unknown-elf-gcc
 export SPIKE_PATH=/path/to/spike
 
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
     --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
@@ -191,7 +191,7 @@ Open the report:
 less out/coverage_report.txt
 
 # or self-contained HTML
-python -m chipforge_inst_gen.coverage.tools export out/coverage.json \
+python -m rvgen.coverage.tools export out/coverage.json \
     --html out/coverage.html
 xdg-open out/coverage.html
 ```
@@ -230,7 +230,7 @@ Every stage is optional via `--steps`. Coverage accumulates across runs when you
 ![auto-regress](docs/images/auto-regress.svg)
 
 ```bash
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --auto_regress --cov_directed --max_seeds 16 \
     --output out/regress/
@@ -298,7 +298,7 @@ Entirely YAML. No Python needed.
 Run:
 
 ```bash
-python -m chipforge_inst_gen --target rv32imc --test my_hazard_heavy_test \
+python -m rvgen --target rv32imc --test my_hazard_heavy_test \
     --testlist my_tests.yaml --steps gen,gcc_compile,iss_sim,cov --iss spike \
     --output out/ -i 4 --start_seed 100
 ```
@@ -361,7 +361,7 @@ for t in rv32imc:riscv_arithmetic_basic_test rv32imc:riscv_rand_instr_test \
          rv64imcb:riscv_b_ext_test; do
   target=${t%%:*}; test=${t##*:}
   for s in 100 200 300; do
-    python -m chipforge_inst_gen --target $target --test $test \
+    python -m rvgen --target $target --test $test \
         --steps gen,gcc_compile,iss_sim --iss spike \
         --output /tmp/reg_${target}_${test}_${s} --start_seed $s -i 1 2>&1 \
       | grep -qE "tests passed ISS sim" \
@@ -377,8 +377,8 @@ Expected: 51 `PASS`.
 ## Project layout
 
 ```
-chipforge_inst_gen/            # main package
-├── cli.py                       # entry point: python -m chipforge_inst_gen
+rvgen/            # main package
+├── cli.py                       # entry point: python -m rvgen
 ├── auto_regress.py              # --auto_regress loop + convergence tracking
 ├── config.py                    # Config dataclass, plusarg parsing
 ├── targets/__init__.py          # 27 TargetCfg entries
@@ -446,7 +446,7 @@ tests/unit/                      # 332 unit tests
 
 ## Citation
 
-If you use chipforge-inst-gen in academic work, see [`CITATION.cff`](CITATION.cff) for the canonical citation.
+If you use rvgen in academic work, see [`CITATION.cff`](CITATION.cff) for the canonical citation.
 
 ---
 

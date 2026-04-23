@@ -1,4 +1,4 @@
-"""Tests for chipforge_inst_gen.testlist."""
+"""Tests for rvgen.testlist."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from chipforge_inst_gen.testlist import TestEntry, load_testlist
+from rvgen.testlist import TestEntry, load_testlist
 
 
 # Fixture: real riscv-dv testlists.

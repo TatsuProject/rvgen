@@ -1,7 +1,7 @@
 # Comparison with top RISC-V instruction generators and coverage tools — and what to build next
 
 > Research brief prepared before the v0.1.0 open-source release. Compares
-> chipforge-inst-gen against the five open-source / industry references
+> rvgen against the five open-source / industry references
 > a verification team is likely to evaluate us against, identifies our
 > genuine strengths and gaps, and ranks the next wave of work by impact.
 
@@ -19,7 +19,7 @@ reference model + testbench integration).
 | [ImperasDV](https://www.synopsys.com/verification/imperasdv.html) | Full platform | Proprietary | Commercial | Closed |
 | [riscvISACOV](https://github.com/riscv-verification/riscvISACOV) | Coverage | SystemVerilog | RV32I initial | Apache-2.0 |
 | [riscv-isac](https://github.com/riscv-verification/riscv-isac) | Coverage (post-sim) | Python | Mature | BSD-3 |
-| **chipforge-inst-gen** | **Generator + Coverage** | **Python** | **v0.1.0** | **Apache-2.0** |
+| **rvgen** | **Generator + Coverage** | **Python** | **v0.1.0** | **Apache-2.0** |
 
 > Sources: [riscv-dv GitHub](https://github.com/chipsalliance/riscv-dv),
 > [force-riscv GitHub](https://github.com/openhwgroup/force-riscv),
@@ -29,7 +29,7 @@ reference model + testbench integration).
 
 ## 2 — Ease of install / use
 
-| | chipforge-inst-gen | riscv-dv | force-riscv | ImperasDV |
+| | rvgen | riscv-dv | force-riscv | ImperasDV |
 |---|---|---|---|---|
 | Install | `pip install -e .` | Commercial/OSS SV simulator + UVM | C++ build + SCons + Python | Licence + Synopsys tool install |
 | Time to first `.S` | **~30 sec** (pip + spike) | 10-30 min (SV flow setup) | 30-60 min (build) | Days (licencing) |
@@ -43,7 +43,7 @@ generate a `.S`.
 
 ## 3 — Test authoring
 
-| | chipforge-inst-gen | riscv-dv | force-riscv | ImperasDV |
+| | rvgen | riscv-dv | force-riscv | ImperasDV |
 |---|---|---|---|---|
 | Primary authoring surface | **YAML gen_opts** | YAML gen_opts (+ optional SV subclass) | Python test-template API | SV / C testbench |
 | New test without code | **✓ (YAML entry)** | ✓ (YAML entry) | ✗ (Python required) | ✗ |
@@ -158,7 +158,7 @@ currently stand out most visibly.
   Bitmanip / Crypto / Vector.
 - Proprietary coverage model; integrated with their simulator.
 
-### chipforge-inst-gen's approach
+### rvgen's approach
 
 - **Built-in, simulator-agnostic coverage** — 32 covergroups sampled
   in pure Python:
@@ -318,7 +318,7 @@ riscv-isac's Python CGF world — nobody else sits there.
 - Tier 1 items #1, #2, #3.
 - Tier 2 items #4, #5, #6 (cheap wins that bump the checkbox score).
 - Tier 5 item #18 (PyPI publication — lets adopters `pip install
-  chipforge-inst-gen`).
+  rvgen`).
 
 **Stretch (v0.3.0, 4 weeks after that):**
 
@@ -331,7 +331,7 @@ riscv-isac's Python CGF world — nobody else sits there.
 - Tier 3 item #10 (H-extension) — required for server-class verification.
 - Full riscv-dv testlist parity (every SV-emitted test runs clean).
 - A single published case study (blog + paper?) showing a core brought
-  up using chipforge-inst-gen exclusively.
+  up using rvgen exclusively.
 
 ## 8 — Honest self-assessment
 

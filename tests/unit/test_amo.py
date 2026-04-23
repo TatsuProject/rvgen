@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from chipforge_inst_gen.isa import rv32a  # noqa: F401
-from chipforge_inst_gen.isa.amo import AmoInstr
-from chipforge_inst_gen.isa.enums import RiscvInstrName, RiscvReg
-from chipforge_inst_gen.isa.factory import get_instr
+from rvgen.isa import rv32a  # noqa: F401
+from rvgen.isa.amo import AmoInstr
+from rvgen.isa.enums import RiscvInstrName, RiscvReg
+from rvgen.isa.factory import get_instr
 
 
 def test_amo_is_amo_instr_subclass():

@@ -6,10 +6,10 @@ import random
 
 import pytest
 
-from chipforge_inst_gen.config import make_config
-from chipforge_inst_gen.isa import vector  # noqa: F401  (side-effect: register VectorInstr)
-from chipforge_inst_gen.isa import rv32v   # noqa: F401  (side-effect: registrations)
-from chipforge_inst_gen.isa.enums import (
+from rvgen.config import make_config
+from rvgen.isa import vector  # noqa: F401  (side-effect: register VectorInstr)
+from rvgen.isa import rv32v   # noqa: F401  (side-effect: registrations)
+from rvgen.isa.enums import (
     RiscvInstrCategory,
     RiscvInstrFormat,
     RiscvInstrGroup,
@@ -17,11 +17,11 @@ from chipforge_inst_gen.isa.enums import (
     RiscvVreg,
     VaVariant,
 )
-from chipforge_inst_gen.isa.factory import INSTR_REGISTRY, get_instr
-from chipforge_inst_gen.isa.filtering import create_instr_list
-from chipforge_inst_gen.isa.vector import VectorInstr
-from chipforge_inst_gen.targets import get_target
-from chipforge_inst_gen.vector_config import VectorConfig, Vtype
+from rvgen.isa.factory import INSTR_REGISTRY, get_instr
+from rvgen.isa.filtering import create_instr_list
+from rvgen.isa.vector import VectorInstr
+from rvgen.targets import get_target
+from rvgen.vector_config import VectorConfig, Vtype
 
 
 # ---------------------------------------------------------------------------

@@ -1,15 +1,15 @@
-"""Tests for chipforge_inst_gen.isa.csr_ops — CSR instruction subclass."""
+"""Tests for rvgen.isa.csr_ops — CSR instruction subclass."""
 
 from __future__ import annotations
 
-from chipforge_inst_gen.isa import rv32i  # noqa: F401
-from chipforge_inst_gen.isa.csr_ops import CsrInstr
-from chipforge_inst_gen.isa.enums import (
+from rvgen.isa import rv32i  # noqa: F401
+from rvgen.isa.csr_ops import CsrInstr
+from rvgen.isa.enums import (
     PrivilegedReg,
     RiscvInstrName,
     RiscvReg,
 )
-from chipforge_inst_gen.isa.factory import get_instr
+from rvgen.isa.factory import get_instr
 
 
 def test_csrrw_is_instance_of_csr_instr():

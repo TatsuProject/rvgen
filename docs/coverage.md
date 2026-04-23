@@ -28,7 +28,7 @@ nothing crashed". Coverage turns that into **"we exercised every case we
 care about at least N times"**, which is what tape-out sign-off actually
 requires.
 
-chipforge-inst-gen ships a pure-Python coverage model inspired by two
+rvgen ships a pure-Python coverage model inspired by two
 industry-standard references:
 
 - **riscv-dv's SystemVerilog covergroups** — the *what* (which bins
@@ -65,7 +65,7 @@ This shape:
 Two complementary sampling entry points:
 
 ```python
-from chipforge_inst_gen.coverage import (
+from rvgen.coverage import (
     sample_sequence,    # static — from the emitted instr list
     sample_trace_file,  # runtime — from spike's --log-commits output
 )
@@ -169,14 +169,14 @@ mem_align_cg:
 Compose multiple YAML files via repeated `--cov_goals`:
 
 ```bash
---cov_goals chipforge_inst_gen/coverage/goals/baseline.yaml \
---cov_goals chipforge_inst_gen/coverage/goals/rv64imc.yaml \
---cov_goals chipforge_inst_gen/coverage/goals/rv64gcv.yaml
+--cov_goals rvgen/coverage/goals/baseline.yaml \
+--cov_goals rvgen/coverage/goals/rv64imc.yaml \
+--cov_goals rvgen/coverage/goals/rv64gcv.yaml
 ```
 
 Merge rule: **last-writer wins per bin**. So a test-specific overlay can
 *relax* a base goal (set to `0`) as well as *add* new ones. We ship 12
-overlays in `chipforge_inst_gen/coverage/goals/`:
+overlays in `rvgen/coverage/goals/`:
 
 | File | Adds/changes |
 |---|---|
@@ -201,9 +201,9 @@ latter exists. So for rv32imcb:
 
 ```bash
 # Without --cov_goals, these two files are picked up automatically:
-#   chipforge_inst_gen/coverage/goals/baseline.yaml
-#   chipforge_inst_gen/coverage/goals/rv32imcb.yaml
-python -m chipforge_inst_gen --target rv32imcb --test riscv_b_ext_test \
+#   rvgen/coverage/goals/baseline.yaml
+#   rvgen/coverage/goals/rv32imcb.yaml
+python -m rvgen --target rv32imcb --test riscv_b_ext_test \
     --steps gen,cov --output out/
 ```
 
@@ -212,7 +212,7 @@ python -m chipforge_inst_gen --target rv32imcb --test riscv_b_ext_test \
 Catch typos before they silently fail:
 
 ```bash
-python -m chipforge_inst_gen.coverage.tools lint-goals my_goals.yaml --strict=error
+python -m rvgen.coverage.tools lint-goals my_goals.yaml --strict=error
 ```
 
 Example output when you typo `AD` instead of `ADD`:
@@ -233,7 +233,7 @@ Unknown bin name(s) (1):
 ### Inline with the pipeline (recommended)
 
 ```bash
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
     --output out/run1 --start_seed 100 -i 1
@@ -253,12 +253,12 @@ runtime sampling. Trace files land in `spike_sim/<test_id>.trace`.
 ### From Python (library use)
 
 ```python
-from chipforge_inst_gen.coverage import (
+from rvgen.coverage import (
     sample_sequence, load_goals, render_report, goals_met,
 )
-from chipforge_inst_gen.coverage.collectors import new_db
-from chipforge_inst_gen.isa.factory import get_instr
-from chipforge_inst_gen.isa.enums import RiscvInstrName, RiscvReg
+from rvgen.coverage.collectors import new_db
+from rvgen.isa.factory import get_instr
+from rvgen.isa.enums import RiscvInstrName, RiscvReg
 
 db = new_db()
 instr = get_instr(RiscvInstrName.ADD)
@@ -271,7 +271,7 @@ sample_sequence(db, [instr])
 print(db["opcode_cg"]["ADD"])   # → 1
 ```
 
-See the doctest in `chipforge_inst_gen/coverage/__init__.py` for the
+See the doctest in `rvgen/coverage/__init__.py` for the
 canonical example.
 
 ---
@@ -303,7 +303,7 @@ covergroups: 35    unique bins hit: 2970    total samples: 299604    grade: 87/1
 ### HTML dashboard
 
 ```bash
-python -m chipforge_inst_gen.coverage.tools export coverage.json \
+python -m rvgen.coverage.tools export coverage.json \
     --html coverage.html --goals baseline.yaml
 ```
 
@@ -315,7 +315,7 @@ for a real rendered example from the jump-stress + mmu-stress runs.
 ### CSV export
 
 ```bash
-python -m chipforge_inst_gen.coverage.tools export coverage.json --csv coverage.csv
+python -m rvgen.coverage.tools export coverage.json --csv coverage.csv
 ```
 
 Three-column format (`covergroup,bin,hit_count`) — drops into any
@@ -325,7 +325,7 @@ spreadsheet or time-series dashboard.
 
 ## 7 — Analysis tools
 
-Everything under `python -m chipforge_inst_gen.coverage.tools`:
+Everything under `python -m rvgen.coverage.tools`:
 
 | Command | What it does |
 |---|---|
@@ -342,8 +342,8 @@ Everything under `python -m chipforge_inst_gen.coverage.tools`:
 Full help:
 
 ```bash
-python -m chipforge_inst_gen.coverage.tools --help
-python -m chipforge_inst_gen.coverage.tools <subcmd> --help
+python -m rvgen.coverage.tools --help
+python -m rvgen.coverage.tools <subcmd> --help
 ```
 
 ---
@@ -353,7 +353,7 @@ python -m chipforge_inst_gen.coverage.tools <subcmd> --help
 `--auto_regress` loops seeds until goals are met:
 
 ```bash
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --auto_regress --cov_directed --max_seeds 32 \
     --output out/regress --start_seed 100
@@ -369,7 +369,7 @@ python -m chipforge_inst_gen \
 - **Coverage-directed** (`--cov_directed`): inspects missing bins and
   perturbs `gen_opts` each seed. Missing `FENCE` → drops `+no_fence=1`.
   Missing `LB` → injects a `riscv_load_store_rand_instr_stream`. Full
-  mapping table in `chipforge_inst_gen/coverage/directed.py`.
+  mapping table in `rvgen/coverage/directed.py`.
 
 **Convergence bookkeeping** (written whether directed or not):
 
@@ -415,7 +415,7 @@ grade=87
 **`GITHUB_STEP_SUMMARY`** — rendered in the PR's job summary:
 
 ```markdown
-### chipforge-inst-gen coverage
+### rvgen coverage
 
 - **Grade: 87/100**
 - Tests run: **2**
@@ -466,7 +466,7 @@ hazard_cg:
 Run:
 
 ```bash
-python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
+python -m rvgen --target rv32imc --test riscv_rand_instr_test \
     --steps gen,cov --output out/ex1 --start_seed 100 -i 1 \
     --cov_goals minimal.yaml
 ```
@@ -492,7 +492,7 @@ injects `riscv_jal_instr` when the bin is missing.
 ### Example 2 — Layered overlays for rv64gcv
 
 ```bash
-python -m chipforge_inst_gen --target rv64gcv \
+python -m rvgen --target rv64gcv \
     --test riscv_rand_instr_test \
     --testlist /path/to/riscv-dv/target/rv64imc/testlist.yaml \
     --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
@@ -528,10 +528,10 @@ overnight run.
 cat out/regression/convergence.json
 
 # 2. Ask the tool
-python -m chipforge_inst_gen.coverage.tools suggest-seeds \
+python -m rvgen.coverage.tools suggest-seeds \
     --convergence out/regression/convergence.json \
     --observed out/regression/coverage.json \
-    --goals chipforge_inst_gen/coverage/goals/baseline.yaml
+    --goals rvgen/coverage/goals/baseline.yaml
 
 # Output:
 #   Seed 417 previously closed 3 bin(s):
@@ -558,7 +558,7 @@ Adding a new covergroup is a three-line change. Say you want
 push/pop:
 
 ```python
-# chipforge_inst_gen/coverage/collectors.py
+# rvgen/coverage/collectors.py
 
 CG_STACK_DEPTH = "stack_depth_cg"  # new
 
@@ -576,7 +576,7 @@ a test in `tests/unit/test_coverage.py`, and you're done. No registry,
 no factory, no decorator plumbing.
 
 For a runtime covergroup, add the parse logic to
-`chipforge_inst_gen/coverage/runtime.py::sample_trace_file` instead.
+`rvgen/coverage/runtime.py::sample_trace_file` instead.
 
 ---
 

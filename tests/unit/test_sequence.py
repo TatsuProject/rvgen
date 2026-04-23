@@ -1,15 +1,15 @@
-"""Tests for chipforge_inst_gen.sequence."""
+"""Tests for rvgen.sequence."""
 
 from __future__ import annotations
 
 import random
 
-from chipforge_inst_gen.config import make_config
-from chipforge_inst_gen.isa import rv32i  # noqa: F401
-from chipforge_inst_gen.isa.enums import LABEL_STR_LEN, RiscvInstrCategory
-from chipforge_inst_gen.isa.filtering import create_instr_list
-from chipforge_inst_gen.sequence import InstrSequence
-from chipforge_inst_gen.targets import get_target
+from rvgen.config import make_config
+from rvgen.isa import rv32i  # noqa: F401
+from rvgen.isa.enums import LABEL_STR_LEN, RiscvInstrCategory
+from rvgen.isa.filtering import create_instr_list
+from rvgen.sequence import InstrSequence
+from rvgen.targets import get_target
 
 
 def _make_sequence(*, instr_cnt: int = 50, no_branch: bool = False, seed: int = 1) -> InstrSequence:
@@ -87,9 +87,9 @@ def test_sequence_format_matches_golden_shape():
 
 def test_directed_instr_injected_before_label_assignment():
     """Directed streams should be inserted before labels are allocated."""
-    from chipforge_inst_gen.isa.factory import get_instr
-    from chipforge_inst_gen.isa.enums import RiscvInstrName
-    from chipforge_inst_gen.stream import InstrStream
+    from rvgen.isa.factory import get_instr
+    from rvgen.isa.enums import RiscvInstrName
+    from rvgen.stream import InstrStream
 
     cfg = make_config(get_target("rv32imc"), gen_opts="+no_fence=1 +no_csr_instr=1")
     avail = create_instr_list(cfg)

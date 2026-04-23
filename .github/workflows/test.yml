@@ -32,10 +32,10 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Doctests (coverage public API example)
-        run: python -m pytest --doctest-modules chipforge_inst_gen/coverage/__init__.py -q
+        run: python -m pytest --doctest-modules rvgen/coverage/__init__.py -q
 
       - name: Lint every shipped coverage-goals YAML
         run: |
-          for f in chipforge_inst_gen/coverage/goals/*.yaml; do
-            python -m chipforge_inst_gen.coverage.tools lint-goals "$f" --strict error
+          for f in rvgen/coverage/goals/*.yaml; do
+            python -m rvgen.coverage.tools lint-goals "$f" --strict error
           done

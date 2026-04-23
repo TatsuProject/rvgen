@@ -13,7 +13,7 @@ A clear, concise description of what went wrong.
 The exact CLI invocation, or Python snippet, that triggers the bug:
 
 ```
-python -m chipforge_inst_gen ...
+python -m rvgen ...
 ```
 
 ### Expected vs actual
@@ -24,7 +24,7 @@ python -m chipforge_inst_gen ...
 
 ### Environment
 
-- chipforge-inst-gen version (git SHA or tag):
+- rvgen version (git SHA or tag):
 - Python version (`python --version`):
 - OS:
 - RISC-V toolchain (`$RISCV_GCC --version | head -1`):

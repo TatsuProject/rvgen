@@ -1,6 +1,6 @@
 # Testlist + gen_opts reference
 
-A **test** in chipforge-inst-gen is a named YAML entry that specifies
+A **test** in rvgen is a named YAML entry that specifies
 generation options, iterations, and metadata. The schema is
 byte-compatible with [riscv-dv's testlist.yaml
 format](https://github.com/chipsalliance/riscv-dv/tree/master/yaml),
@@ -59,14 +59,14 @@ so you can point our CLI directly at riscv-dv's existing testlists.
 
 ```bash
 # Point at your testlist
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test my_custom_test \
     --testlist my_testlist.yaml \
     --steps gen,gcc_compile,iss_sim,cov --iss spike \
     --output out/ -i 4 --start_seed 100
 
 # Or use riscv-dv's bundled testlist (default fallback)
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_arithmetic_basic_test \
     --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
     --steps gen --output out/
@@ -178,14 +178,14 @@ All registered via SV class name. Reference one from gen_opts via
 
 ## Writing your own stream
 
-Minimal template (drop under `chipforge_inst_gen/streams/my_stream.py`):
+Minimal template (drop under `rvgen/streams/my_stream.py`):
 
 ```python
 from dataclasses import dataclass
-from chipforge_inst_gen.isa.factory import get_instr
-from chipforge_inst_gen.isa.enums import RiscvInstrName, RiscvReg
-from chipforge_inst_gen.streams import register_stream
-from chipforge_inst_gen.streams.base import DirectedInstrStream
+from rvgen.isa.factory import get_instr
+from rvgen.isa.enums import RiscvInstrName, RiscvReg
+from rvgen.streams import register_stream
+from rvgen.streams.base import DirectedInstrStream
 
 
 @dataclass
@@ -238,7 +238,7 @@ to your testlist.yaml and invoke:
 ```
 
 ```bash
-python -m chipforge_inst_gen --target rv32imc --test riscv_hazard_heavy_test \
+python -m rvgen --target rv32imc --test riscv_hazard_heavy_test \
     --testlist my_tests.yaml --steps gen,gcc_compile,iss_sim,cov \
     --iss spike --iss_trace --output out/ -i 4 --start_seed 100
 ```

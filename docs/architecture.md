@@ -9,11 +9,11 @@ and `iss_sim` steps respectively.
 
 ## Module inventory
 
-All source under `chipforge_inst_gen/`:
+All source under `rvgen/`:
 
 | Module | Responsibility |
 |---|---|
-| `cli.py` | argparse entry point (`python -m chipforge_inst_gen ...`). Orchestrates the `gen,gcc_compile,iss_sim,cov` steps and wires `--auto_regress` to the dedicated driver. |
+| `cli.py` | argparse entry point (`python -m rvgen ...`). Orchestrates the `gen,gcc_compile,iss_sim,cov` steps and wires `--auto_regress` to the dedicated driver. |
 | `auto_regress.py` | The `--auto_regress` loop: seed-bumping, coverage-directed perturbation, convergence tracking, plateau detection, per-seed asm archival. |
 | `config.py` | `Config` dataclass — every riscv-dv plusarg knob, plus our extensions. Parses `+key=value` strings. Stamps `VectorConfig` when the target advertises a vector profile. |
 | `targets/__init__.py` | Declarative `TargetCfg` table — 27 targets covering rv32i through rv64gcv plus Zve*/coralnpu embedded profiles. |
@@ -100,7 +100,7 @@ they don't want.
 | Test kind | Where | Count |
 |---|---|---|
 | Unit | `tests/unit/` | 332 |
-| Doctest (coverage API example) | `chipforge_inst_gen/coverage/__init__.py` | 1 |
+| Doctest (coverage API example) | `rvgen/coverage/__init__.py` | 1 |
 | End-to-end on spike (51-case scalar) | shell harness in README | 51 × 3 seeds |
 | End-to-end on spike-vector (rv64gcv) | shell harness in CLAUDE.md | 18 × 3 seeds |
 | End-to-end on spike-vector (Zve* + coralnpu) | shell harness in CLAUDE.md | 5 |
@@ -113,7 +113,7 @@ All green at the tip of main.
 
 | Goal | Where to change |
 |---|---|
-| Add a new opcode | `chipforge_inst_gen/isa/<ext>.py` — call `define_instr(name, format, category, group)`. |
+| Add a new opcode | `rvgen/isa/<ext>.py` — call `define_instr(name, format, category, group)`. |
 | Add a new extension group | `isa/enums.py::RiscvInstrGroup` + new module that registers opcodes. |
 | Add a new target | `targets/__init__.py::_TARGETS` — add a `TargetCfg` entry. Update `cli.py::_TARGET_ISA_MABI` for GCC. |
 | Add a new directed stream | `streams/<my_stream>.py` — subclass `DirectedInstrStream`, call `register_stream("riscv_my_stream", cls)`. Reference from testlist gen_opts. |

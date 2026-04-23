@@ -88,5 +88,5 @@ broader use.
 - 1 integration-regression test (golden-coverage floor) anchoring
   the fixed-seed rv32imc run.
 
-[0.1.0]: https://github.com/<org>/chipforge-inst-gen/releases/tag/v0.1.0
-[Unreleased]: https://github.com/<org>/chipforge-inst-gen/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/<org>/rvgen/releases/tag/v0.1.0
+[Unreleased]: https://github.com/<org>/rvgen/compare/v0.1.0...HEAD

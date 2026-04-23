@@ -1,7 +1,7 @@
 # Example: standalone testlist with a mix of shipped + custom tests.
 #
 # Use as-is:
-#   python -m chipforge_inst_gen --target rv32imc --test my_hazard_heavy_test \
+#   python -m rvgen --target rv32imc --test my_hazard_heavy_test \
 #       --testlist docs/examples/custom-testlist.yaml \
 #       --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
 #       --output out/ -i 4 --start_seed 100

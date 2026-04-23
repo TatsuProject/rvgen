@@ -1,6 +1,6 @@
 # Verification engineer's guide
 
-A step-by-step walkthrough of **chipforge-inst-gen** for someone who wants
+A step-by-step walkthrough of **rvgen** for someone who wants
 to gate a RISC-V core's sign-off on functional coverage.
 
 ---
@@ -12,7 +12,7 @@ to gate a RISC-V core's sign-off on functional coverage.
 - Python 3.11+.
 
 ```bash
-pip install -e .                       # install chipforge-inst-gen in-place
+pip install -e .                       # install rvgen in-place
 export RISCV_GCC=/path/to/riscv64-unknown-elf-gcc
 export SPIKE_PATH=/path/to/spike       # or spike-vector for RVV
 ```
@@ -25,7 +25,7 @@ Generate a test, assemble it, run it on spike, and collect coverage — all
 in one command:
 
 ```bash
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
     --output out/first_run --start_seed 100 -i 1
@@ -117,7 +117,7 @@ The generator collects **24 covergroups**:
 ## 4 — Define goals
 
 Ship your required coverage in a CGF-style YAML. Start by copying
-`chipforge_inst_gen/coverage/goals/baseline.yaml` and tightening the
+`rvgen/coverage/goals/baseline.yaml` and tightening the
 counts to what your core needs:
 
 ```yaml
@@ -155,7 +155,7 @@ When goals are unmet, three tools help:
 ### 5a — Coverage-directed auto-regression
 
 ```bash
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --auto_regress --cov_directed --max_seeds 16 \
     --output out/regress
@@ -178,7 +178,7 @@ seed-sweep).
 Does one test over-represent some bins? See which tests own which:
 
 ```bash
-python -m chipforge_inst_gen.coverage.tools per-test \
+python -m rvgen.coverage.tools per-test \
     out/regress/coverage_per_test.json
 ```
 
@@ -188,7 +188,7 @@ bins, retire it last. If a test owns 0 unique bins, it's redundant.
 ### 5c — Diff two runs
 
 ```bash
-python -m chipforge_inst_gen.coverage.tools diff \
+python -m rvgen.coverage.tools diff \
     out/baseline/coverage.json out/new/coverage.json
 ```
 
@@ -204,7 +204,7 @@ regression: something stopped emitting it.
 - name: Run regression
   id: regress
   run: |
-    python -m chipforge_inst_gen --target rv32imc \
+    python -m rvgen --target rv32imc \
         --test riscv_rand_instr_test \
         --auto_regress --cov_directed --max_seeds 32 \
         --output out
@@ -213,7 +213,7 @@ regression: something stopped emitting it.
 
 - name: Baseline protection
   run: |
-    python -m chipforge_inst_gen.coverage.tools baseline-check \
+    python -m rvgen.coverage.tools baseline-check \
         --baseline tests/golden/coverage_golden.json \
         out/coverage.json
 ```

@@ -4,7 +4,7 @@
 # a starting template for your own target.
 #
 # Layer order recommendation:
-#   --cov_goals chipforge_inst_gen/coverage/goals/baseline.yaml
+#   --cov_goals rvgen/coverage/goals/baseline.yaml
 #   --cov_goals docs/examples/annotated-goals.yaml
 # Last-writer wins per bin — so this file can both extend and override
 # the baseline.
@@ -12,7 +12,7 @@
 # ---------------------------------------------------------------------
 # Opcode bins — one entry per instruction mnemonic you want to require.
 # Use the exact RiscvInstrName enum name (UPPERCASE_WITH_UNDERSCORES).
-# Typo protection: `python -m chipforge_inst_gen.coverage.tools lint-goals <this-file>`.
+# Typo protection: `python -m rvgen.coverage.tools lint-goals <this-file>`.
 # ---------------------------------------------------------------------
 opcode_cg:
   # Required bins — the CLI exits 3 and CI flags 'goals not met' if any

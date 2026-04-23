@@ -1,4 +1,4 @@
-"""Tests for chipforge_inst_gen.isa.filtering."""
+"""Tests for rvgen.isa.filtering."""
 
 from __future__ import annotations
 
@@ -6,22 +6,22 @@ import random
 
 import pytest
 
-from chipforge_inst_gen.config import make_config
-from chipforge_inst_gen.isa import rv32i  # noqa: F401 — register RV32I
-from chipforge_inst_gen.isa.enums import (
+from rvgen.config import make_config
+from rvgen.isa import rv32i  # noqa: F401 — register RV32I
+from rvgen.isa.enums import (
     PrivilegedMode,
     RiscvInstrCategory,
     RiscvInstrGroup,
     RiscvInstrName,
     RiscvReg,
 )
-from chipforge_inst_gen.isa.filtering import (
+from rvgen.isa.filtering import (
     AvailableInstrs,
     create_instr_list,
     get_rand_instr,
     randomize_gpr_operands,
 )
-from chipforge_inst_gen.targets import get_target
+from rvgen.targets import get_target
 
 
 def test_create_instr_list_for_rv32i_filters_to_rv32i_only():
@@ -162,7 +162,7 @@ def test_fp_groups_gated_by_enable_floating_point():
 
 def test_target_unsupported_instr_honored_for_fp():
     """unsupported_instr filters individual instrs even when their group survives."""
-    from chipforge_inst_gen.targets import TargetCfg, get_target
+    from rvgen.targets import TargetCfg, get_target
     from dataclasses import replace
 
     base = get_target("rv32imafdc")

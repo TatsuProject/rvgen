@@ -1,16 +1,16 @@
-"""Tests for chipforge_inst_gen.targets."""
+"""Tests for rvgen.targets."""
 
 from __future__ import annotations
 
 import pytest
 
-from chipforge_inst_gen.isa.enums import (
+from rvgen.isa.enums import (
     PrivilegedMode,
     PrivilegedReg,
     RiscvInstrGroup,
     SatpMode,
 )
-from chipforge_inst_gen.targets import TargetCfg, get_target, target_names
+from rvgen.targets import TargetCfg, get_target, target_names
 
 
 def test_all_expected_targets_present():
@@ -101,7 +101,7 @@ def test_targetcfg_is_frozen():
 
 def test_rv32im_marks_high_mul_unsupported():
     t = get_target("rv32im")
-    from chipforge_inst_gen.isa.enums import RiscvInstrName as N
+    from rvgen.isa.enums import RiscvInstrName as N
     # riscv-dv's rv32im excludes the high-multiply variants.
     for name in (N.MUL, N.MULH, N.MULHSU, N.MULHU):
         assert name in t.unsupported_instr

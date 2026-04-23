@@ -1,14 +1,14 @@
-"""Tests for chipforge_inst_gen.isa.utils."""
+"""Tests for rvgen.isa.utils."""
 
 from __future__ import annotations
 
-from chipforge_inst_gen.isa.enums import (
+from rvgen.isa.enums import (
     LABEL_STR_LEN,
     PrivilegedReg,
     RiscvReg,
     SatpMode,
 )
-from chipforge_inst_gen.isa.utils import (
+from rvgen.isa.utils import (
     format_data,
     format_string,
     get_label,

@@ -1,0 +1,420 @@
+"""Top-level assembly composer — Phase 1 step-5 skeleton.
+
+Port of ``src/riscv_asm_program_gen.sv::gen_program`` (riscv_asm_program_gen.sv:68).
+The Phase-1 MVP handles the M-mode / DIRECT-trap / no-paging path:
+
+    .include "user_define.h"
+    .globl _start
+    .section .text
+    [.option norvc]
+    _start:
+       la <scratch>, h0_start
+       jalr x0, <scratch>, 0
+    h0_start:
+       <setup_misa>
+       <pre_enter_privileged_mode>      # boot CSRs + mret
+    init:
+       <GPR init>
+       la <sp>, h<N>user_stack_end
+       [signature INITIALIZED]
+    main:
+       <sequence body>
+    test_done:
+       li gp, 1
+       ecall
+    <trap handler>
+    write_tohost:  sw gp, tohost, t5
+    _exit:          j write_tohost
+    .section .data
+    .align 6; .global tohost; tohost: .dword 0;
+    .align 6; .global fromhost; fromhost: .dword 0;
+    <user stack>
+    <kernel stack>
+
+Step 8 will add S/U modes, paging, PMP, debug.
+"""
+
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass, field
+
+from rvgen.config import Config
+from rvgen.isa.enums import (
+    LABEL_STR_LEN,
+    PrivilegedMode,
+    RiscvReg,
+)
+from rvgen.isa.filtering import AvailableInstrs, create_instr_list
+from rvgen.isa.utils import format_string, hart_prefix
+from rvgen.privileged.boot import (
+    gen_pre_enter_privileged_mode,
+    gen_setup_misa,
+)
+from rvgen.privileged.trap import gen_trap_handler
+from rvgen.sections.data_page import (
+    DEFAULT_AMO_REGION,
+    DEFAULT_MEM_REGIONS,
+    gen_data_page,
+    gen_stack_section,
+    gen_tohost_fromhost,
+)
+from rvgen.sections.signature import (
+    INITIALIZED,
+    IN_MACHINE_MODE,
+    TEST_PASS,
+    emit_core_status,
+    emit_test_result,
+)
+from rvgen.sequence import InstrSequence
+
+
+_INDENT = " " * LABEL_STR_LEN
+
+
+def _line(s: str) -> str:
+    return f"{_INDENT}{s}"
+
+
+def _labeled(label: str, body: str = "") -> str:
+    return format_string(f"{label}:", LABEL_STR_LEN) + body
+
+
+# GPR init-value distribution (SV: riscv_asm_program_gen.sv:672).
+# SV weights: 0, 0x80000000, [0x1..0xF], [0x10..0xEFFFFFFF], [0xF0000000..0xFFFFFFFF] each :/ 1.
+_GPR_INIT_BUCKETS = (
+    (lambda rng: 0, 1),
+    (lambda rng: 0x80000000, 1),
+    (lambda rng: rng.randint(0x1, 0xF), 1),
+    (lambda rng: rng.randint(0x10, 0xEFFFFFFF), 1),
+    (lambda rng: rng.randint(0xF0000000, 0xFFFFFFFF), 1),
+)
+
+
+def _pick_gpr_init(rng: random.Random) -> int:
+    pool, weights = zip(*_GPR_INIT_BUCKETS)
+    (fn,) = rng.choices(pool, weights=weights, k=1)
+    return fn(rng)
+
+
+@dataclass
+class AsmProgramGen:
+    """Top-level assembler-file composer."""
+
+    cfg: Config
+    avail: AvailableInstrs
+    rng: random.Random
+
+    # Output bucket: the final list of ``.S`` lines.
+    instr_stream: list[str] = field(default_factory=list)
+
+    # Per-hart sequences (Phase 1 MVP: single hart only).
+    main_sequence: InstrSequence | None = None
+
+    # Symbol names bound in :meth:`gen_program`.
+    hart: int = 0
+
+    def gen_program(self) -> list[str]:
+        """Assemble the full ``.S`` line list (M-mode, DIRECT, no paging)."""
+        self.instr_stream = []
+        self._gen_program_header()
+        for hart in range(self.cfg.num_of_harts):
+            self.hart = hart
+            self._gen_hart_section(hart)
+        self._gen_test_done()
+        self._gen_trap_handler_section()
+        self._gen_program_end()
+        self._gen_data_section()
+        return self.instr_stream
+
+    # ------------------------------------------------------------------
+    # Phase-1 MVP phases
+    # ------------------------------------------------------------------
+
+    def _gen_program_header(self) -> None:
+        """Port of SV ``gen_program_header`` (riscv_asm_program_gen.sv:522)."""
+        self.instr_stream.append('.include "user_define.h"')
+        self.instr_stream.append(".globl _start")
+        self.instr_stream.append(".section .text")
+        if self.cfg.disable_compressed_instr:
+            self.instr_stream.append(".option norvc;")
+        self.instr_stream.append('.include "user_init.s"')
+
+        # _start always dispatches to ``h<hart>_start`` labels (SV always
+        # emits these literally regardless of num_harts).
+        self.instr_stream.append(_labeled("_start"))
+        if self.cfg.num_of_harts > 1:
+            self.instr_stream.append(
+                _line(f"csrr {self.cfg.gpr[0].abi}, 0xf14")
+            )
+            for h in range(self.cfg.num_of_harts):
+                self.instr_stream.append(
+                    _line(f"li {self.cfg.gpr[1].abi}, {h}")
+                )
+                self.instr_stream.append(
+                    _line(f"beq {self.cfg.gpr[0].abi}, {self.cfg.gpr[1].abi}, {h}f")
+                )
+            for h in range(self.cfg.num_of_harts):
+                self.instr_stream.append(_labeled(f"{h}"))
+                self.instr_stream.append(
+                    _line(f"la {self.cfg.scratch_reg.abi}, h{h}_start")
+                )
+                self.instr_stream.append(
+                    _line(f"jalr x0, {self.cfg.scratch_reg.abi}, 0")
+                )
+        else:
+            self.instr_stream.append(_line("j h0_start"))
+
+    def _gen_hart_section(self, hart: int) -> None:
+        """Emit h<hart>_start + init + main.
+
+        SV convention (riscv_asm_program_gen.sv:75, :338): the ``h<N>_start``
+        label is always literal (even for num_harts=1), so ``_start:`` can
+        uniquely dispatch. All other hart-local labels (``init``,
+        ``mtvec_handler``, ``user_stack_*``, ``kernel_stack_*``) use the
+        collapsible ``hart_prefix()`` which is ``""`` when num_harts == 1.
+        """
+        gpr0 = self.cfg.gpr[0]
+        prefix = hart_prefix(hart, self.cfg.num_of_harts)
+        # h<hart>_start is always literal, independent of hart_prefix.
+        hart_start_label = f"h{hart}_start"
+
+        self.instr_stream.append(_labeled(hart_start_label))
+        # SV guards both setup_misa + pre_enter_privileged_mode behind
+        # ``if (!cfg.bare_program_mode)`` (riscv_asm_program_gen.sv:76). Skipping
+        # them lets the output target rv32ui-only cores that lack CSRs entirely.
+        if not self.cfg.bare_program_mode:
+            self.instr_stream.extend(gen_setup_misa(self.cfg, gpr0))
+            self.instr_stream.extend(gen_pre_enter_privileged_mode(
+                self.cfg,
+                hart=hart,
+                init_label=f"{prefix}init",
+                trap_handler_label=f"{prefix}mtvec_handler",
+            ))
+
+        self.instr_stream.append(_labeled(f"{prefix}init"))
+        self._gen_init_section(hart)
+
+        main_label = f"{prefix}main"
+        self.main_sequence = InstrSequence(
+            cfg=self.cfg,
+            avail=self.avail,
+            label_name=main_label,
+            instr_cnt=self.cfg.main_program_instr_cnt,
+        )
+        # Build directed-stream instances from cfg.directed_instr = {idx: (name, cnt)}.
+        from rvgen.streams import get_stream
+        from rvgen.stream import InstrStream
+        self.main_sequence.directed_instr = []
+        for idx, (name, count) in sorted(self.cfg.directed_instr.items()):
+            try:
+                stream_cls = get_stream(name)
+            except KeyError:
+                # Unknown streams are skipped silently for Phase 1 forward-compat.
+                continue
+            for i in range(max(count, 1)):
+                stream = stream_cls(
+                    cfg=self.cfg,
+                    avail=self.avail,
+                    rng=self.rng,
+                    stream_name=name,
+                    label=f"{main_label}_{name}_{i}",
+                    hart=hart,
+                )
+                stream.generate()
+                # Wrap in a plain InstrStream so InstrSequence can insert it.
+                wrapper = InstrStream(instr_list=stream.instr_list)
+                self.main_sequence.directed_instr.append(wrapper)
+
+        self.main_sequence.gen_instr(self.rng, no_branch=self.cfg.no_branch_jump)
+        self.main_sequence.post_process_instr(self.rng)
+        self.main_sequence.generate_instr_stream()
+        self.instr_stream.extend(self.main_sequence.instr_string_list)
+
+    def _gen_init_section(self, hart: int) -> None:
+        """GPR init + stack pointer + signature INITIALIZED handshake."""
+        prefix = hart_prefix(hart, self.cfg.num_of_harts)
+        # Initialize x1..x31 with biased random values (skip SP and TP — they
+        # will be set below / via the trap handler).
+        skip = {self.cfg.sp.value, self.cfg.tp.value, 0}
+        for i in range(32):
+            if i in skip:
+                continue
+            val = _pick_gpr_init(self.rng)
+            self.instr_stream.append(_line(f"li x{i}, 0x{val:x}"))
+
+        # Vector engine init — emitted before the stack pointer load because
+        # init_vec_gpr runs in a "temporary SEW/LMUL" regime (SV line 1629)
+        # before the final vsetvli sets the real vtype.
+        if self.cfg.enable_vector_extension and self.cfg.vector_cfg is not None:
+            self._gen_vector_init(hart)
+
+        # Stack pointer.
+        self.instr_stream.append(
+            _line(f"la {self.cfg.sp.abi}, {prefix}user_stack_end")
+        )
+
+        # Signature: CORE_STATUS INITIALIZED then IN_MACHINE_MODE.
+        if self.cfg.require_signature_addr:
+            self.instr_stream.extend(
+                emit_core_status(
+                    signature_addr=self.cfg.signature_addr,
+                    core_status=INITIALIZED,
+                    gpr0=self.cfg.gpr[0],
+                    gpr1=self.cfg.gpr[1],
+                )
+            )
+            if self.cfg.init_privileged_mode == PrivilegedMode.MACHINE_MODE:
+                self.instr_stream.extend(
+                    emit_core_status(
+                        signature_addr=self.cfg.signature_addr,
+                        core_status=IN_MACHINE_MODE,
+                        gpr0=self.cfg.gpr[0],
+                        gpr1=self.cfg.gpr[1],
+                    )
+                )
+
+    def _gen_vector_init(self, hart: int) -> None:
+        """Emit the vector engine init section.
+
+        Port of SV ``init_vec_gpr`` + ``randomize_vec_gpr_and_csr``
+        (riscv_asm_program_gen.sv:544 and :1624).
+
+        Flow:
+          csrwi vxsat, <val>
+          csrwi vxrm, <val>
+          <temporary vsetvli with LMUL=1, SEW=min(ELEN,XLEN)>
+          vec_reg_init:
+            <per-register init — SAME_VALUES_ALL_ELEMS form:
+              vmv.v.x v<N>, x<N>>
+          <final vsetvli with cfg.vector_cfg.vtype>
+        """
+        vcfg = self.cfg.vector_cfg
+        assert vcfg is not None
+        gpr0 = self.cfg.gpr[0].abi
+        gpr1 = self.cfg.gpr[1].abi
+
+        # VXSAT / VXRM setup (SV emits unconditionally).
+        self.instr_stream.append(_line(f"csrwi vxsat, {int(vcfg.vxsat)}"))
+        self.instr_stream.append(_line(f"csrwi vxrm, {int(vcfg.vxrm)}"))
+
+        # Temporary vsetvli with LMUL=1 for vreg init. SEW = min(ELEN, XLEN).
+        # GCC 15 implements RVV v1.0 vsetvli: <sew>,<lmul>,<ta|tu>,<ma|mu>.
+        # The legacy v0.8 `d<N>` (EDIV) tail no longer assembles. We emit
+        # tail-agnostic / mask-agnostic by default — standard for random code.
+        tmp_sew = min(vcfg.elen, self.cfg.target.xlen)
+        self.instr_stream.append(_line(f"li {gpr1}, {vcfg.vl}"))
+        self.instr_stream.append(
+            _line(f"vsetvli {gpr0}, {gpr1}, e{tmp_sew}, m1, ta, ma")
+        )
+        self.instr_stream.append(_labeled(f"{hart_prefix(hart, self.cfg.num_of_harts)}vec_reg_init"))
+
+        # SAME_VALUES_ALL_ELEMS init (simplest form, assembles cleanly).
+        # Avoids the reserved scratch regs.
+        reserved = {self.cfg.sp.value, self.cfg.tp.value, self.cfg.gpr[0].value,
+                    self.cfg.gpr[1].value, self.cfg.scratch_reg.value}
+        for v in range(vcfg.num_vec_gpr):
+            # Use x<N> if safe, else x0. vmv.v.x accepts x0.
+            src = v if v not in reserved else 0
+            self.instr_stream.append(_line(f"vmv.v.x v{v}, x{src}"))
+
+        # Final vsetvli with the intended vtype.
+        self.instr_stream.append(_line(f"li {gpr1}, {vcfg.vl}"))
+        self.instr_stream.append(
+            _line(
+                f"vsetvli {gpr0}, {gpr1}, e{vcfg.vtype.vsew}, "
+                f"{vcfg.lmul_str()}, ta, ma"
+            )
+        )
+
+    def _gen_test_done(self) -> None:
+        """SV: gen_test_done (riscv_asm_program_gen.sv:700)."""
+        self.instr_stream.append(_labeled("test_done"))
+        self.instr_stream.append(_line("li gp, 1"))
+        if self.cfg.bare_program_mode:
+            self.instr_stream.append(_line("j write_tohost"))
+        else:
+            self.instr_stream.append(_line("ecall"))
+
+    def _gen_trap_handler_section(self) -> None:
+        """Emit the trap handler(s). Phase 1: M-mode DIRECT only.
+
+        SV ``gen_trap_handler_section`` (riscv_asm_program_gen.sv:1046) emits an
+        ``.align`` directive before each handler so MTVEC.BASE lands on an
+        architecturally legal boundary (bottom two bits of MTVEC are the MODE
+        field and are masked out of the jump target). Without this, compressed
+        code can land the label on a 2-byte boundary and spike jumps into the
+        middle of the preceding instruction.
+        """
+        if self.cfg.bare_program_mode:
+            return
+        from rvgen.isa.enums import SatpMode
+        if self.cfg.target.satp_mode != SatpMode.BARE:
+            align = 12
+        else:
+            align = self.cfg.tvec_alignment
+        for hart in range(self.cfg.num_of_harts):
+            self.instr_stream.append(f".align {align}")
+            self.instr_stream.extend(gen_trap_handler(self.cfg, hart=hart))
+
+    def _gen_program_end(self) -> None:
+        """Write-to-host terminator. SV: gen_program_end (riscv_asm_program_gen.sv:540)."""
+        self.instr_stream.append(_labeled("write_tohost", "sw gp, tohost, t5"))
+        self.instr_stream.append(_labeled("_exit", "j write_tohost"))
+        self.instr_stream.append(_labeled("instr_end", "nop"))
+
+    def _gen_data_section(self) -> None:
+        """SV: gen_data_page_begin + gen_data_page + stack_section."""
+        self.instr_stream.append("")
+        self.instr_stream.append(".section .data")
+        self.instr_stream.extend(gen_tohost_fromhost())
+
+        # Data pages (skip when cfg.no_data_page=True).
+        if not self.cfg.no_data_page:
+            for hart in range(self.cfg.num_of_harts):
+                lines = gen_data_page(
+                    DEFAULT_MEM_REGIONS,
+                    self.cfg.data_page_pattern,
+                    hart=hart,
+                    num_harts=self.cfg.num_of_harts,
+                    rng=self.rng,
+                    use_push_data_section=self.cfg.use_push_data_section,
+                )
+                self.instr_stream.extend(lines)
+
+        # AMO region (always emitted when an AMO directed stream is configured;
+        # the symbol ``amo_0`` is referenced by LR/SC/AMO streams). Always-on
+        # for simplicity — GCC just ignores unreferenced sections.
+        self.instr_stream.extend(
+            gen_data_page(
+                DEFAULT_AMO_REGION,
+                self.cfg.data_page_pattern,
+                amo=True,
+                rng=self.rng,
+                use_push_data_section=self.cfg.use_push_data_section,
+            )
+        )
+
+        # User stack.
+        for hart in range(self.cfg.num_of_harts):
+            self.instr_stream.extend(
+                gen_stack_section(
+                    stack_len=self.cfg.stack_len,
+                    hart=hart,
+                    num_harts=self.cfg.num_of_harts,
+                    xlen=self.cfg.target.xlen,
+                )
+            )
+
+        # Kernel stack (only needed when we actually use a trap handler).
+        if not self.cfg.bare_program_mode:
+            for hart in range(self.cfg.num_of_harts):
+                self.instr_stream.extend(
+                    gen_stack_section(
+                        stack_len=self.cfg.kernel_stack_len,
+                        hart=hart,
+                        num_harts=self.cfg.num_of_harts,
+                        xlen=self.cfg.target.xlen,
+                        kernel=True,
+                    )
+                )

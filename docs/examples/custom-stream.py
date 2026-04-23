@@ -1,7 +1,7 @@
 """Example: write your own directed instruction stream.
 
 This file is not imported by the package by default — drop it into
-``chipforge_inst_gen/streams/`` (or import it from your own code) to
+``rvgen/streams/`` (or import it from your own code) to
 make the stream available to testlist gen_opts.
 
 After that, reference it from any testlist.yaml:
@@ -16,10 +16,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from chipforge_inst_gen.isa.enums import RiscvInstrName, RiscvReg
-from chipforge_inst_gen.isa.factory import get_instr
-from chipforge_inst_gen.streams import register_stream
-from chipforge_inst_gen.streams.base import DirectedInstrStream
+from rvgen.isa.enums import RiscvInstrName, RiscvReg
+from rvgen.isa.factory import get_instr
+from rvgen.streams import register_stream
+from rvgen.streams.base import DirectedInstrStream
 
 
 @dataclass

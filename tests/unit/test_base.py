@@ -1,12 +1,12 @@
-"""Tests for chipforge_inst_gen.isa.base — Instr base class behavior."""
+"""Tests for rvgen.isa.base — Instr base class behavior."""
 
 from __future__ import annotations
 
 import pytest
 
-from chipforge_inst_gen.isa import rv32i  # noqa: F401 — registers RV32I instrs
-from chipforge_inst_gen.isa.base import Instr, copy_instr
-from chipforge_inst_gen.isa.enums import (
+from rvgen.isa import rv32i  # noqa: F401 — registers RV32I instrs
+from rvgen.isa.base import Instr, copy_instr
+from rvgen.isa.enums import (
     ImmType,
     RiscvInstrCategory,
     RiscvInstrFormat,
@@ -14,7 +14,7 @@ from chipforge_inst_gen.isa.enums import (
     RiscvInstrName,
     RiscvReg,
 )
-from chipforge_inst_gen.isa.factory import get_instr
+from rvgen.isa.factory import get_instr
 
 
 # ---------------------------------------------------------------------------

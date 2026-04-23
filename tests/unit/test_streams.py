@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import random
 
-from chipforge_inst_gen.config import make_config
-from chipforge_inst_gen.isa.enums import RiscvInstrCategory, RiscvInstrName, RiscvReg
-from chipforge_inst_gen.isa.filtering import create_instr_list
-from chipforge_inst_gen.streams import STREAM_REGISTRY, get_stream
-from chipforge_inst_gen.targets import get_target
+from rvgen.config import make_config
+from rvgen.isa.enums import RiscvInstrCategory, RiscvInstrName, RiscvReg
+from rvgen.isa.filtering import create_instr_list
+from rvgen.streams import STREAM_REGISTRY, get_stream
+from rvgen.targets import get_target
 
 
 def _ctx(target="rv32imc"):
@@ -35,7 +35,7 @@ def test_int_numeric_corner_stream_produces_lis_then_arith():
     stream = cls(cfg=cfg, avail=avail, rng=rng, stream_name="test")
     stream.generate()
     # First 10 should be LI pseudo (or similar init ops).
-    from chipforge_inst_gen.streams.directed import _LiPseudo
+    from rvgen.streams.directed import _LiPseudo
     assert sum(1 for i in stream.instr_list if isinstance(i, _LiPseudo)) >= 5
     # Plus some arithmetic/logical/compare/shift body.
     body_count = sum(
@@ -98,6 +98,6 @@ def test_amo_stream_contains_amos():
     cls = get_stream("riscv_amo_instr_stream")
     stream = cls(cfg=cfg, avail=avail, rng=rng, stream_name="test_amo", num_amo=5)
     stream.generate()
-    from chipforge_inst_gen.isa.amo import AmoInstr
+    from rvgen.isa.amo import AmoInstr
     amo_count = sum(1 for i in stream.instr_list if isinstance(i, AmoInstr))
     assert amo_count == 5

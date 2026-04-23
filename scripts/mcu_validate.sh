@@ -2,7 +2,7 @@
 # chipforge-mcu cross-compare: gen → spike → core → diff.
 #
 # Runs one test through the full validation chain:
-#   1. chipforge-inst-gen           → .S
+#   1. rvgen           → .S
 #   2. riscv-gcc                    → .elf
 #   3. objcopy -O verilog + split   → imem.mem / dmem.mem
 #   4. spike --log-commits          → spike_trace.csv
@@ -58,7 +58,7 @@ SIM="$MCU_VERIF/obj_dir/Vtb_top"
 rm -rf "$WORK_DIR"; mkdir -p "$WORK_DIR"
 
 # 1) generate .S
-"$PYTHON" -m chipforge_inst_gen --target rv32imc_zkn \
+"$PYTHON" -m rvgen --target rv32imc_zkn \
     --testlist "$RISCV_DV/target/rv32imc/testlist.yaml" \
     --test "$test_name" --steps gen \
     --output "$WORK_DIR" --start_seed "$seed" -i 1 >/dev/null 2>&1

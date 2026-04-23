@@ -30,7 +30,7 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install chipforge-inst-gen
+      - name: Install rvgen
         run: pip install -e ".[test]"
 
       - name: Install toolchain (placeholder — replace with your toolchain setup)
@@ -40,14 +40,14 @@ jobs:
 
       - name: Lint goals files
         run: |
-          for f in chipforge_inst_gen/coverage/goals/*.yaml; do
-            python -m chipforge_inst_gen.coverage.tools lint-goals "$f" --strict error
+          for f in rvgen/coverage/goals/*.yaml; do
+            python -m rvgen.coverage.tools lint-goals "$f" --strict error
           done
 
       - name: Generate + simulate + collect coverage
         id: regress
         run: |
-          python -m chipforge_inst_gen \
+          python -m rvgen \
               --target rv32imc --test riscv_rand_instr_test \
               --auto_regress --cov_directed --max_seeds 16 \
               --output out/regress
@@ -57,7 +57,7 @@ jobs:
 
       - name: Regression against the golden baseline
         run: |
-          python -m chipforge_inst_gen.coverage.tools baseline-check \
+          python -m rvgen.coverage.tools baseline-check \
               out/regress/coverage.json \
               --baseline tests/golden/coverage_golden_rv32imc.json
         # Requires a checked-in tests/golden/coverage_golden_rv32imc.json.
@@ -67,10 +67,10 @@ jobs:
       - name: Export HTML dashboard
         if: always()
         run: |
-          python -m chipforge_inst_gen.coverage.tools export \
+          python -m rvgen.coverage.tools export \
               out/regress/coverage.json \
               --html out/regress/coverage.html \
-              --goals chipforge_inst_gen/coverage/goals/baseline.yaml
+              --goals rvgen/coverage/goals/baseline.yaml
 
       - name: Upload coverage artefacts
         if: always()

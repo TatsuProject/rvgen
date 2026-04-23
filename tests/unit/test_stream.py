@@ -1,21 +1,21 @@
-"""Tests for chipforge_inst_gen.stream."""
+"""Tests for rvgen.stream."""
 
 from __future__ import annotations
 
 import random
 
-from chipforge_inst_gen.config import make_config
-from chipforge_inst_gen.isa import rv32i  # noqa: F401
-from chipforge_inst_gen.isa.base import Instr
-from chipforge_inst_gen.isa.enums import (
+from rvgen.config import make_config
+from rvgen.isa import rv32i  # noqa: F401
+from rvgen.isa.base import Instr
+from rvgen.isa.enums import (
     RiscvInstrCategory,
     RiscvInstrName,
     RiscvReg,
 )
-from chipforge_inst_gen.isa.factory import get_instr
-from chipforge_inst_gen.isa.filtering import create_instr_list
-from chipforge_inst_gen.stream import InstrStream, RandInstrStream
-from chipforge_inst_gen.targets import get_target
+from rvgen.isa.factory import get_instr
+from rvgen.isa.filtering import create_instr_list
+from rvgen.stream import InstrStream, RandInstrStream
+from rvgen.targets import get_target
 
 
 def _make_nop_stream(n: int) -> list[Instr]:

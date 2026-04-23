@@ -1,16 +1,16 @@
-"""Tests for chipforge_inst_gen.isa.csrs — CSR field layouts."""
+"""Tests for rvgen.isa.csrs — CSR field layouts."""
 
 from __future__ import annotations
 
 import pytest
 
-from chipforge_inst_gen.isa.csrs import (
+from rvgen.isa.csrs import (
     CsrField,
     get_csr_fields,
     has_csr_layout,
     privilege_level,
 )
-from chipforge_inst_gen.isa.enums import (
+from rvgen.isa.enums import (
     PrivilegedLevel,
     PrivilegedReg,
     RegFieldAccess,

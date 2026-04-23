@@ -41,8 +41,8 @@ from shlex import quote
 
 
 _ROOT = Path(__file__).resolve().parent.parent
-_CIG = [sys.executable, "-m", "chipforge_inst_gen"]
-_TOOLS = [sys.executable, "-m", "chipforge_inst_gen.coverage.tools"]
+_CIG = [sys.executable, "-m", "rvgen"]
+_TOOLS = [sys.executable, "-m", "rvgen.coverage.tools"]
 
 
 def _run_one(target: str, test: str, seed: int, output_dir: Path,
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--emit_html", action="store_true",
                     help="Render summary.html alongside combined_coverage.json.")
     p.add_argument("extra_args", nargs=argparse.REMAINDER,
-                    help="Extra args forwarded to each chipforge_inst_gen invocation.")
+                    help="Extra args forwarded to each rvgen invocation.")
     args = p.parse_args(argv)
 
     output_dir = Path(args.output)

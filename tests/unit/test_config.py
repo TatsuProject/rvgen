@@ -1,15 +1,15 @@
-"""Tests for chipforge_inst_gen.config."""
+"""Tests for rvgen.config."""
 
 from __future__ import annotations
 
-from chipforge_inst_gen.config import Config, make_config
-from chipforge_inst_gen.isa.enums import (
+from rvgen.config import Config, make_config
+from rvgen.isa.enums import (
     DataPattern,
     MtvecMode,
     PrivilegedMode,
     RiscvReg,
 )
-from chipforge_inst_gen.targets import get_target
+from rvgen.targets import get_target
 
 
 def test_default_config_fields():

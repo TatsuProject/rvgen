@@ -1,7 +1,7 @@
 """End-to-end CLI smoke test.
 
 The Phase 1 step 3 done-criterion is:
-    python -m chipforge_inst_gen --target rv32imc --test riscv_arithmetic_basic_test
+    python -m rvgen --target rv32imc --test riscv_arithmetic_basic_test
         --iterations 2 --steps gen
 must emit two ``.S`` files (content can be crude for now).
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from chipforge_inst_gen.cli import main
+from rvgen.cli import main
 
 
 _RISCV_DV_ROOT = Path.home() / "Desktop" / "verif_env_tatsu" / "riscv-dv"

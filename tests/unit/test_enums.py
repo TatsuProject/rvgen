@@ -7,7 +7,7 @@ Phase-1 parity depends on declaration order staying identical.
 
 from __future__ import annotations
 
-from chipforge_inst_gen.isa import enums
+from rvgen.isa import enums
 
 
 # ---------------------------------------------------------------------------

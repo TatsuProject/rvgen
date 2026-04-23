@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for considering a contribution! chipforge-inst-gen is open-source
+Thanks for considering a contribution! rvgen is open-source
 and maintained by a small team — every bug report, feature suggestion,
 or PR is appreciated.
 
@@ -12,7 +12,7 @@ or PR is appreciated.
 - **Improve docs** — PRs to `docs/`, `README.md`, or the docstrings land
   without ceremony.
 - **Add an instruction extension** — the pattern is short
-  (`chipforge_inst_gen/isa/<ext>.py` registers opcodes into the global
+  (`rvgen/isa/<ext>.py` registers opcodes into the global
   factory; see `isa/bitmanip.py` or `isa/crypto.py` as templates).
 - **Add a directed stream** — subclass `DirectedInstrStream` and call
   `register_stream("riscv_your_name", cls)`. See
@@ -25,8 +25,8 @@ or PR is appreciated.
 ## Development workflow
 
 ```bash
-git clone <fork-url> chipforge-inst-gen
-cd chipforge-inst-gen
+git clone <fork-url> rvgen
+cd rvgen
 pip install -e ".[test]"
 python -m pytest tests/ -q
 ```
@@ -41,7 +41,7 @@ Before pushing a PR:
 3. **Coverage not regressed** — if your change touches the generator,
    run `scripts/regression.py` for an appropriate matrix and attach the
    coverage delta (via
-   `python -m chipforge_inst_gen.coverage.tools diff`) in the PR
+   `python -m rvgen.coverage.tools diff`) in the PR
    description.
 
 ## Commit style
@@ -75,7 +75,7 @@ Tests: 333/333 green.
 
 - [ ] Tests added / updated for the new behaviour.
 - [ ] `python -m pytest tests/ -q` passes locally.
-- [ ] `python -m chipforge_inst_gen.coverage.tools lint-goals` clean on any
+- [ ] `python -m rvgen.coverage.tools lint-goals` clean on any
       new / modified goals YAML.
 - [ ] Docstring on any new public function.
 - [ ] README / `docs/` updated if the user-facing surface changed.

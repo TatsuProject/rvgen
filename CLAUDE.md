@@ -1,4 +1,4 @@
-# chipforge-inst-gen
+# rvgen
 
 A pure-Python re-implementation of **riscv-dv**, Google's UVM/SystemVerilog random instruction generator. Phase 1 = exact parity; Phase 2 = beyond. No Verilator, VCS, Questa, UVM, or PyVSC — just Python. SV reference lives at `~/Desktop/verif_env_tatsu/riscv-dv/`.
 
@@ -14,7 +14,7 @@ Last substantive session (2026-04-23) iterated on **verification-team-ready cove
 - Coverage-directed auto-regression (closes 95/95 rv32imc goals on seed 1 vs 86/95 for blind-sweep after 8 seeds). Plateau detection bails early when seeds stop adding bins.
 - Convergence tracking — per-bin first-hit seed + per-seed new-bin counts emitted as convergence.json + cov_timeline.json + ASCII sparkline in the log.
 - CI integration: `GITHUB_OUTPUT` + `GITHUB_STEP_SUMMARY` + composite 0-100 grade (60% goals × 20% hazard balance × 20% opcode breadth). Exit codes standardized (0=ok, 1=config, 2=iss-fail, 3=cov-unmet).
-- Coverage tools CLI: `merge / diff / attribute / export(CSV+HTML) / report / per-test / baseline-check` under `python -m chipforge_inst_gen.coverage.tools`.
+- Coverage tools CLI: `merge / diff / attribute / export(CSV+HTML) / report / per-test / baseline-check` under `python -m rvgen.coverage.tools`.
 - JalrInstr directed stream added (coverage-driven — JALR was absent from all existing streams).
 - SV-faithful scalar load/store hierarchy (LoadStoreBaseInstrStream + 8 distinct subclasses with locality-aware offset gen, alignment-aware width selection, hazard_ratio reuse, multi-page interleaving) replaced the old 7-way aliasing stub.
 - Full verification-engineer workflow documented in `docs/verification-guide.md` (9-section tutorial).
@@ -37,7 +37,7 @@ for t in rv32imc:riscv_arithmetic_basic_test rv32imc:riscv_rand_instr_test \
   target=${t%%:*}; test=${t##*:}
   for s in 100 200 300; do
     rm -rf /tmp/reg_${target}_${test}_${s}
-    /home/qamar/anaconda3/bin/python -m chipforge_inst_gen \
+    /home/qamar/anaconda3/bin/python -m rvgen \
       --target $target --test $test \
       --steps gen,gcc_compile,iss_sim --iss spike \
       --output /tmp/reg_${target}_${test}_${s} --start_seed $s -i 1 2>&1 \
@@ -57,7 +57,7 @@ for t in riscv_rand_instr_test riscv_arithmetic_basic_test riscv_loop_test \
          riscv_jump_stress_test riscv_no_fence_test riscv_rand_jump_test; do
   for s in 100 200 300; do
     rm -rf /tmp/vreg_${t}_${s}
-    /home/qamar/anaconda3/bin/python -m chipforge_inst_gen \
+    /home/qamar/anaconda3/bin/python -m rvgen \
       --target rv64gcv --test $t \
       --steps gen,gcc_compile,iss_sim --iss spike \
       --output /tmp/vreg_${t}_${s} --start_seed $s -i 1 2>&1 \
@@ -73,32 +73,32 @@ Coverage workflow (any target):
 
 ```bash
 # Collect static + runtime coverage end-to-end, check against goals.
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv64gcv --test riscv_rand_instr_test \
     --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
     --output /tmp/run1 --start_seed 100 -i 1 \
-    --cov_goals chipforge_inst_gen/coverage/goals/baseline.yaml \
-    --cov_goals chipforge_inst_gen/coverage/goals/rv64imc.yaml \
-    --cov_goals chipforge_inst_gen/coverage/goals/rv64gcv.yaml
+    --cov_goals rvgen/coverage/goals/baseline.yaml \
+    --cov_goals rvgen/coverage/goals/rv64imc.yaml \
+    --cov_goals rvgen/coverage/goals/rv64gcv.yaml
 
 # Auto-regress until goals hit (smart, not blind seed-sweep).
-python -m chipforge_inst_gen \
+python -m rvgen \
     --target rv32imc --test riscv_rand_instr_test \
     --auto_regress --cov_directed --max_seeds 8 \
-    --cov_goals chipforge_inst_gen/coverage/goals/baseline.yaml \
+    --cov_goals rvgen/coverage/goals/baseline.yaml \
     --output /tmp/regress
 
 # Analyse accumulated coverage.
-python -m chipforge_inst_gen.coverage.tools diff run1/coverage.json run2/coverage.json
-python -m chipforge_inst_gen.coverage.tools attribute run*/coverage.json \
-    --goals chipforge_inst_gen/coverage/goals/baseline.yaml
-python -m chipforge_inst_gen.coverage.tools merge run*/coverage.json -o all.json
-python -m chipforge_inst_gen.coverage.tools export all.json --html cov.html --goals ...
+python -m rvgen.coverage.tools diff run1/coverage.json run2/coverage.json
+python -m rvgen.coverage.tools attribute run*/coverage.json \
+    --goals rvgen/coverage/goals/baseline.yaml
+python -m rvgen.coverage.tools merge run*/coverage.json -o all.json
+python -m rvgen.coverage.tools export all.json --html cov.html --goals ...
 ```
 
 ### Prompt to resume a fresh session
 
-> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/chipforge-inst-gen/` first. 332 unit tests pass, 51/51 Spike E2E, 18/18 rv64gcv vector E2E, 5/5 Zve*-profile E2E, 21/21 chipforge-mcu trace-level match. 32 covergroups, layered CGF goals, directed auto-regression, parallel regression runner in `scripts/regression.py`, CLI tools (merge/diff/attribute/export/report/per-test/baseline-check/suggest-seeds/lint-goals). Docs: `docs/verification-guide.md`. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
+> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/rvgen/` first. 332 unit tests pass, 51/51 Spike E2E, 18/18 rv64gcv vector E2E, 5/5 Zve*-profile E2E, 21/21 chipforge-mcu trace-level match. 32 covergroups, layered CGF goals, directed auto-regression, parallel regression runner in `scripts/regression.py`, CLI tools (merge/diff/attribute/export/report/per-test/baseline-check/suggest-seeds/lint-goals). Docs: `docs/verification-guide.md`. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
 
 Rules for either a generic continuation or a specific task: prefer editing existing files, cross-check each change against the SV reference at `~/Desktop/verif_env_tatsu/riscv-dv/`, run `python -m pytest tests/` after every change, update §0 when a major milestone lands.
 
@@ -110,7 +110,7 @@ Rules for either a generic continuation or a specific task: prefer editing exist
 - **Unit tests: 332 passing** (`/home/qamar/anaconda3/bin/python -m pytest tests/`).
 - **Coverage: 32 covergroups** (18 static + 10 runtime + 4 crosses — incl. rs1×rs2 and rd×rs1 reg-pair crosses, bit_activity per-bit toggle detection, csr_value/rs_val_corner runtime bins, priv_mode per-retired-instruction sampling). See `docs/verification-guide.md` for the full catalog + workflow tutorial.
 - **Coverage goals shipped**: baseline + rv32imafdc + rv32imc_zkn + rv32imcb + rv32ui + rv64gc + rv64gcv + rv64imafdc + rv64imc + rv64imcb + coralnpu + no_branch_jump. Layer via repeated `--cov_goals`; auto-resolve from `goals/<target>.yaml` when omitted.
-- **Coverage tools**: `python -m chipforge_inst_gen.coverage.tools {merge, diff, attribute, export, report, per-test, baseline-check, suggest-seeds, lint-goals}` — CSV + HTML outputs, first-closer attribution, golden-baseline CI gate, seed-replay recommendations, typo-catching goals linter.
+- **Coverage tools**: `python -m rvgen.coverage.tools {merge, diff, attribute, export, report, per-test, baseline-check, suggest-seeds, lint-goals}` — CSV + HTML outputs, first-closer attribution, golden-baseline CI gate, seed-replay recommendations, typo-catching goals linter.
 - **Parallel regression runner**: `scripts/regression.py --targets ... --tests ... --seeds ... --jobs 8 --emit_html` — matrix execution + merged coverage + HTML dashboard. The one command CI invokes.
 - **Auto-regression**: `--auto_regress --cov_directed` closes 95/95 rv32imc baseline goals on seed 1 (vs 86/95 for blind-sweep). Plateau detection via `--plateau_window`. Emits convergence.json + cov_timeline.json + ASCII sparkline.
 - **CI integration**: `GITHUB_OUTPUT` + `GITHUB_STEP_SUMMARY` + composite 0-100 coverage grade.
@@ -141,7 +141,7 @@ Rules for either a generic continuation or a specific task: prefer editing exist
 ### Phase 2 — Beyond riscv-dv
 - Add extensions riscv-dv's pygen never ported (full RVV, Zfh, Zvfh, Zc*, Zk*, Smaia/Ssaia, Svnapot, Svpbmt, etc.).
 - Declarative composable YAML configs (vs `+plusarg` soup).
-- Library API (`from chipforge_inst_gen import Generator`).
+- Library API (`from rvgen import Generator`).
 - Faster generation (pygen ≈ 12 min for 10K-instr; goal: seconds).
 
 ### Non-goals
@@ -340,7 +340,7 @@ These define "exact parity" — come out of golden `.S` files + SV source.
 - No UVM factory: plain `dict[str, Type[Instr]]` registry. Honor riscv-dv class names (`riscv_<instr>_instr`) because `+directed_instr_N=<name>` references them.
 - Stream output = `list[str]` lines (not one big string) so tests can match individual lines.
 - One `random.Random(seed)` per generator; seed-derivation rules mirror `SeedGen` in `run.py`.
-- Import shape: `from chipforge_inst_gen.isa import Instr, InstrName`.
+- Import shape: `from rvgen.isa import Instr, InstrName`.
 - Enums match SV declaration order exactly.
 - `.S` output = spaces only (no tabs), matching golden files.
 - ABI register names in asm output (`a0`, `t0`, `fa0`), matching `riscv_reg_t.name()`.

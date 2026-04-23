@@ -14,7 +14,7 @@ there is one.
 ## Checklist
 
 - [ ] `python -m pytest tests/ -q` passes locally.
-- [ ] `python -m chipforge_inst_gen.coverage.tools lint-goals ...` clean
+- [ ] `python -m rvgen.coverage.tools lint-goals ...` clean
       on any new / modified goals YAML.
 - [ ] Docstring on any new public function.
 - [ ] README / `docs/` updated if the user-facing surface changed.
@@ -26,12 +26,12 @@ If this change touches the generator or streams, attach a
 `coverage.tools diff` between a clean baseline and this PR:
 
 ```
-python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
+python -m rvgen --target rv32imc --test riscv_rand_instr_test \
     --steps gen,cov --output /tmp/before --start_seed 100 -i 1
 git stash  # or check out main
-python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
+python -m rvgen --target rv32imc --test riscv_rand_instr_test \
     --steps gen,cov --output /tmp/after --start_seed 100 -i 1
-python -m chipforge_inst_gen.coverage.tools diff \
+python -m rvgen.coverage.tools diff \
     /tmp/before/coverage.json /tmp/after/coverage.json
 ```
 

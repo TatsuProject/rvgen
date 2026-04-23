@@ -39,7 +39,7 @@
   </g>
 
   <!-- title -->
-  <text x="180" y="68" font-size="36" font-weight="800" fill="#f1f5f9">chipforge-inst-gen</text>
+  <text x="180" y="68" font-size="36" font-weight="800" fill="#f1f5f9">rvgen</text>
   <text x="180" y="100" font-size="16" fill="#cbd5e1">Pure-Python RISC-V instruction generator with built-in</text>
   <text x="180" y="122" font-size="16" fill="#cbd5e1">functional coverage, auto-regression, and CI-ready dashboards.</text>
 
