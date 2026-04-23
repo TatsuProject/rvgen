@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" font-family="-apple-system, system-ui, Helvetica, Arial, sans-serif">
+  <rect width="960" height="480" fill="#ffffff"/>
+  <text x="480" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#202030">Coverage model — sampling sources → DB → goals → report</text>
+
+  <!-- LEFT: static sampling -->
+  <g>
+    <rect x="40" y="60" width="220" height="160" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="1.5"/>
+    <text x="150" y="82" text-anchor="middle" font-size="13" font-weight="700" fill="#0c4a6e">Static sampling</text>
+    <text x="150" y="100" text-anchor="middle" font-size="10" fill="#334155">sample_sequence(db, instr_list)</text>
+    <text x="60" y="122" font-size="10" fill="#0f172a">• opcode / format / category</text>
+    <text x="60" y="138" font-size="10" fill="#0f172a">• rs1 / rs2 / rd (+ crosses)</text>
+    <text x="60" y="154" font-size="10" fill="#0f172a">• imm_sign / imm_range</text>
+    <text x="60" y="170" font-size="10" fill="#0f172a">• hazard (RAW/WAR/WAW)</text>
+    <text x="60" y="186" font-size="10" fill="#0f172a">• mem_align / ls_offset / ls_width</text>
+    <text x="60" y="202" font-size="10" fill="#0f172a">• category_transition / op_transition</text>
+  </g>
+
+  <!-- LEFT-BOTTOM: runtime sampling -->
+  <g>
+    <rect x="40" y="240" width="220" height="160" rx="10" fill="#fce7f3" stroke="#be185d" stroke-width="1.5"/>
+    <text x="150" y="262" text-anchor="middle" font-size="13" font-weight="700" fill="#831843">Runtime sampling</text>
+    <text x="150" y="280" text-anchor="middle" font-size="10" fill="#334155">sample_trace_file(db, trace)</text>
+    <text x="60" y="302" font-size="10" fill="#0f172a">• branch_direction (taken/NT)</text>
+    <text x="60" y="318" font-size="10" fill="#0f172a">• exception_cg / pc_reach</text>
+    <text x="60" y="334" font-size="10" fill="#0f172a">• privilege_mode (M/S/U)</text>
+    <text x="60" y="350" font-size="10" fill="#0f172a">• csr_value (per CSR × bucket)</text>
+    <text x="60" y="366" font-size="10" fill="#0f172a">• rs_val_corner (GPR corners)</text>
+    <text x="60" y="382" font-size="10" fill="#0f172a">• bit_activity (per-bit toggle)</text>
+  </g>
+
+  <!-- MIDDLE: Coverage DB -->
+  <g>
+    <rect x="340" y="140" width="200" height="200" rx="12" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+    <text x="440" y="168" text-anchor="middle" font-size="14" font-weight="700" fill="#064e3b">CoverageDB</text>
+    <text x="440" y="186" text-anchor="middle" font-size="10" fill="#334155" font-style="italic">dict[cg_name, dict[bin, int]]</text>
+
+    <rect x="360" y="200" width="160" height="22" rx="4" fill="#ffffff" stroke="#059669"/>
+    <text x="440" y="215" text-anchor="middle" font-size="10" fill="#0f172a">opcode_cg: {ADD: 328, SUB: 120, …}</text>
+
+    <rect x="360" y="228" width="160" height="22" rx="4" fill="#ffffff" stroke="#059669"/>
+    <text x="440" y="243" text-anchor="middle" font-size="10" fill="#0f172a">hazard_cg: {raw: 512, waw: 240, …}</text>
+
+    <rect x="360" y="256" width="160" height="22" rx="4" fill="#ffffff" stroke="#059669"/>
+    <text x="440" y="271" text-anchor="middle" font-size="10" fill="#0f172a">csr_cg: {MSCRATCH: 14, …}</text>
+
+    <rect x="360" y="284" width="160" height="22" rx="4" fill="#ffffff" stroke="#059669"/>
+    <text x="440" y="299" text-anchor="middle" font-size="10" fill="#0f172a">branch_direction_cg: {…}</text>
+
+    <text x="440" y="322" text-anchor="middle" font-size="10" fill="#64748b">32 covergroups total</text>
+  </g>
+
+  <!-- arrows from sources -->
+  <path d="M 260 140 L 335 220" stroke="#0369a1" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+  <path d="M 260 320 L 335 260" stroke="#be185d" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- RIGHT: Goals compare -->
+  <g>
+    <rect x="620" y="60" width="300" height="160" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+    <text x="770" y="82" text-anchor="middle" font-size="13" font-weight="700" fill="#78350f">Goals (CGF-style YAML)</text>
+    <text x="770" y="100" text-anchor="middle" font-size="10" fill="#334155">load_goals_layered(baseline, target)</text>
+    <rect x="640" y="110" width="260" height="100" rx="4" fill="#ffffff" stroke="#b45309"/>
+    <text x="650" y="128" font-size="10" fill="#0f172a" font-family="monospace">opcode_cg:</text>
+    <text x="650" y="144" font-size="10" fill="#0f172a" font-family="monospace">  ADD: 20     # required ≥20</text>
+    <text x="650" y="160" font-size="10" fill="#0f172a" font-family="monospace">  SUB: 10</text>
+    <text x="650" y="176" font-size="10" fill="#0f172a" font-family="monospace">  MRET: 0     # tracked only</text>
+    <text x="650" y="192" font-size="10" fill="#0f172a" font-family="monospace">hazard_cg:</text>
+    <text x="650" y="208" font-size="10" fill="#0f172a" font-family="monospace">  raw: 50 ; waw: 30</text>
+  </g>
+
+  <!-- RIGHT-BOTTOM: Report + grade -->
+  <g>
+    <rect x="620" y="240" width="300" height="160" rx="10" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1.5"/>
+    <text x="770" y="262" text-anchor="middle" font-size="13" font-weight="700" fill="#581c87">Report + Grade</text>
+    <text x="770" y="280" text-anchor="middle" font-size="10" fill="#334155">render_report / compute_grade</text>
+    <rect x="640" y="290" width="260" height="100" rx="4" fill="#ffffff" stroke="#7c3aed"/>
+    <text x="650" y="308" font-size="10" fill="#0f172a" font-family="monospace">grade: 87/100</text>
+    <text x="650" y="324" font-size="10" fill="#16a34a" font-family="monospace">  ADD  328 / 20 ✓</text>
+    <text x="650" y="340" font-size="10" fill="#16a34a" font-family="monospace">  SUB  120 / 10 ✓</text>
+    <text x="650" y="356" font-size="10" fill="#dc2626" font-family="monospace">  ! FENCE  0 / 2</text>
+    <text x="650" y="372" font-size="10" fill="#dc2626" font-family="monospace">  ! JALR   0 / 5</text>
+  </g>
+
+  <!-- DB -> goals + report -->
+  <path d="M 545 220 L 615 140" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+  <path d="M 545 260 L 615 320" stroke="#666" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+  <!-- goals -> report -->
+  <path d="M 770 220 L 770 240" stroke="#b45309" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- defs -->
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <text x="480" y="440" text-anchor="middle" font-size="11" fill="#888" font-style="italic">DB merges bin-wise across runs. Grade = 60% goals met + 20% hazard balance + 20% opcode breadth.</text>
+  <text x="480" y="458" text-anchor="middle" font-size="11" fill="#888" font-style="italic">Exit code 3 when coverage goals unmet — hook directly into CI.</text>
+</svg>

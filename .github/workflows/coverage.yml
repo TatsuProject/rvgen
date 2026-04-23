@@ -1,0 +1,86 @@
+# Example coverage workflow — copy / adapt for your own CI.
+#
+# Demonstrates the end-to-end flow: generate tests, compile + sim with
+# spike, collect coverage, compare to goals, post a PR summary, and
+# upload the HTML dashboard as an artefact.
+#
+# Prereqs in your CI runner:
+#   - riscv64-unknown-elf-gcc (typically pre-built in a Docker image).
+#   - spike (RISC-V ISA simulator) on $PATH.
+# The chipforge CI uses a container image with both pre-installed.
+
+name: coverage
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  coverage:
+    name: rv32imc baseline-goals regression
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install chipforge-inst-gen
+        run: pip install -e ".[test]"
+
+      - name: Install toolchain (placeholder — replace with your toolchain setup)
+        run: |
+          echo "Install riscv64-unknown-elf-gcc + spike here."
+          # sudo apt-get install ...
+
+      - name: Lint goals files
+        run: |
+          for f in chipforge_inst_gen/coverage/goals/*.yaml; do
+            python -m chipforge_inst_gen.coverage.tools lint-goals "$f" --strict error
+          done
+
+      - name: Generate + simulate + collect coverage
+        id: regress
+        run: |
+          python -m chipforge_inst_gen \
+              --target rv32imc --test riscv_rand_instr_test \
+              --auto_regress --cov_directed --max_seeds 16 \
+              --output out/regress
+          # Exit code 3 here means "simulation succeeded but coverage goals unmet".
+          # Treat that as a soft failure — still upload artefacts so the PR author
+          # can see the delta.
+
+      - name: Regression against the golden baseline
+        run: |
+          python -m chipforge_inst_gen.coverage.tools baseline-check \
+              out/regress/coverage.json \
+              --baseline tests/golden/coverage_golden_rv32imc.json
+        # Requires a checked-in tests/golden/coverage_golden_rv32imc.json.
+        # Delete this step if you don't use a golden baseline.
+        continue-on-error: false
+
+      - name: Export HTML dashboard
+        if: always()
+        run: |
+          python -m chipforge_inst_gen.coverage.tools export \
+              out/regress/coverage.json \
+              --html out/regress/coverage.html \
+              --goals chipforge_inst_gen/coverage/goals/baseline.yaml
+
+      - name: Upload coverage artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ github.sha }}
+          path: |
+            out/regress/coverage.json
+            out/regress/coverage.html
+            out/regress/coverage_report.txt
+            out/regress/convergence.json
+            out/regress/cov_timeline.json
+          retention-days: 30

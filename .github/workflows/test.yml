@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Unit tests
+        run: python -m pytest tests/ -q
+
+      - name: Doctests (coverage public API example)
+        run: python -m pytest --doctest-modules chipforge_inst_gen/coverage/__init__.py -q
+
+      - name: Lint every shipped coverage-goals YAML
+        run: |
+          for f in chipforge_inst_gen/coverage/goals/*.yaml; do
+            python -m chipforge_inst_gen.coverage.tools lint-goals "$f" --strict error
+          done

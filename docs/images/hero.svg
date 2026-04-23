@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 180" font-family="-apple-system, system-ui, Helvetica, Arial, sans-serif">
+  <!-- gradient background -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="180" rx="12" fill="url(#bg)"/>
+
+  <!-- logo mark — stylised 'IG' monogram in a chip outline -->
+  <g transform="translate(40, 36)">
+    <rect x="0" y="0" width="100" height="100" rx="14" fill="none" stroke="url(#accent)" stroke-width="3"/>
+    <!-- chip pins -->
+    <g fill="url(#accent)">
+      <rect x="-6" y="18" width="6" height="4"/>
+      <rect x="-6" y="38" width="6" height="4"/>
+      <rect x="-6" y="58" width="6" height="4"/>
+      <rect x="-6" y="78" width="6" height="4"/>
+      <rect x="100" y="18" width="6" height="4"/>
+      <rect x="100" y="38" width="6" height="4"/>
+      <rect x="100" y="58" width="6" height="4"/>
+      <rect x="100" y="78" width="6" height="4"/>
+      <rect x="18" y="-6" width="4" height="6"/>
+      <rect x="38" y="-6" width="4" height="6"/>
+      <rect x="58" y="-6" width="4" height="6"/>
+      <rect x="78" y="-6" width="4" height="6"/>
+      <rect x="18" y="100" width="4" height="6"/>
+      <rect x="38" y="100" width="4" height="6"/>
+      <rect x="58" y="100" width="4" height="6"/>
+      <rect x="78" y="100" width="4" height="6"/>
+    </g>
+    <text x="50" y="66" text-anchor="middle" font-size="48" font-weight="700" fill="url(#accent)" font-family="Menlo, Monaco, monospace">IG</text>
+  </g>
+
+  <!-- title -->
+  <text x="180" y="68" font-size="36" font-weight="800" fill="#f1f5f9">chipforge-inst-gen</text>
+  <text x="180" y="100" font-size="16" fill="#cbd5e1">Pure-Python RISC-V instruction generator with built-in</text>
+  <text x="180" y="122" font-size="16" fill="#cbd5e1">functional coverage, auto-regression, and CI-ready dashboards.</text>
+
+  <!-- tag chips -->
+  <g font-size="11" font-weight="600">
+    <rect x="180" y="140" width="110" height="24" rx="12" fill="#1e3a8a" stroke="#3b82f6"/>
+    <text x="235" y="156" text-anchor="middle" fill="#dbeafe">486 opcodes</text>
+
+    <rect x="300" y="140" width="100" height="24" rx="12" fill="#065f46" stroke="#10b981"/>
+    <text x="350" y="156" text-anchor="middle" fill="#d1fae5">27 targets</text>
+
+    <rect x="410" y="140" width="130" height="24" rx="12" fill="#78350f" stroke="#f59e0b"/>
+    <text x="475" y="156" text-anchor="middle" fill="#fef3c7">32 covergroups</text>
+
+    <rect x="550" y="140" width="90" height="24" rx="12" fill="#581c87" stroke="#a78bfa"/>
+    <text x="595" y="156" text-anchor="middle" fill="#ede9fe">RVV + Zve</text>
+
+    <rect x="650" y="140" width="150" height="24" rx="12" fill="#831843" stroke="#ec4899"/>
+    <text x="725" y="156" text-anchor="middle" fill="#fce7f3">auto-regression</text>
+  </g>
+</svg>

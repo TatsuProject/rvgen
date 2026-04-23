@@ -1,194 +1,352 @@
-# chipforge-inst-gen
+<p align="center">
+  <img src="docs/images/hero.svg" alt="chipforge-inst-gen" width="780">
+</p>
 
-A pure-Python random instruction generator for RISC-V, structurally modelled
-on Google's [riscv-dv](https://github.com/chipsalliance/riscv-dv) but without
-any of the SystemVerilog / UVM / PyVSC dependencies. Generates assembly-level
-tests for RV32/RV64 cores and validates them against the Spike ISA simulator.
+<p align="center">
+  <strong>Pure-Python RISC-V instruction generator with built-in functional coverage, auto-regression, and CI-ready dashboards.</strong>
+</p>
 
-## Table of Contents
+<p align="center">
+  <a href="#install"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0"></a>
+  <a href="#validation"><img src="https://img.shields.io/badge/tests-332%20passing-brightgreen" alt="332 tests"></a>
+  <a href="#validation"><img src="https://img.shields.io/badge/spike-51%2F51%20%2B%2018%2F18%20%2B%205%2F5-brightgreen" alt="Spike regression"></a>
+  <a href="docs/verification-guide.md"><img src="https://img.shields.io/badge/docs-verification%20guide-blueviolet" alt="Verification guide"></a>
+</p>
 
+<p align="center">
+  <a href="docs/verification-guide.md"><b>Verification Guide</b></a> •
+  <a href="docs/coverage.md"><b>Coverage Reference</b></a> •
+  <a href="docs/architecture.md"><b>Architecture</b></a> •
+  <a href="docs/testlist.md"><b>Testlist Reference</b></a> •
+  <a href="docs/examples/coverage-report.html"><b>Sample HTML Report</b></a>
+</p>
+
+---
+
+chipforge-inst-gen replaces Google's [riscv-dv](https://github.com/chipsalliance/riscv-dv) at the generator layer with a small, single-dependency (PyYAML) Python package. Every riscv-dv testlist YAML runs unchanged. On top of that parity, the project adds a first-class **functional-coverage subsystem** — covergroups, CGF-style goal files, coverage-directed auto-regression, per-test attribution, HTML dashboards, CI integration — that in the SV world you'd normally assemble from a UVM flow, riscv-isac, and a simulator licence.
+
+**Who this is for:** verification engineers bringing up RISC-V cores who want the power of random instruction generation without SystemVerilog, UVM, or a simulator licence between them and their `.S` files.
+
+---
+
+## Table of contents
+
+- [See it in action](#see-it-in-action)
 - [Highlights](#highlights)
+- [Why chipforge-inst-gen?](#why-chipforge-inst-gen)
 - [Install](#install)
-- [Quick start](#quick-start)
-- [How it works](#how-it-works)
-- [Supported ISA surface](#supported-isa-surface)
-- [Targets](#targets)
+- [Quick start — 30 seconds](#quick-start--30-seconds)
+- [Quick start — with coverage (2 minutes)](#quick-start--with-coverage-2-minutes)
+- [The pipeline](#the-pipeline)
+- [Functional coverage at a glance](#functional-coverage-at-a-glance)
+- [Auto-regression](#auto-regression)
+- [Supported ISA and targets](#supported-isa-and-targets)
+- [Writing your own test](#writing-your-own-test)
+- [Writing your own directed stream](#writing-your-own-directed-stream)
 - [Validation](#validation)
-- [Cross-compare against a custom core (chipforge-mcu)](#cross-compare-against-a-custom-core-chipforge-mcu)
-- [Testlist format](#testlist-format)
-- [Directed instruction streams](#directed-instruction-streams)
-- [Disable / feature-gate flags](#disable--feature-gate-flags)
-- [Functional coverage](#functional-coverage)
-- [Running the test suite](#running-the-test-suite)
 - [Project layout](#project-layout)
-- [Contributing / continuing development](#contributing--continuing-development)
-- [Non-goals](#non-goals)
+- [Community](#community)
 - [License](#license)
+- [Citation](#citation)
+
+---
+
+## See it in action
+
+**Generate, simulate, and collect coverage in one command:**
+
+```bash
+python -m chipforge_inst_gen \
+    --target rv32imc --test riscv_rand_instr_test \
+    --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
+    --output out/ --start_seed 100 -i 1
+```
+
+**Output (truncated):**
+
+```text
+Generated out/asm_test/riscv_rand_instr_test_0.S (seed=100, 3020 lines)
+Compiling out/asm_test/riscv_rand_instr_test_0.S
+Running spike: out/asm_test/riscv_rand_instr_test_0.o
+2 tests passed ISS sim
+Coverage DB updated: out/coverage.json
+Coverage goals layered from: .../baseline.yaml
+Coverage report: out/coverage_report.txt
+```
+
+**`out/coverage_report.txt`:**
+
+```text
+covergroups: 35    unique bins hit: 2970    total samples: 299604    grade: 87/100
+
+[opcode_cg]  unique_bins=82  total_hits=10284  43/45 goals met
+    ADD                             248 / 5     ✓
+    SUB                             120 / 5     ✓
+    ...
+  MISSING (2):
+    ! FENCE                            0 / 2
+    ! JALR                             0 / 5
+```
+
+**The HTML dashboard** (`python -m chipforge_inst_gen.coverage.tools export out/coverage.json --html cov.html`):
+
+See a real rendered example at **[`docs/examples/coverage-report.html`](docs/examples/coverage-report.html)** (self-contained, no JS, ~5k lines).
+
+---
 
 ## Highlights
 
-- **233 unit tests** pass in under a second.
-- **51/51** end-to-end ISS runs pass on Spike for rv32imc, rv32imafdc,
-  rv32imcb, rv64imc, rv64imcb targets (17 tests × 3 seeds).
-- **21/21** trace-level matches against the
-  [chipforge-mcu](https://chipforge.io) RV32IMC+Zkn silicon-target RTL (7
-  tests × 3 seeds, instruction-by-instruction compare vs Spike).
-- **301 instructions** registered across RV32I/M/A/C/F/D, RV64I/M/A/C/F/D,
-  RV32FC/DC, Zba/Zbb/Zbc/Zbs + draft B, and ratified crypto
-  (Zbkb/Zbkc/Zbkx/Zkne/Zknd/Zknh/Zksh/Zksed).
-- **22 targets** out of the box, from bare `rv32ui` (no CSR) to full
-  `rv64gc` / `rv64gcv` / crypto-capable variants.
-- Standards-only ISA name parsing — non-standard strings (e.g. `rv32imck`)
-  are rejected so the user can't accidentally ask for what doesn't exist.
-- No constraint solver. Random selection is rejection-sampled per
-  instruction; generating a 10k-instruction test takes seconds, not minutes.
+- **486 instructions** across RV32I/M/A/C/F/FC/D/DC, RV64 counterparts, Zba/Zbb/Zbc/Zbs, draft RV32B, ratified crypto (Zbkb/Zbkc/Zbkx/Zknd/Zkne/Zknh/Zksh/Zksed), and **RVV 1.0 (184 vector opcodes)**.
+- **27 targets** — rv32i through rv64gcv, plus bare `rv32ui`, 4 crypto variants, and **5 Zve\* embedded-vector profiles including Google's Coral NPU** (`rv32imf_zve32x_zbb`).
+- **16 directed-stream classes** — corner-value init, JAL chain, JALR pairs, loops, LR/SC, AMO, plus an SV-faithful scalar load/store family with locality / hazard / multi-page variants.
+- **32 functional-coverage groups** — opcode, format, category, group, operand registers, immediates, hazards (RAW/WAR/WAW), CSR access, FP rounding, vtype, memory alignment, category and opcode transitions, register crosses, plus runtime bins (branch direction, privilege mode, CSR values, bit-activity).
+- **CGF-style YAML goals** with layered overlays (baseline + per-target + per-test). 12 goal files shipped.
+- **Coverage-directed auto-regression** — `--cov_directed` perturbs `gen_opts` per seed based on the currently-missing bin set. Baseline rv32imc goals close in 1 seed vs 8+ for blind seed-sweep.
+- **CI-ready** — GitHub Actions integration (`GITHUB_OUTPUT` + step summary), composite 0-100 coverage grade, standardized exit codes, golden-baseline regression gate, goals linter.
+- **Coverage analysis CLI** — `merge`, `diff`, `attribute`, `per-test`, `export` (CSV + HTML), `report`, `suggest-seeds`, `baseline-check`, `lint-goals`.
+- **Parallel regression runner** (`scripts/regression.py`) — target × test × seed matrix execution with merged coverage + HTML dashboard.
+- **One hard dependency: PyYAML.** No constraint solver. No UVM. No simulator licence.
+- **Pure Python generation is fast** — 10k-instruction test in seconds; a typical matrix regression runs at ~8 seeds/sec on an 8-core laptop.
+
+---
+
+## Why chipforge-inst-gen?
+
+| | chipforge-inst-gen | riscv-dv (SV/UVM) | force-riscv | riscv-isac |
+|---|---|---|---|---|
+| Language | **Python 3.11+** | SystemVerilog + UVM + Python glue | C++ + Python | Python |
+| Simulator licence | — (open-source spike) | VCS / Questa typically required for SV | — | — |
+| Install complexity | `pip install -e .` | Full EDA install + UVM libs | Build from source, C++ | `pip install riscv_isac` |
+| Time to 10k-instr test | seconds | minutes (pygen: ~12 min) | seconds | n/a (post-hoc tool) |
+| Instruction generation | ✓ | ✓ | ✓ | — |
+| RVV 1.0 | ✓ | ✓ (recent) | ✓ | — |
+| Zve\* embedded profiles | ✓ (5 targets) | — | — | — |
+| Functional coverage | **built-in** (32 groups, CGF goals) | separate SV covergroup file + sim | coverage engine (C++) | **primary** (CGF-native) |
+| Coverage-directed regression | ✓ (`--cov_directed`) | — (blind only) | — | — |
+| Goals YAML layering + linter | ✓ | — | — | partial |
+| HTML coverage dashboard | ✓ (built-in) | UCIS + vendor tool | — | partial |
+| CI integration (GITHUB_OUTPUT + grade) | ✓ | — | — | — |
+| New-test creation | edit YAML | edit YAML + possibly SV class | edit XML | n/a |
+
+**The summary:** if you already have a commercial SV flow, riscv-dv is still the richest framework. If you don't — or if you're running a CI workflow where "pip install + run" matters — chipforge-inst-gen gives you random instruction generation, the same testlist format, **and a complete coverage workflow** in one open-source package.
+
+---
 
 ## Install
 
-Python 3.11+ is required. The only runtime dependency is PyYAML.
-
 ```bash
-git clone <this repo> chipforge-inst-gen
+git clone https://github.com/<org>/chipforge-inst-gen.git
 cd chipforge-inst-gen
 pip install -e ".[test]"
 ```
 
-The binary tool-chain you need at runtime:
+**Runtime dependencies** (external tools):
 
-| Tool | Used for | Where it's looked up |
-|------|----------|----------------------|
-| `riscv64-unknown-elf-gcc` (or `riscv32-`) | Assemble + link `.S` → ELF | `$RISCV_GCC` or `$RISCV_TOOLCHAIN/bin` or `PATH` |
-| `riscv64-unknown-elf-objcopy` | ELF → raw binary / verilog hex | Resolved next to the GCC binary |
-| `spike` (RISC-V ISA simulator) | Execute the ELF, emit golden trace | `$SPIKE_PATH` or `PATH` |
+| Tool | Used for | Env var |
+|------|----------|---------|
+| `riscv64-unknown-elf-gcc` | Assemble `.S` → ELF | `$RISCV_GCC` |
+| `riscv64-unknown-elf-objcopy` | ELF → raw binary | resolved next to GCC |
+| `spike` (ISA simulator) | Execute ELF + emit trace | `$SPIKE_PATH` |
+| `spike-vector` | For RVV / Zve* targets | `$SPIKE_PATH` |
 
-Set `RISCV_GCC`, `RISCV_OBJCOPY`, and `SPIKE_PATH` if they're not already on
-your `PATH`.
+Toolchain setup guides: [SiFive freedom-tools](https://github.com/sifive/freedom-tools) / [riscv-gnu-toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) / [spike](https://github.com/riscv-software-src/riscv-isa-sim).
 
-## Quick start
+---
 
-Generate one arithmetic-basic test for rv32imc, assemble it, run it on Spike:
+## Quick start — 30 seconds
+
+Just generate an assembly file (skip GCC and spike):
 
 ```bash
 python -m chipforge_inst_gen \
-    --target rv32imc \
-    --test riscv_arithmetic_basic_test \
+    --target rv32imc --test riscv_arithmetic_basic_test \
     --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
-    --steps gen,gcc_compile,iss_sim --iss spike \
-    --output out --start_seed 100 -i 1
+    --steps gen --output out/ --start_seed 100 -i 1
 ```
 
-You'll see:
+Output: `out/asm_test/riscv_arithmetic_basic_test_0.S`. Inspect it, assemble it with your own toolchain, run it where you want.
 
-```
-Generated out/asm_test/riscv_arithmetic_basic_test_0.S (seed=100, 5400 lines)
-Compiling out/asm_test/riscv_arithmetic_basic_test_0.S
-Running spike: out/asm_test/riscv_arithmetic_basic_test_0.o
-2 tests passed ISS sim
-```
+---
 
-To only generate `.S` files (skip assemble + simulate):
+## Quick start — with coverage (2 minutes)
+
+End-to-end: generate → assemble → simulate → collect static + runtime coverage:
 
 ```bash
-python -m chipforge_inst_gen --target rv32imc --test riscv_arithmetic_basic_test \
-    --testlist <path> --steps gen --output out -i 1
+export RISCV_GCC=/path/to/riscv64-unknown-elf-gcc
+export SPIKE_PATH=/path/to/spike
+
+python -m chipforge_inst_gen \
+    --target rv32imc --test riscv_rand_instr_test \
+    --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
+    --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
+    --output out/ --start_seed 100 -i 1
 ```
 
-## How it works
+Open the report:
 
-```
-testlist YAML ──▶ load_testlist ──▶ [TestEntry, ...]
-                                         │
-                       gen_opts plusargs ▼
-                                    ┌─────────────────┐
-      target/<name>.py ───▶ TargetCfg ──▶ Config ◀───── --gen_opts CLI
-                                    └─────────────────┘
-                                             │
-           RISCV_INSTR_REGISTRY ──▶ create_instr_list(cfg) ──▶ filtered pool
-                                             │
-                             random.Random(seed)
-                                             │
-                                             ▼
-              AsmProgramGen.gen_program():
-                 • _start / h<N>_start
-                 • setup_misa + boot CSR sequence (unless bare)
-                 • init section (GPR init, stack, signature)
-                 • main RandInstrStream (+ directed streams interleaved)
-                 • test_done → ecall
-                 • trap handler  (unless bare)
-                 • .data / region_N / user_stack / kernel_stack
-                                             │
-                                             ▼
-                                   out/asm_test/*.S
-                                             │
-                               gcc_compile → *.o / *.bin
-                                             │
-                                  spike      → spike_sim/*.log
+```bash
+# text (terminal-friendly)
+less out/coverage_report.txt
+
+# or self-contained HTML
+python -m chipforge_inst_gen.coverage.tools export out/coverage.json \
+    --html out/coverage.html
+xdg-open out/coverage.html
 ```
 
-Every phase mirrors the SV reference (`src/riscv_asm_program_gen.sv`) exactly
-where behaviour matters — same section order, same 18-char label column,
-same MTVEC/MEPC/MSTATUS setup, same GPR-init value distribution. Where the
-SV reference relies on constrained random (PyVSC) we replace it with
-rejection sampling: faster, deterministic-per-seed, no solver.
+See **[`docs/verification-guide.md`](docs/verification-guide.md)** for the complete tutorial.
 
-## Supported ISA surface
+---
 
-| Family | Status | Notes |
-|--------|--------|-------|
-| RV32I / RV64I | complete | All 54 base integer ops. |
-| M | complete | |
-| C | complete | Full RVC with NZIMM/NZUIMM, 3-bit reg constraints, no-HINT guards. |
-| A (AMO) | complete | aq/rl, LR/SC, AMO streams. |
-| F / D | complete | FP operand layout, rounding mode, compressed FP (FC/DC). |
-| Zba / Zbb / Zbc / Zbs | complete | Ratified bitmanip. |
-| B (draft v0.93) | registered | GORC/CMIX/CMOV/PACK*/SLO/GREV/FSL/CRC32*/SHFL etc. Pool-filtered by target. |
-| Zbkb / Zbkc / Zbkx | complete | Ratified crypto bitmanip; adds `brev8`/`zip`/`unzip` (RV32 only). |
-| Zkne / Zknd | complete | AES32* on RV32; AES64*/AES64KS1I/AES64KS2/AES64IM on RV64. |
-| Zknh | complete | SHA-256 on both widths; SHA-512 single-instr on RV64, H/L split pair on RV32. |
-| Zksh / Zksed | complete | SM3, SM4. |
-| RVV 1.0 | stub | Base instructions registered but full Phase-2 work. |
-| CSR ops | complete | Writes restricted to `{MSCRATCH}` by default (matches SV). |
+## The pipeline
 
-Directed streams implemented: `riscv_int_numeric_corner_stream`,
-`riscv_jal_instr`, `riscv_loop_instr`, `riscv_amo_instr_stream`,
-`riscv_lr_sc_instr_stream`, `riscv_load_store_rand_instr_stream` (+ aliases
-for hazard / multi-page / mem-region-stress / shared-mem / rand-addr).
+![pipeline](docs/images/pipeline.svg)
 
-## Targets
+Every stage is optional via `--steps`. Coverage accumulates across runs when you re-use the same `coverage.json` path (`--cov_db`).
 
-| Target | XLEN | ISA groups | Privilege | Notes |
-|--------|------|-----------|-----------|-------|
-| `rv32i` | 32 | I | M | Vanilla. |
-| `rv32im` | 32 | I, M | M | SV source marks MUL* unsupported. |
-| `rv32imc` | 32 | I, M, C | M | Common baseline. |
-| `rv32imac` | 32 | I, M, A, C | M | |
-| `rv32imafdc` | 32 | I, M, A, F, FC, D, DC | M | Full G (RV32). |
-| `rv32imcb` | 32 | I, M, C, Zba/Zbb/Zbc/Zbs | M | Ratified bitmanip. |
-| `rv32imc_sv32` | 32 | I, M, C | M+U, SV32 | Paging target. |
-| `rv32imc_zkn` | 32 | I, M, C, Zbkb/Zbkc/Zbkx/Zkne/Zknd/Zknh | M | Matches chipforge-mcu ISA. |
-| `rv32imc_zkn_zks` | 32 | + Zksh + Zksed | M | Full ratified K-family. |
-| `rv32ui` | 32 | I | — | Bare, no CSR (see §Validation). |
-| `rv64imc` / `rv64imcb` | 64 | I, M, C (+ratified Zb*) | M | RV64 baselines. |
-| `rv64imc_zkn` | 64 | RV64 IMC + RV64 crypto | M | AES64 / SHA-512 single-instr. |
-| `rv64imafdc` | 64 | Full G (RV64) | M | |
-| `rv64gc` | 64 | G + C | M+S+U, SV39 | Privileged baseline. |
-| `rv64gcv` | 64 | G + V | M | VLEN=512, ELEN=32. |
-| `ml` / `multi_harts` | 64 | G + C | M | Specialized variants. |
+---
 
-Non-standard names (e.g. `rv32imck`) are **not accepted** — the CLI's
-`--target` argparse choices list fails immediately if the target isn't
-registered. Add it explicitly in `chipforge_inst_gen/targets/__init__.py`
-to use it.
+## Functional coverage at a glance
+
+![coverage-model](docs/images/coverage-model.svg)
+
+32 covergroups sampled from two sources:
+
+- **Static** (at generation): opcode / format / category / group / rs1 / rs2 / rd / imm_sign / imm_range / hazard / csr / csr_access / fp_rm / vreg / vtype / mem_align / load_store_width / load_store_offset / category_transition / opcode_transition / rs1==rs2 / rs1==rd / directed_stream + 2 crosses.
+- **Runtime** (from spike `-l --log-commits`): branch_direction + branch×mnemonic / exception / privilege_mode / pc_reach / csr_value / rs_val_corner / bit_activity + `opcode_cg.*__dyn`.
+
+**Goals** are CGF-style YAML. Layered overlays, auto-resolved from `goals/<target>.yaml`, linted for typos.
+
+**Complete reference:** [`docs/coverage.md`](docs/coverage.md).
+
+---
+
+## Auto-regression
+
+`--auto_regress` loops seeds until goals are met or a plateau is detected:
+
+![auto-regress](docs/images/auto-regress.svg)
+
+```bash
+python -m chipforge_inst_gen \
+    --target rv32imc --test riscv_rand_instr_test \
+    --auto_regress --cov_directed --max_seeds 16 \
+    --output out/regress/
+```
+
+Coverage-directed (`--cov_directed`) mode inspects the currently-missing bin set and perturbs `gen_opts` per seed — dropping `+no_fence=1` if FENCE is missing, injecting `riscv_load_store_rand_instr_stream` if LB/LH aren't hit, etc. Result: baseline rv32imc goals close in **1 seed** vs **8+** for blind sweep.
+
+Bookkeeping: `convergence.json` (per-bin first-hit seed), `cov_timeline.json` (time-series), ASCII sparkline in the log, rotating per-seed `.S` snapshots in `asm_test/seed_archive/`.
+
+---
+
+## Supported ISA and targets
+
+**Instructions (486 total):**
+
+| Group | Count | Notes |
+|---|---:|---|
+| RV32I / RV64I | 62 | base + W-width |
+| RV32M / RV64M | 13 | mul / div |
+| RV32A / RV64A | 22 | LR/SC + AMO |
+| RV32F / RV64F / RV32D / RV64D | 60 | + FCVT + FMV |
+| RV32FC / RV32DC | 8 | compressed FP load/store |
+| RV32C / RV64C | 35 | base compressed |
+| Zba / Zbb / Zbc / Zbs | 30 | ratified bit-manip |
+| Zbkb / Zbkc / Zbkx | 6 | crypto bit-manip |
+| Zknd / Zkne / Zknh | 19 | AES + SHA |
+| Zksh / Zksed | 4 | SM3 / SM4 |
+| RV32B (draft) | 40 | for historical compatibility |
+| **RVV 1.0** | **184** | integer + FP + widening/narrowing + mask + reductions + loads/stores + AMO |
+
+**Targets (27):**
+
+```
+rv32i        rv32im        rv32ic        rv32ia       rv32iac      rv32imac
+rv32imc      rv32if        rv32imafdc    rv32imcb     rv32imc_sv32 rv32ui
+rv32imc_zkn  rv32imc_zkn_zks  rv32imc_zve32x  rv32imfc_zve32f
+rv64imc      rv64imcb      rv64imc_zkn   rv64imafdc   rv64gc       rv64gcv
+rv64imc_zve64x  rv64imafdc_zve64d
+coralnpu     ml            multi_harts
+```
+
+Targets are declarative — adding a new one is a single `TargetCfg(...)` entry plus a `(isa, mabi)` pair in `cli.py`.
+
+---
+
+## Writing your own test
+
+Entirely YAML. No Python needed.
+
+```yaml
+# my_tests.yaml
+- test: my_hazard_heavy_test
+  description: "Force hazards via tight reg pool + directed hazard streams."
+  iterations: 4
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=8000
+    +num_of_sub_program=3
+    +directed_instr_0=riscv_hazard_instr_stream,6
+    +directed_instr_1=riscv_load_store_hazard_instr_stream,6
+    +no_csr_instr=0
+  rtl_test: core_base_test
+```
+
+Run:
+
+```bash
+python -m chipforge_inst_gen --target rv32imc --test my_hazard_heavy_test \
+    --testlist my_tests.yaml --steps gen,gcc_compile,iss_sim,cov --iss spike \
+    --output out/ -i 4 --start_seed 100
+```
+
+**Full plusarg reference** and the directed-stream catalogue: [`docs/testlist.md`](docs/testlist.md).
+
+---
+
+## Writing your own directed stream
+
+If gen_opts isn't enough, a new stream is ~20 lines of Python. See [`docs/examples/custom-stream.py`](docs/examples/custom-stream.py) for a complete annotated template.
+
+```python
+@dataclass
+class MyBurstStream(DirectedInstrStream):
+    def build(self) -> None:
+        for _ in range(10):
+            instr = get_instr(RiscvInstrName.ADD)
+            instr.rs1 = instr.rd = RiscvReg.T0  # in-place accumulator
+            instr.rs2 = self.rng.choice([r for r in RiscvReg
+                                         if r not in self.cfg.reserved_regs])
+            instr.post_randomize()
+            self.instr_list.append(instr)
+
+register_stream("my_burst_stream", MyBurstStream)
+```
+
+Reference it from any testlist:
+
+```yaml
+gen_opts: >
+  +directed_instr_0=my_burst_stream,5
+```
+
+---
 
 ## Validation
 
-### Unit tests — 233 pass
+All green at the tip of main:
 
-```bash
-python -m pytest tests/ -q
-```
+- **332** unit tests (`python -m pytest tests/ -q`).
+- **51/51** scalar end-to-end on spike (17 tests × 3 seeds across rv32imc / rv32imafdc / rv32imcb / rv64imc / rv64imcb).
+- **18/18** vector end-to-end on spike-vector (6 tests × 3 seeds on rv64gcv).
+- **5/5** Zve\*-profile end-to-end (coralnpu / rv32imc_zve32x / rv32imfc_zve32f / rv64imc_zve64x / rv64imafdc_zve64d).
+- **21/21** instruction-by-instruction trace matches against the [chipforge-mcu](https://chipforge.io) RV32IMC+Zkn RTL (7 tests × 3 seeds, via `scripts/mcu_validate.sh`).
+- **1** integration-regression test pinning the fixed-seed rv32imc run against a known coverage floor.
 
-### End-to-end on Spike — 51 / 51
+**Reproduce the scalar sweep:**
 
 ```bash
 for t in rv32imc:riscv_arithmetic_basic_test rv32imc:riscv_rand_instr_test \
@@ -203,348 +361,99 @@ for t in rv32imc:riscv_arithmetic_basic_test rv32imc:riscv_rand_instr_test \
          rv64imcb:riscv_b_ext_test; do
   target=${t%%:*}; test=${t##*:}
   for s in 100 200 300; do
-    python -m chipforge_inst_gen \
-      --target $target --test $test \
-      --steps gen,gcc_compile,iss_sim --iss spike \
-      --output /tmp/reg_${target}_${test}_${s} --start_seed $s -i 1 2>&1 \
+    python -m chipforge_inst_gen --target $target --test $test \
+        --steps gen,gcc_compile,iss_sim --iss spike \
+        --output /tmp/reg_${target}_${test}_${s} --start_seed $s -i 1 2>&1 \
       | grep -qE "tests passed ISS sim" \
       && echo "PASS $target/$test/$s" || echo "FAIL $target/$test/$s"
   done
 done
 ```
 
-Expected: 51 `PASS`, 0 `FAIL`.
+Expected: 51 `PASS`.
 
-## Cross-compare against a custom core (chipforge-mcu)
-
-For an end-to-end proof-of-correctness, tests go through *both* Spike (the
-golden reference) and the target-core RTL simulator, and the two traces are
-compared instruction-by-instruction. This section shows the flow against
-[`chipforge-mcu`](https://chipforge.io), an RV32IMC + Zkn open-source
-microcontroller.
-
-Requirements:
-
-- A pre-built `Vtb_top` Verilator binary (built from the MCU repo's
-  `verif/gen_sim.py`).
-- riscv-dv's `scripts/spike_log_to_trace_csv.py`, `core_log_to_trace_csv.py`,
-  and `instr_trace_compare.py` (the MCU repo ships compatible copies).
-
-Flow:
-
-1. **Generate `.S`** for target `rv32imc_zkn` (matches the MCU's ISA
-   advertised by its README — no Zbb, ratified K sub-extensions only).
-2. **Assemble** with the MCU's `verif/scripts/link.ld`
-   (`.text @0x80000000`, `.data @0x80008000`) and the matching
-   `-march=rv32imc_zbkb_zbkc_zbkx_zknd_zkne_zknh_zicsr_zifencei`.
-3. **`objcopy -O verilog`** the ELF and split the Verilog hex into two
-   `.mem` files: 32 KB `imem.mem` (text) and 16 KB `dmem.mem` (data).
-4. **Spike** with `--log-commits --misaligned`; strip its bootrom prefix and
-   convert the log to CSV via `spike_log_to_trace_csv.py`.
-5. **RTL sim** — copy the `.mem` files into the MCU's verif/ dir, run
-   `Vtb_top`, convert `trace_core_00000001.log` to CSV via
-   `core_log_to_trace_csv.py`.
-6. **Diff** the two CSVs with `instr_trace_compare.py`. `[PASSED]: N matched`
-   means every committed instruction matched between spike and the RTL.
-
-A reference driver script for all six steps lives in
-`scripts/mcu_validate.sh`. Invoke it with the relevant env vars pointing at
-your toolchain, the MCU checkout, and a riscv-dv checkout (for testlist
-imports):
-
-```bash
-WORK_DIR=/var/tmp/mcu/work \
-MCU_VERIF=/path/to/chipforge-mcu/verif \
-RISCV_DV=/path/to/riscv-dv \
-PYTHON=/path/to/python \
-RISCV_GCC=/path/to/riscv64-unknown-elf-gcc \
-SPIKE=/path/to/spike \
-scripts/mcu_validate.sh riscv_arithmetic_basic_test 100
-```
-
-Outputs one line: `<test> seed=<seed>: [PASSED]: N matched` or
-`[FAILED]: …`. Run it in a loop over `{arithmetic_basic, rand_instr, loop,
-jump_stress, amo, rand_jump, no_fence} × {100, 200, 300}` to reproduce the
-full 21-run sweep below.
-
-Latest results:
-
-```
-riscv_arithmetic_basic_test seed=100: [PASSED]: 4113 matched
-riscv_arithmetic_basic_test seed=200: [PASSED]: 4220 matched
-riscv_arithmetic_basic_test seed=300: [PASSED]: 4342 matched
-riscv_rand_instr_test       seed=100: [PASSED]: 1066 matched
-riscv_rand_instr_test       seed=200: [PASSED]: 1048 matched
-riscv_rand_instr_test       seed=300: [PASSED]: 1306 matched
-riscv_loop_test             seed=100: [PASSED]: 1822 matched
-riscv_loop_test             seed=200: [PASSED]: 1411 matched
-riscv_loop_test             seed=300: [PASSED]: 1522 matched
-riscv_jump_stress_test      seed=100: [PASSED]: 2456 matched
-riscv_jump_stress_test      seed=200: [PASSED]: 2358 matched
-riscv_jump_stress_test      seed=300: [PASSED]: 2682 matched
-riscv_amo_test              seed=100: [PASSED]: 2174 matched
-riscv_amo_test              seed=200: [PASSED]: 2440 matched
-riscv_amo_test              seed=300: [PASSED]: 2346 matched
-riscv_rand_jump_test        seed=100: [PASSED]: 2308 matched
-riscv_rand_jump_test        seed=200: [PASSED]: 2332 matched
-riscv_rand_jump_test        seed=300: [PASSED]: 2418 matched
-riscv_no_fence_test         seed=100: [PASSED]: 121 matched
-riscv_no_fence_test         seed=200: [PASSED]: 127 matched
-riscv_no_fence_test         seed=300: [PASSED]: 136 matched
-
-→ 21 / 21 PASSED
-```
-
-These results confirm that generator output is byte-identical-equivalent on
-both Spike and real RV32IMC+Zkn silicon-model RTL — no trap divergences,
-no decode disagreements, no illegal-instruction paths.
-
-## Testlist format
-
-Reuses riscv-dv's YAML schema unchanged:
-
-```yaml
-- import: <riscv_dv_root>/yaml/base_testlist.yaml
-
-- test: my_test
-  description: >
-    Human-readable description.
-  iterations: 2
-  gen_test: riscv_instr_base_test
-  gen_opts: >
-    +instr_cnt=2000
-    +no_fence=1
-    +directed_instr_1=riscv_loop_instr,4
-    +directed_instr_2=riscv_jal_instr,8
-  rtl_test: core_base_test
-```
-
-The loader recursively expands `import:` entries and substitutes
-`<riscv_dv_root>` with whatever `--riscv_dv_root` the CLI receives (defaults
-to the sibling `riscv-dv` checkout if present).
-
-## Directed instruction streams
-
-Set via `+directed_instr_N=<stream_name>,<count>` in a test's `gen_opts`, or
-passed at the command line via `--gen_opts`. Examples — see
-`chipforge_inst_gen/streams/` for the full list.
-
-```
-+directed_instr_0=riscv_int_numeric_corner_stream,4   # corner values
-+directed_instr_1=riscv_jal_instr,8                   # shuffled JAL chain
-+directed_instr_2=riscv_loop_instr,4                  # nested loops
-+directed_instr_3=riscv_load_store_rand_instr_stream,4
-+directed_instr_4=riscv_amo_instr_stream,4
-+directed_instr_5=riscv_lr_sc_instr_stream,4
-```
-
-## Disable / feature-gate flags
-
-All riscv-dv-compatible, set as `+flag=0/1` in `gen_opts` (or via
-`--gen_opts` on the CLI):
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `+instr_cnt=<n>` | 200 | Main-program instruction count. |
-| `+no_branch_jump` | 0 | Suppress BRANCH ops from the random pool. |
-| `+no_fence` | 0 | Suppress FENCE / FENCE.I / SFENCE.VMA. |
-| `+no_csr_instr` | 0 | Suppress CSRRW/CSRRS/CSRRC(I) from the random pool. |
-| `+no_ebreak` | 1 | Include EBREAK in random pool when = 0. |
-| `+no_ecall` | 1 | Include ECALL in random pool when = 0. |
-| `+no_wfi` | 1 | Include WFI in random pool when = 0. |
-| `+no_dret` | 1 | Include DRET in random pool when = 0. |
-| `+disable_compressed_instr` | 0 | Drop all RVC ops. |
-| `+no_data_page` | 0 | Skip the random data region. |
-| `+enable_floating_point` | 0 | Enable RV32F/D / RV32FC/DC groups. |
-| `+enable_b_extension` | 0 | Enable draft-B mnemonics. |
-| `+bare_program_mode` | 0 | Skip ALL CSR-based boot setup and trap handler (for rv32ui-style no-CSR cores). |
-| `+boot_mode=m/s/u` | m | Initial privilege mode. |
-
-## Functional coverage
-
-> **Full verification engineer's walkthrough**: see
-> [`docs/verification-guide.md`](docs/verification-guide.md) for a 9-section
-> tutorial (first-run → goals → regression → CI gate → scaling).
-
-The generator ships a pure-Python functional-coverage model inspired by
-riscv-dv's SV covergroups and riscv-isac's CGF goals-file format.
-
-### What's collected
-
-24 covergroups across two sources:
-
-**Static** (sampled at generation time — no ISS required):
-
-| Covergroup | Bins |
-|---|---|
-| `opcode_cg` | every RiscvInstrName member |
-| `format_cg` | R / I / S / B / U / J / C{R,I,L,S,SS,A,IW,B,J} / V{SET,A,S2,L,S,LX,SX,LS,SS,AMO}_FORMAT |
-| `category_cg` | LOAD / STORE / ARITHMETIC / LOGICAL / COMPARE / SHIFT / BRANCH / JUMP / SYNCH / SYSTEM / CSR / AMO |
-| `group_cg` | RV32I / RV32M / … / RVV / ZVE32X / ZVE64D |
-| `rs1_cg`, `rs2_cg`, `rd_cg` | x0..x31 |
-| `imm_sign_cg` | pos / neg / zero |
-| `imm_range_cg` | zero / all_ones / walking_one / walking_zero / min_signed / max_signed / generic |
-| `hazard_cg` | raw / war / waw / none (8-instruction sliding window) |
-| `csr_cg` | PrivilegedReg name per CSR op |
-| `fp_rm_cg` | RNE / RTZ / RDN / RUP / RMM |
-| `vreg_cg`, `fpr_cg` | v0..v31 / ft0..ft11 |
-| `mem_align_cg` | byte / half_{aligned,unaligned} / word_{aligned,unaligned} / dword_{aligned,unaligned} |
-| `load_store_width_cg` | byte / half / word / dword |
-| `category_transition_cg` | prev_category __ current_category |
-| `opcode_transition_cg` | prev_mnem __ current_mnem |
-| `fmt_category_cross`, `category_group_cross` | crosses |
-
-**Runtime** (parsed from `spike -l` trace — set `--iss_trace`):
-
-| Covergroup | Bins |
-|---|---|
-| `branch_direction_cg` | taken / not_taken |
-| `exception_cg` | trap_entered (refined in Phase 2) |
-| `privilege_mode_cg` | M_entered / M_return / S_return / U_return |
-| `pc_reach_cg` | one bin per spike-resolved label |
-| `opcode_cg.*__dyn` | dynamic opcodes observed (vs static generation — gap = dead code) |
-
-### Goals (CGF-style YAML)
-
-```yaml
-opcode_cg:
-  ADD: 20
-  SUB: 10
-  FENCE: 2
-hazard_cg:
-  raw: 50
-  waw: 30
-```
-
-Keys map 1:1 to covergroup + bin names; the int is the required hit count.
-`0` marks a bin as tracked but optional (doesn't block "goals met").
-
-Ships four overlay files:
-
-- `chipforge_inst_gen/coverage/goals/baseline.yaml` — rv32imc-focused starter.
-- `.../rv64imc.yaml` — adds RV64I/M/C opcodes.
-- `.../rv64gcv.yaml` — vector additions.
-- `.../coralnpu.yaml` — Zve32x embedded (no FP vector, no S/U).
-- `.../no_branch_jump.yaml` — test overlay: zeroes branch/jump goals when the test sets `+no_branch_jump=1`.
-
-Layer via repeated `--cov_goals`:
-
-```bash
---cov_goals goals/baseline.yaml --cov_goals goals/rv64gcv.yaml
-```
-
-Last writer wins per bin — overlays can both tighten *and* relax goals.
-
-### CLI workflows
-
-```bash
-# Collect static coverage (fast — no GCC/ISS):
-python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
-    --steps gen,cov --output /tmp/run \
-    --cov_goals chipforge_inst_gen/coverage/goals/baseline.yaml
-
-# Static + runtime (branch direction, pc_reach from spike trace):
-python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
-    --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
-    --output /tmp/run --cov_goals .../baseline.yaml
-
-# Auto-regression until goals hit (smart: perturbs gen_opts per-seed):
-python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
-    --auto_regress --cov_directed --max_seeds 16 \
-    --output /tmp/regress --cov_goals .../baseline.yaml
-
-# Post-run analysis:
-python -m chipforge_inst_gen.coverage.tools diff run_a/coverage.json run_b/coverage.json
-python -m chipforge_inst_gen.coverage.tools attribute run_*/coverage.json \
-    --goals .../baseline.yaml
-python -m chipforge_inst_gen.coverage.tools merge run_*/coverage.json -o all.json
-python -m chipforge_inst_gen.coverage.tools export all.json \
-    --csv cov.csv --html cov.html --goals .../baseline.yaml
-```
-
-`--cov_directed` is a heuristic that inspects missing bins and perturbs the
-next seed's `gen_opts` — e.g. if `FENCE` is uncovered it drops `+no_fence=1`;
-if `LB` is uncovered it injects a `riscv_load_store_rand_instr_stream`
-directed-stream. Baseline rv32imc goals close in 1 seed vs 8+ for blind sweep.
-
-## Running the test suite
-
-```bash
-python -m pytest tests/ -q
-```
-
-Expected: `304 passed in <2s`.
+---
 
 ## Project layout
 
 ```
-chipforge_inst_gen/
-  cli.py                  entry point (argparse + top-level pipeline)
-  config.py               Config dataclass (every plusarg knob)
-  targets/                per-target TargetCfg (XLEN, supported_isa, ...)
-  isa/
-    enums.py              RiscvInstrName, RiscvInstrGroup, RiscvReg, ...
-    csrs.py               per-CSR field table
-    base.py               Instr base class (R/I/S/B/U/J + convert2asm)
-    factory.py            register / instantiate by name
-    filtering.py          create_instr_list + get_rand_instr
-    rv32i.py … rv64d.py   per-extension registration
-    compressed.py / floating_point.py / amo.py / bitmanip.py / crypto.py
-  streams/
-    base.py               DirectedInstrStream
-    directed.py           JAL chain, numeric corner, load/store
-    loop.py               nested countdown loop
-    amo_streams.py        LR/SC, AMO
-  privileged/
-    boot.py               setup_misa + pre_enter_privileged_mode
-    trap.py               DIRECT-mode M-mode trap handler
-  sections/
-    data_page.py          .data / region_N / stacks
-    signature.py          CORE_STATUS / TEST_RESULT / WRITE_GPR / WRITE_CSR
-  asm_program_gen.py      top-level program composer
-  stream.py               RandInstrStream.gen_instr
-  sequence.py             label + branch target resolution
-  gcc.py                  riscv-gcc invocation
-  iss.py                  Spike driver
-  testlist.py             riscv-dv YAML testlist loader
-  seeding.py              SeedGen (fixed/start/rerun/random)
+chipforge_inst_gen/            # main package
+├── cli.py                       # entry point: python -m chipforge_inst_gen
+├── auto_regress.py              # --auto_regress loop + convergence tracking
+├── config.py                    # Config dataclass, plusarg parsing
+├── targets/__init__.py          # 27 TargetCfg entries
+├── testlist.py                  # YAML loader (riscv-dv schema compatible)
+├── seeding.py                   # SeedGen: fixed/start/rerun/random
+├── isa/                         # per-extension instruction modules
+│   ├── base.py                   # Instr base class
+│   ├── rv32i.py, rv32m.py ...    # scalar registrations
+│   ├── bitmanip.py, crypto.py    # Zb* / Zk* registrations
+│   ├── rv32v.py                  # RVV 1.0 registrations
+│   ├── floating_point.py         # FP base class
+│   ├── vector.py                 # VectorInstr base class + factory
+│   ├── factory.py                # INSTR_REGISTRY + define_instr()
+│   └── filtering.py              # create_instr_list + get_rand_instr
+├── stream.py, sequence.py        # instr-stream + sequence machinery
+├── asm_program_gen.py            # top-level .S composer
+├── streams/                      # directed streams
+│   ├── base.py, directed.py, loop.py, amo_streams.py, load_store.py
+├── privileged/                   # boot CSR + trap handlers
+├── sections/                     # data pages, signature, stack
+├── gcc.py, iss.py                # external-tool wrappers (GCC + spike)
+├── coverage/                     # functional-coverage subsystem
+│   ├── collectors.py              # 32 covergroups + sample_*
+│   ├── runtime.py                 # spike-trace parser
+│   ├── cgf.py                     # goals YAML loader
+│   ├── directed.py                # auto-regress perturbation table
+│   ├── report.py                  # text report + composite grade
+│   ├── tools.py                   # merge/diff/attribute/export CLI
+│   └── goals/*.yaml               # 12 shipped goal overlays
+└── vector_config.py              # VectorConfig + Vtype + legal_eew
 
-tests/                    233 unit tests + filtering + e2e
-research/                 11 distilled notes from reading riscv-dv SV
-scripts/mcu_validate.sh   chipforge-mcu trace-compare driver
-CLAUDE.md                 engineering log — current state, next-up queue, resume prompt
+docs/                            # deep documentation
+├── verification-guide.md         # 9-section tutorial
+├── coverage.md                   # complete coverage reference
+├── architecture.md               # module / data flow
+├── testlist.md                   # gen_opts + stream reference
+├── images/                       # SVG diagrams
+└── examples/                     # coverage HTML, annotated goals, custom stream
+
+scripts/
+├── regression.py                 # parallel matrix runner
+└── mcu_validate.sh               # chipforge-mcu trace-compare driver
+
+tests/unit/                      # 332 unit tests
 ```
 
-## Contributing / continuing development
+---
 
-The authoritative engineering log lives in **[`CLAUDE.md`](CLAUDE.md)**.
-`§0 — Status and where to pick up` is always kept current with:
+## Community
 
-- What's finished (per SV-reference step).
-- A dated list of every fix that's landed, with root cause.
-- A priority-ordered "next-up queue" of open work (vector extension,
-  full privileged mode, golden-file diff harness, etc).
-- Ready-made prompts for resuming a session either generically ("pick
-  the next thing") or for a specific target ("add vector support").
+- **Bug reports**: [open an issue](../../issues/new?template=bug_report.md) with a reproducer.
+- **Feature requests**: [feature template](../../issues/new?template=feature_request.md).
+- **Security**: email the maintainer directly (do not open a public issue).
+- **Contributing**: [`CONTRIBUTING.md`](CONTRIBUTING.md) — workflow, commit style, PR checklist.
+- **Code of conduct**: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) (Contributor Covenant 2.1).
+- **Changelog**: [`CHANGELOG.md`](CHANGELOG.md).
 
-The `research/` directory contains 11 focused notes distilled from the
-riscv-dv SV source before any code was written — consult the relevant
-note before modifying the corresponding module (pointers are in the
-`§11 — Research notes` section of CLAUDE.md).
-
-## Non-goals
-
-- **No constraint solver dependency** (PyVSC, Z3, etc.). Rejection sampling
-  is fast enough and debuggable.
-- **No RTL simulator integration.** Pipeline stops at `.S` / `.bin` / ISS
-  log. RTL hook-up is the user's responsibility (see
-  [chipforge-mcu cross-compare](#cross-compare-against-a-custom-core-chipforge-mcu)
-  for a worked example).
-- **No GUI.**
-- **No byte-identical output vs riscv-dv.** Different PRNG, different
-  sampling → structurally equivalent, ISS-equivalent, but bytes differ for
-  the same seed.
+---
 
 ## License
 
-TBD.
+[Apache 2.0](LICENSE) — same permissive licence as riscv-dv. Free to use commercially, modify, redistribute.
+
+---
+
+## Citation
+
+If you use chipforge-inst-gen in academic work, see [`CITATION.cff`](CITATION.cff) for the canonical citation.
+
+---
+
+## Acknowledgements
+
+- Structurally inspired by [riscv-dv](https://github.com/chipsalliance/riscv-dv) — the SystemVerilog reference we ported.
+- CGF goals format from [riscv-isac](https://github.com/riscv-verification/riscvISACOV).
+- Spike, the RISC-V ISA simulator we validate against.
+
+This project is not affiliated with the RISC-V Foundation, Google, or the chipsalliance organisation.

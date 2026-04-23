@@ -1,0 +1,217 @@
+# Example: fully-annotated coverage goals file.
+#
+# Walk through every construct the goals schema supports. Use this as
+# a starting template for your own target.
+#
+# Layer order recommendation:
+#   --cov_goals chipforge_inst_gen/coverage/goals/baseline.yaml
+#   --cov_goals docs/examples/annotated-goals.yaml
+# Last-writer wins per bin — so this file can both extend and override
+# the baseline.
+
+# ---------------------------------------------------------------------
+# Opcode bins — one entry per instruction mnemonic you want to require.
+# Use the exact RiscvInstrName enum name (UPPERCASE_WITH_UNDERSCORES).
+# Typo protection: `python -m chipforge_inst_gen.coverage.tools lint-goals <this-file>`.
+# ---------------------------------------------------------------------
+opcode_cg:
+  # Required bins — the CLI exits 3 and CI flags 'goals not met' if any
+  # of these fall short.
+  ADD: 50        # expect the random stream to emit ≥50 ADDs
+  SUB: 20
+  ADDI: 80       # ADDI is common — a higher bar.
+  BEQ: 10
+  BNE: 10
+
+  # Tracked-but-optional bins: set required to 0. These show up in
+  # reports so you can see how often they fire, but they don't block
+  # 'goals met'. Use for: privileged ops that default off, corner cases
+  # you want visibility on, and bins that only fire on some target
+  # profiles.
+  MRET: 0
+  WFI: 0
+  EBREAK: 0
+
+  # Intentionally-low bins you just want a handful of — corner patterns
+  # like arithmetic overflow might only be reachable once every few
+  # thousand instructions.
+  FENCE: 2
+  FENCE_I: 0     # optional — only on specific targets
+
+# ---------------------------------------------------------------------
+# Format / category / group — higher-level shape coverage.
+# ---------------------------------------------------------------------
+format_cg:
+  R_FORMAT: 100  # every typical rv32imc run produces plenty of R-format
+  I_FORMAT: 100
+  S_FORMAT: 20   # stores are rarer — looser bar
+  B_FORMAT: 20
+  U_FORMAT: 5    # LUI/AUIPC come from scaffolding mostly
+  J_FORMAT: 0    # optional — JAL only if +directed_instr_N=riscv_jal_instr
+
+category_cg:
+  ARITHMETIC: 200
+  LOGICAL: 80
+  COMPARE: 30
+  SHIFT: 50
+  BRANCH: 20
+  JUMP: 0
+  LOAD: 0        # only when directed load/store streams or +no_load_store=0
+  STORE: 0
+
+group_cg:
+  RV32I: 200
+
+# ---------------------------------------------------------------------
+# Register-operand coverage. Useful for detecting "register file dead-bits"
+# or "one register hit 1000× but others barely touched".
+# ---------------------------------------------------------------------
+rs1_cg:
+  ZERO: 5        # x0 as source — surprisingly few ops legally use it
+  RA: 3
+  SP: 3
+  # Skip GP / TP — they're typically reserved by the generator.
+  T0: 10
+  T6: 10
+  A0: 10
+  S11: 10
+
+rd_cg:
+  # ZERO / SP / TP / GP are reserved as rd; mark optional so reports
+  # still show them without blocking goals.
+  ZERO: 0
+  SP: 0
+  TP: 0
+  GP: 0
+  T0: 10
+  A5: 10
+  S1: 10
+
+# ---------------------------------------------------------------------
+# Hazard coverage — raw/war/waw must all fire.
+# The 'none' bin is how often adjacent instructions had zero register
+# conflict; it should be highest but shouldn't dominate.
+# ---------------------------------------------------------------------
+hazard_cg:
+  raw: 100       # read-after-write is the easy one
+  war: 50        # write-after-read
+  waw: 30        # write-after-write is rarest but critical for OoO cores
+  none: 200
+
+# ---------------------------------------------------------------------
+# Immediate-value corner coverage — catches cases where the generator
+# only emits random values and never hits the walking-one or all-ones
+# patterns that trip arithmetic edge cases.
+# ---------------------------------------------------------------------
+imm_range_cg:
+  zero: 20
+  all_ones: 10
+  walking_one: 20
+  walking_zero: 20
+  min_signed: 5
+  max_signed: 5
+  generic: 100
+
+imm_sign_cg:
+  pos: 100
+  neg: 50
+  zero: 10
+
+# ---------------------------------------------------------------------
+# Memory-operation coverage. Separate from opcode coverage — tracks the
+# shape of the access (width + alignment) independently of which
+# specific load/store op emitted it.
+# ---------------------------------------------------------------------
+load_store_width_cg:
+  byte: 5
+  half: 5
+  word: 20
+  dword: 0       # only RV64 targets
+
+mem_align_cg:
+  byte_aligned: 5
+  half_aligned: 5
+  word_aligned: 15
+  word_unaligned: 2     # intentional — we want some unaligned too
+  # dword_* — RV64 only
+
+load_store_offset_cg:
+  zero: 3
+  pos_small: 20    # offset in [1, 127]
+  pos_medium: 10   # offset in [128, 1023]
+  pos_large: 3     # offset in [1024, 2047]
+  neg_small: 20
+  neg_medium: 10
+  neg_large: 3
+
+# ---------------------------------------------------------------------
+# Register-pair crosses — detects register-file port conflict coverage.
+# 1024 possible bins each; even modest regressions close a few hundred.
+# You rarely require specific pairs — just a minimum diversity.
+# ---------------------------------------------------------------------
+rs1_rs2_cross_cg:
+  # Require at least the common pairs — customise if you're doing
+  # specific port-pair verification.
+  T0__T1: 2
+  T0__T6: 2
+  A0__A1: 2
+
+rs1_eq_rs2_cg:
+  equal: 20        # 'add x5, x5, x5' pattern
+  distinct: 200
+rs1_eq_rd_cg:
+  equal: 20        # 'addi x5, x5, 1' in-place pattern
+  distinct: 200
+
+# ---------------------------------------------------------------------
+# CSR coverage — both address (csr_cg) and access type (csr_access_cg).
+# Only hit when the test doesn't set +no_csr_instr=1.
+# ---------------------------------------------------------------------
+csr_cg:
+  MSCRATCH: 0    # reads go anywhere, writes only to MSCRATCH
+  MSTATUS: 0
+  MISA: 0
+  MTVEC: 0
+  MEPC: 0
+  MCAUSE: 0
+
+csr_access_cg:
+  MSCRATCH__write: 0   # our only writable CSR by default
+  MSTATUS__read: 0
+  MISA__read: 0
+
+# ---------------------------------------------------------------------
+# Category transitions — which kind of instruction follows which.
+# BRANCH__LOAD is interesting: some pipelines stall on this pair.
+# ---------------------------------------------------------------------
+category_transition_cg:
+  ARITHMETIC__ARITHMETIC: 100
+  ARITHMETIC__LOGICAL: 50
+  BRANCH__ARITHMETIC: 10
+  LOGICAL__SHIFT: 20
+
+# ---------------------------------------------------------------------
+# Runtime covergroups — only hit when --iss_trace is enabled and spike
+# is actually run.
+# ---------------------------------------------------------------------
+branch_direction_cg:
+  taken: 50
+  not_taken: 50        # both directions should fire
+
+branch_taken_per_mnem_cg:
+  BEQ__T: 5
+  BEQ__NT: 5
+  BNE__T: 5
+  BNE__NT: 5
+
+privilege_mode_cg:
+  M_entered: 1    # always 1 after boot
+  M_return: 1    # mret execution
+  M_mode: 100    # per-retired-instr (commit-line priv digit)
+
+pc_reach_cg:
+  init: 1
+  mtvec_handler: 0   # only if the test takes a trap
+
+exception_cg:
+  trap_entered: 0    # optional — tracks whether a trap was taken

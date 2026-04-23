@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="-apple-system, system-ui, Helvetica, Arial, sans-serif">
+  <rect width="960" height="560" fill="#ffffff"/>
+
+  <text x="480" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#202030">Architecture — module overview</text>
+
+  <!-- TOP LANE: CLI / drivers -->
+  <g>
+    <rect x="80" y="56" width="800" height="70" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="480" y="76" text-anchor="middle" font-size="12" font-weight="700" fill="#1e3a8a">Entry points</text>
+    <rect x="110" y="88" width="160" height="32" rx="6" fill="#ffffff" stroke="#2563eb"/>
+    <text x="190" y="108" text-anchor="middle" font-size="11" font-weight="600" fill="#1e3a8a">python -m chipforge_inst_gen</text>
+    <rect x="290" y="88" width="160" height="32" rx="6" fill="#ffffff" stroke="#2563eb"/>
+    <text x="370" y="108" text-anchor="middle" font-size="11" font-weight="600" fill="#1e3a8a">--auto_regress</text>
+    <rect x="470" y="88" width="200" height="32" rx="6" fill="#ffffff" stroke="#2563eb"/>
+    <text x="570" y="108" text-anchor="middle" font-size="11" font-weight="600" fill="#1e3a8a">scripts/regression.py</text>
+    <rect x="690" y="88" width="180" height="32" rx="6" fill="#ffffff" stroke="#2563eb"/>
+    <text x="780" y="108" text-anchor="middle" font-size="11" font-weight="600" fill="#1e3a8a">coverage.tools (merge/diff/…)</text>
+  </g>
+
+  <!-- arrow down to core -->
+  <path d="M 480 126 L 480 148" stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- MIDDLE LANE: core generator -->
+  <g>
+    <rect x="80" y="150" width="800" height="200" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+    <text x="480" y="170" text-anchor="middle" font-size="12" font-weight="700" fill="#065f46">Generator core</text>
+
+    <!-- Config -->
+    <rect x="110" y="184" width="160" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="190" y="204" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">Config</text>
+    <text x="190" y="220" text-anchor="middle" font-size="10" fill="#334155">parses +plusargs</text>
+    <text x="190" y="234" text-anchor="middle" font-size="10" fill="#334155">stamps VectorConfig</text>
+
+    <!-- Targets -->
+    <rect x="290" y="184" width="160" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="370" y="204" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">TargetCfg</text>
+    <text x="370" y="220" text-anchor="middle" font-size="10" fill="#334155">27 targets</text>
+    <text x="370" y="234" text-anchor="middle" font-size="10" fill="#334155">xlen / ISA / VLEN / ELEN</text>
+
+    <!-- Factory -->
+    <rect x="470" y="184" width="160" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="550" y="204" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">INSTR_REGISTRY</text>
+    <text x="550" y="220" text-anchor="middle" font-size="10" fill="#334155">486 opcodes</text>
+    <text x="550" y="234" text-anchor="middle" font-size="10" fill="#334155">(RV*/Zb*/Zk*/RVV/Zve*)</text>
+
+    <!-- Filtering -->
+    <rect x="650" y="184" width="180" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="740" y="204" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">filtering</text>
+    <text x="740" y="220" text-anchor="middle" font-size="10" fill="#334155">narrow by target + cfg</text>
+    <text x="740" y="234" text-anchor="middle" font-size="10" fill="#334155">→ AvailableInstrs</text>
+
+    <!-- Streams -->
+    <rect x="110" y="262" width="160" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="190" y="282" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">Directed streams</text>
+    <text x="190" y="298" text-anchor="middle" font-size="10" fill="#334155">16 classes</text>
+    <text x="190" y="312" text-anchor="middle" font-size="10" fill="#334155">(JalInstr, Hazard, …)</text>
+
+    <!-- RandInstrStream -->
+    <rect x="290" y="262" width="160" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="370" y="282" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">RandInstrStream</text>
+    <text x="370" y="298" text-anchor="middle" font-size="10" fill="#334155">per-slot rejection</text>
+    <text x="370" y="312" text-anchor="middle" font-size="10" fill="#334155">sample</text>
+
+    <!-- Sequence -->
+    <rect x="470" y="262" width="160" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="550" y="282" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">InstrSequence</text>
+    <text x="550" y="298" text-anchor="middle" font-size="10" fill="#334155">insert directed</text>
+    <text x="550" y="312" text-anchor="middle" font-size="10" fill="#334155">resolve branch labels</text>
+
+    <!-- AsmProgramGen -->
+    <rect x="650" y="262" width="180" height="58" rx="6" fill="#ffffff" stroke="#059669"/>
+    <text x="740" y="282" text-anchor="middle" font-size="12" font-weight="700" fill="#064e3b">AsmProgramGen</text>
+    <text x="740" y="298" text-anchor="middle" font-size="10" fill="#334155">boot + trap + data pages</text>
+    <text x="740" y="312" text-anchor="middle" font-size="10" fill="#334155">emits .S lines</text>
+  </g>
+
+  <!-- arrow down to coverage -->
+  <path d="M 250 350 L 250 380" stroke="#059669" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+  <text x="270" y="372" font-size="10" fill="#555" font-style="italic">sample_sequence</text>
+
+  <!-- BOTTOM-LEFT: Coverage subsystem -->
+  <g>
+    <rect x="80" y="380" width="500" height="140" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+    <text x="330" y="402" text-anchor="middle" font-size="12" font-weight="700" fill="#78350f">Coverage subsystem</text>
+
+    <rect x="100" y="416" width="140" height="44" rx="6" fill="#ffffff" stroke="#b45309"/>
+    <text x="170" y="434" text-anchor="middle" font-size="11" font-weight="600" fill="#7c2d12">collectors.py</text>
+    <text x="170" y="450" text-anchor="middle" font-size="9" fill="#475569">32 covergroups, sample_*</text>
+
+    <rect x="260" y="416" width="140" height="44" rx="6" fill="#ffffff" stroke="#b45309"/>
+    <text x="330" y="434" text-anchor="middle" font-size="11" font-weight="600" fill="#7c2d12">runtime.py</text>
+    <text x="330" y="450" text-anchor="middle" font-size="9" fill="#475569">spike trace parser</text>
+
+    <rect x="420" y="416" width="140" height="44" rx="6" fill="#ffffff" stroke="#b45309"/>
+    <text x="490" y="434" text-anchor="middle" font-size="11" font-weight="600" fill="#7c2d12">cgf.py</text>
+    <text x="490" y="450" text-anchor="middle" font-size="9" fill="#475569">goals YAML loader</text>
+
+    <rect x="100" y="468" width="140" height="44" rx="6" fill="#ffffff" stroke="#b45309"/>
+    <text x="170" y="486" text-anchor="middle" font-size="11" font-weight="600" fill="#7c2d12">directed.py</text>
+    <text x="170" y="502" text-anchor="middle" font-size="9" fill="#475569">auto-regress perturbations</text>
+
+    <rect x="260" y="468" width="140" height="44" rx="6" fill="#ffffff" stroke="#b45309"/>
+    <text x="330" y="486" text-anchor="middle" font-size="11" font-weight="600" fill="#7c2d12">report.py</text>
+    <text x="330" y="502" text-anchor="middle" font-size="9" fill="#475569">text + grade</text>
+
+    <rect x="420" y="468" width="140" height="44" rx="6" fill="#ffffff" stroke="#b45309"/>
+    <text x="490" y="486" text-anchor="middle" font-size="11" font-weight="600" fill="#7c2d12">tools.py</text>
+    <text x="490" y="502" text-anchor="middle" font-size="9" fill="#475569">CLI: merge/diff/export…</text>
+  </g>
+
+  <!-- BOTTOM-RIGHT: External I/O -->
+  <g>
+    <rect x="600" y="380" width="280" height="140" rx="10" fill="#f3e8ff" stroke="#7c3aed" stroke-width="1.5"/>
+    <text x="740" y="402" text-anchor="middle" font-size="12" font-weight="700" fill="#581c87">External artefacts</text>
+
+    <rect x="620" y="416" width="240" height="28" rx="6" fill="#ffffff" stroke="#7c3aed"/>
+    <text x="740" y="434" text-anchor="middle" font-size="10" fill="#3b0764">coverage.json (per-run + cumulative)</text>
+
+    <rect x="620" y="448" width="240" height="28" rx="6" fill="#ffffff" stroke="#7c3aed"/>
+    <text x="740" y="466" text-anchor="middle" font-size="10" fill="#3b0764">coverage_per_test.json</text>
+
+    <rect x="620" y="480" width="240" height="28" rx="6" fill="#ffffff" stroke="#7c3aed"/>
+    <text x="740" y="498" text-anchor="middle" font-size="10" fill="#3b0764">convergence.json + cov_timeline.json</text>
+  </g>
+
+  <!-- arrow coverage → artefacts -->
+  <path d="M 580 460 L 615 460" stroke="#7c3aed" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- defs -->
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <text x="480" y="550" text-anchor="middle" font-size="11" fill="#888" font-style="italic">Arrows show data-flow. All modules are pure Python; only external tools are GCC + spike.</text>
+</svg>

@@ -1,0 +1,31 @@
+# CITATION file — for citation managers, Zenodo, academic publications.
+# https://citation-file-format.github.io/
+
+cff-version: 1.2.0
+message: "If you use chipforge-inst-gen in academic work, please cite it as follows."
+title: "chipforge-inst-gen: Pure-Python RISC-V instruction generator with built-in functional coverage"
+type: software
+version: 0.1.0
+date-released: "2026-04-23"
+license: Apache-2.0
+url: "https://github.com/chipforge/chipforge-inst-gen"
+repository-code: "https://github.com/chipforge/chipforge-inst-gen"
+abstract: >
+  A pure-Python random instruction generator for RISC-V cores, structurally
+  modelled on Google's riscv-dv but without the SystemVerilog / UVM / PyVSC
+  dependencies. Targets include rv32i through rv64gcv plus Zve* embedded
+  vector profiles (incl. Google's Coral NPU). Ships a 32-covergroup
+  functional-coverage subsystem with CGF-style goals, coverage-directed
+  auto-regression, convergence tracking, and CI-ready dashboards.
+keywords:
+  - RISC-V
+  - verification
+  - instruction generator
+  - functional coverage
+  - hardware verification
+  - CGF
+  - open source
+authors:
+  - given-names: "chipforge-inst-gen"
+    family-names: "contributors"
+    website: "https://github.com/chipforge/chipforge-inst-gen"

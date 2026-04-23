@@ -1,0 +1,55 @@
+# Example: standalone testlist with a mix of shipped + custom tests.
+#
+# Use as-is:
+#   python -m chipforge_inst_gen --target rv32imc --test my_hazard_heavy_test \
+#       --testlist docs/examples/custom-testlist.yaml \
+#       --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
+#       --output out/ -i 4 --start_seed 100
+#
+# Chain-import riscv-dv's base testlist if you want those tests alongside
+# your custom ones — uncomment the import line.
+#
+# - import: <riscv_dv_root>/yaml/base_testlist.yaml
+
+- test: my_hazard_heavy_test
+  description: >
+    Register hazards + address hazards in the same run — stresses both
+    the GPR hazard detector (via the restricted-pool Hazard stream) and
+    the load/store unit's address hazard logic (via offset-reuse).
+  iterations: 4
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=10000
+    +num_of_sub_program=5
+    +directed_instr_0=riscv_hazard_instr_stream,8
+    +directed_instr_1=riscv_load_store_hazard_instr_stream,8
+    +directed_instr_2=riscv_int_numeric_corner_stream,4
+    +no_csr_instr=0
+    +no_fence=0
+  rtl_test: core_base_test
+
+- test: my_burst_heavy_test
+  description: >
+    Repeated bursts of the custom "10 back-to-back accumulator ADDs"
+    stream (defined in docs/examples/custom-stream.py). Register-file
+    read-port + forwarding-path stress.
+  iterations: 2
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=8000
+    +num_of_sub_program=3
+    +directed_instr_0=my_burst_accumulator_stream,20
+    +directed_instr_1=riscv_jal_instr,5
+  rtl_test: core_base_test
+
+- test: my_crypto_stress_test
+  description: >
+    Exhaustive exercise of every Zkn crypto opcode on chipforge MCU's
+    ISA (RV32IMC + ratified Zkn umbrella).
+  iterations: 2
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=12000
+    +num_of_sub_program=3
+    +no_csr_instr=0
+  rtl_test: core_base_test
