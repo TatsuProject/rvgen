@@ -6,9 +6,18 @@ A pure-Python re-implementation of **riscv-dv**, Google's UVM/SystemVerilog rand
 
 ## 0 — Status and where to pick up
 
-**Current phase:** Phase 1 steps 1–7 complete + Phase 2 crypto + **RVV 1.0 baseline** + **5 Zve* embedded targets (incl. Coral NPU)** + **functional-coverage infrastructure** + **SV-faithful scalar load/store stream family** landed. **304 unit tests passing.** End-to-end CLI pipeline (gen → gcc_compile → iss_sim → cov) passes **51/51** non-vector Spike runs (rv32imc/rv32imafdc/rv32imcb/rv64imc/rv64imcb) + **18/18** rv64gcv vector runs on spike-vector + **5/5** Zve*-profile runs (coralnpu/rv32imc_zve32x/rv32imfc_zve32f/rv64imc_zve64x/rv64imafdc_zve64d) on spike-vector + **21/21 trace-level matches on chipforge-mcu RTL** (`rv32imc_zkn` — RV32IMC + Zkn umbrella). Instruction registry = **486 ops** (184 RVV, 302 scalar), stream registry = **15 streams** (distinct classes, no more aliases), **27 targets**.
+**Current phase:** Phase 1 steps 1–7 complete + Phase 2 crypto + **RVV 1.0 baseline** + **5 Zve* embedded targets (incl. Coral NPU)** + **comprehensive functional-coverage infrastructure** + **SV-faithful scalar load/store stream family** landed. **325 unit tests passing.** End-to-end CLI pipeline (gen → gcc_compile → iss_sim → cov) passes **51/51** non-vector Spike runs + **18/18** rv64gcv vector runs + **5/5** Zve*-profile runs + **21/21 trace-level matches on chipforge-mcu RTL** (`rv32imc_zkn`). Instruction registry = **486 ops**, stream registry = **16 distinct classes** (incl. JalrInstr), **27 targets**, **28 covergroups**.
 
-Last substantive session (2026-04-23) landed **functional coverage** end-to-end: 24 covergroups (opcode/format/category/group/rs1/rs2/rd/imm_sign/imm_range/hazard/csr/fp_rm/vtype/vreg/fpr/mem_align/load_store_width/category_transition/opcode_transition/branch_direction/exception/privilege_mode/pc_reach/fmt_category_cross/category_group_cross), static sampling from the generator + runtime sampling from spike `-l` traces (branch taken/not-taken, label entries, mret/sret/uret), CGF-style YAML goals with required hit counts, layered goals (base + target + test overlays — baseline/rv64imc/rv64gcv/coralnpu/no_branch_jump shipped), coverage-directed auto-regression (closes 95/95 rv32imc goals on seed 1 vs 86/95 for blind-sweep after 8 seeds), diff/attribute/merge/export(CSV+HTML)/report CLI tools in `chipforge_inst_gen.coverage.tools`. JalrInstr stream added (coverage-driven — JALR was absent from every existing stream). SV-faithful scalar load/store hierarchy (LoadStoreBaseInstrStream + 8 distinct subclasses with locality-aware offset gen + alignment-aware width selection + hazard_ratio reuse + multi-page interleaving) replaces the old 7-way aliasing of a single class.
+Last substantive session (2026-04-23) iterated on **verification-team-ready coverage**. Additions since the baseline RVV+Zve work:
+- 28 covergroups total (static: opcode/format/category/group/rs1/rs2/rd/imm_sign/imm_range/hazard/csr/csr_access/fp_rm/vtype/vreg/fpr/mem_align/load_store_width/load_store_offset/category_transition/opcode_transition/rs1_eq_rs2/rs1_eq_rd/directed_stream/fmt_category_cross/category_group_cross; runtime: branch_direction/branch_taken_per_mnem/exception/privilege_mode/pc_reach/csr_value/rs_val_corner + opcode_cg.*__dyn).
+- CGF-style YAML goals with layered overlays (baseline + rv32imcb/rv32imafdc/rv32imc_zkn/rv32ui/rv64imc/rv64imcb/rv64imafdc/rv64gc/rv64gcv/coralnpu/no_branch_jump shipped, auto-resolved from `goals/<target>.yaml` when omitted).
+- Coverage-directed auto-regression (closes 95/95 rv32imc goals on seed 1 vs 86/95 for blind-sweep after 8 seeds). Plateau detection bails early when seeds stop adding bins.
+- Convergence tracking — per-bin first-hit seed + per-seed new-bin counts emitted as convergence.json + cov_timeline.json + ASCII sparkline in the log.
+- CI integration: `GITHUB_OUTPUT` + `GITHUB_STEP_SUMMARY` + composite 0-100 grade (60% goals × 20% hazard balance × 20% opcode breadth). Exit codes standardized (0=ok, 1=config, 2=iss-fail, 3=cov-unmet).
+- Coverage tools CLI: `merge / diff / attribute / export(CSV+HTML) / report / per-test / baseline-check` under `python -m chipforge_inst_gen.coverage.tools`.
+- JalrInstr directed stream added (coverage-driven — JALR was absent from all existing streams).
+- SV-faithful scalar load/store hierarchy (LoadStoreBaseInstrStream + 8 distinct subclasses with locality-aware offset gen, alignment-aware width selection, hazard_ratio reuse, multi-page interleaving) replaced the old 7-way aliasing stub.
+- Full verification-engineer workflow documented in `docs/verification-guide.md` (9-section tutorial).
 
 Prior session (also 2026-04-23, earlier) landed RVV 1.0 baseline: `VectorConfig` (legal_eew + SV validation), `VectorInstr` base class (port of `riscv_vector_instr.sv`), ~130 vector mnemonics registered, vsetvli-v1.0 boot init, random stream interleaves vector ops, 5 Zve*/coralnpu targets. Session before that cleared blocking trap-alignment / JalInstr / compressed-FP / misaligned-store / bare-mode / CSR-whitelist bugs (post-commit `ddfe4b8`).
 
@@ -89,28 +98,29 @@ python -m chipforge_inst_gen.coverage.tools export all.json --html cov.html --go
 
 ### Prompt to resume a fresh session
 
-> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/chipforge-inst-gen/` first. 304 unit tests pass, 51/51 Spike E2E, 18/18 rv64gcv vector E2E, 5/5 Zve*-profile E2E, 21/21 chipforge-mcu trace-level match, coverage + auto-regression infrastructure in place. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
+> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/chipforge-inst-gen/` first. 325 unit tests pass, 51/51 Spike E2E, 18/18 rv64gcv vector E2E, 5/5 Zve*-profile E2E, 21/21 chipforge-mcu trace-level match, 28 covergroups, CGF-style goals + auto-regression + CI integration in place. Docs: `docs/verification-guide.md`. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
 
 Rules for either a generic continuation or a specific task: prefer editing existing files, cross-check each change against the SV reference at `~/Desktop/verif_env_tatsu/riscv-dv/`, run `python -m pytest tests/` after every change, update §0 when a major milestone lands.
 
 ### Current state (latest — 2026-04-23, end of session)
 
 - **Instruction registry: 486 ops** — RV32I/M/A/C/F/FC/D/DC + RV64 counterparts + Zba/Zbb/Zbc/Zbs + draft RV32B + Zbkb/Zbkc/Zbkx + Zkne/Zknd/Zknh + Zksh/Zksed + **RVV 1.0 (184 ops)**.
-- **Stream registry: 15 distinct classes** — IntNumericCornerStream, JalInstr, JalrInstr (new — coverage-driven addition for JALR), LoopInstr, LrScInstrStream, AmoInstrStream, LoadStoreBase, LoadStoreStress, LoadStoreRand, HazardInstrStream, LoadStoreHazardInstrStream, MultiPageLoadStoreInstrStream, MemRegionStressTest, LoadStoreRandAddrInstrStream, LoadStoreSharedMemStream.
-- **Targets: 27** — all previous 22 + **coralnpu + rv32imc_zve32x + rv32imfc_zve32f + rv64imc_zve64x + rv64imafdc_zve64d** (Zve* embedded-vector profiles).
-- **Unit tests: 304 passing** (`/home/qamar/anaconda3/bin/python -m pytest tests/`).
-- **Coverage: 24 covergroups** — opcode / format / category / group / rs1 / rs2 / rd / imm_sign / imm_range / hazard / csr / fp_rm / vtype / vreg / fpr / mem_align / load_store_width / category_transition / opcode_transition / branch_direction (runtime) / exception (runtime) / privilege_mode (runtime) / pc_reach (runtime) / fmt_category_cross / category_group_cross.
-- **Coverage goals shipped**: baseline.yaml + rv64imc / rv64gcv / coralnpu / no_branch_jump overlays. Layered via `--cov_goals` (repeat flag).
-- **Coverage tools**: `python -m chipforge_inst_gen.coverage.tools {merge,diff,attribute,export,report}` — CSV + HTML outputs, first-closer attribution across seed sequences.
-- **Auto-regression**: `--auto_regress --cov_directed` closes 95/95 rv32imc baseline goals on seed 1 (vs 86/95 for blind-sweep after 8 seeds).
+- **Stream registry: 16 distinct classes** — IntNumericCornerStream, JalInstr, JalrInstr, LoopInstr, LrScInstrStream, AmoInstrStream, LoadStoreBase, LoadStoreStress, LoadStoreRand, HazardInstrStream, LoadStoreHazardInstrStream, MultiPageLoadStoreInstrStream, MemRegionStressTest, LoadStoreRandAddrInstrStream, LoadStoreSharedMemStream, (+ legacy `LoadStoreRandInstrStream` alias in `streams/directed.py`).
+- **Targets: 27** — all previous 22 + coralnpu + rv32imc_zve32x + rv32imfc_zve32f + rv64imc_zve64x + rv64imafdc_zve64d (Zve* embedded-vector profiles).
+- **Unit tests: 325 passing** (`/home/qamar/anaconda3/bin/python -m pytest tests/`).
+- **Coverage: 28 covergroups** (16 static + 8 runtime + 4 crosses) — see `docs/verification-guide.md` for the full catalog.
+- **Coverage goals shipped**: baseline + rv32imafdc + rv32imc_zkn + rv32imcb + rv32ui + rv64gc + rv64gcv + rv64imafdc + rv64imc + rv64imcb + coralnpu + no_branch_jump. Layer via repeated `--cov_goals`; auto-resolve from `goals/<target>.yaml` when omitted.
+- **Coverage tools**: `python -m chipforge_inst_gen.coverage.tools {merge, diff, attribute, export, report, per-test, baseline-check}` — CSV + HTML outputs, first-closer attribution, golden-baseline CI gate.
+- **Auto-regression**: `--auto_regress --cov_directed` closes 95/95 rv32imc baseline goals on seed 1 (vs 86/95 for blind-sweep). Plateau detection via `--plateau_window`. Emits convergence.json + cov_timeline.json + ASCII sparkline.
+- **CI integration**: `GITHUB_OUTPUT` + `GITHUB_STEP_SUMMARY` + composite 0-100 coverage grade.
 
 ### Next-up queue (priority-ordered)
 
-1. **Vector loads/stores** (step 9 Phase 2). Directed `VectorLoadStoreStream` (unit-stride / strided / indexed) pinning rs1 to a legal memory region. Coverage dir's vtype_cg + vreg_cg goals already reserve bins for this.
+1. **Vector loads/stores** (step 9 Phase 2). Directed `VectorLoadStoreStream` (unit-stride / strided / indexed) pinning rs1 to a legal memory region.
 2. **Vector memory stress + vector AMO** — the `riscv_vector_load_store_instr_stream` and `riscv_vector_amo_instr_stream` names in rv64gcv's testlist currently resolve to nothing.
-3. **Goals profile auto-selection**: when `--auto_regress` runs with no `--cov_goals`, look for `coverage/goals/<target>.yaml` and auto-layer it on top of baseline.
-4. **Richer runtime coverage** — CSR final-value bins from the spike log (parse "csrw mstatus, t0" + t0's last observed value), exception-cause decoding (read mcause after each trap).
-5. **Full privileged mode** (step 8). Paging (SV32/SV39/SV48), PMP cfg packing + NAPOT encoding, S/U-mode boot, debug ROM (DCSR/DPC/DSCRATCH, single-step).
+3. **Full privileged mode** (step 8). Paging (SV32/SV39/SV48), PMP cfg packing + NAPOT encoding, S/U-mode boot, debug ROM (DCSR/DPC/DSCRATCH, single-step).
+4. **Smart seed-picker** (Phase 2 coverage) — replay seeds that historically closed the currently-missing bins, rather than random new seeds.
+5. **Toggle / bit-activity coverage** — per-bit toggle counts across GPR writes (dead-bit detection).
 6. **Golden-file diff harness** (step 12) — structural `.S` compare vs riscv-dv's `2026-04-21/` reference.
 7. **Widen CSR-write whitelist** — port SV's `+include_write_reg=...` plusarg.
 8. **Vector FP / widening / narrowing** — classes exist but gated; flip via `+vec_fp=1` / `+vec_narrowing_widening=1`.
