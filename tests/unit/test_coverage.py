@@ -649,3 +649,31 @@ def test_resolve_cov_goals_unknown_target_only_baseline():
     # Baseline is always there; target-specific file absent.
     assert any("baseline.yaml" in p for p in out)
     assert not any("_target_not_shipped_" in p for p in out)
+
+
+def test_per_test_tool_ranks_tests(tmp_path: Path):
+    """Smoke test for the per-test attribution CLI."""
+    import json as _j
+    from chipforge_inst_gen.coverage.tools import cmd_per_test
+    per_test = {
+        "test_a": {"opcode_cg": {"ADD": 10, "JAL": 5}},
+        "test_b": {"opcode_cg": {"ADD": 2, "SUB": 7}},
+        "test_c": {"opcode_cg": {"ADD": 1}},  # owns nothing uniquely
+    }
+    path = tmp_path / "per_test.json"
+    path.write_text(_j.dumps(per_test))
+    import argparse, io, contextlib
+    ns = argparse.Namespace(input=str(path), cg="")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cmd_per_test(ns)
+    out = buf.getvalue()
+    assert rc == 0
+    # test_a owns JAL (only one who hits it), test_b owns SUB.
+    assert "test_a" in out
+    assert "test_b" in out
+    # test_c owns no unique bin.
+    assert "test_c" in out
+    # Check the ranking — test_a or test_b have 1 owned bin each, test_c 0.
+    assert "1" in out  # unique_owned column
+    assert "0" in out

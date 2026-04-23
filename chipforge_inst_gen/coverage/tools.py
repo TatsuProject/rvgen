@@ -199,6 +199,72 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_per_test(args: argparse.Namespace) -> int:
+    """Analyse a coverage_per_test.json sidecar.
+
+    The sidecar maps test_id → CoverageDB. We print:
+
+    - a ranked list of tests by unique bins owned (bins this test hits
+      that no other test does),
+    - per-test total hit counts,
+    - optionally, per-bin "owner" attribution for a chosen covergroup.
+    """
+    with open(args.input) as f:
+        raw = json.load(f)
+    per_test: dict[str, CoverageDB] = {
+        k: {cg: dict(bins) for cg, bins in v.items()}
+        for k, v in raw.items()
+    }
+    if not per_test:
+        print("coverage_per_test.json is empty")
+        return 0
+
+    # Unique-owner analysis: for each (cg, bin), count how many tests hit
+    # it; if only one hits it, that test is its "owner".
+    owners: dict[str, int] = {k: 0 for k in per_test}
+    owner_of: dict[tuple[str, str], str] = {}
+    all_bins = set()
+    bin_test_count: dict[tuple[str, str], int] = {}
+    for tid, db in per_test.items():
+        for cg, bins in db.items():
+            for bn, cnt in bins.items():
+                if cnt <= 0:
+                    continue
+                key = (cg, bn)
+                all_bins.add(key)
+                bin_test_count[key] = bin_test_count.get(key, 0) + 1
+
+    # Assign owner to bins hit by exactly one test.
+    for tid, db in per_test.items():
+        for cg, bins in db.items():
+            for bn, cnt in bins.items():
+                if cnt <= 0:
+                    continue
+                key = (cg, bn)
+                if bin_test_count.get(key, 0) == 1:
+                    owners[tid] += 1
+                    owner_of[key] = tid
+
+    # Per-test hit totals.
+    totals = {tid: sum(sum(b.values()) for b in db.values()) for tid, db in per_test.items()}
+
+    print(f"=== per-test coverage attribution: {args.input} ===")
+    print(f"    {len(per_test)} tests, {len(all_bins)} unique (cg, bin) pairs")
+    print()
+    print(f"{'Test':<40s} {'unique_owned':>14s} {'total_hits':>12s}")
+    for tid in sorted(per_test, key=lambda t: (-owners[t], -totals[t])):
+        print(f"{tid:<40s} {owners[tid]:>14d} {totals[tid]:>12d}")
+
+    if args.cg:
+        print()
+        print(f"=== owners in covergroup {args.cg!r} ===")
+        for (cg, bn), tid in sorted(owner_of.items()):
+            if cg == args.cg:
+                print(f"    {bn:<40s} {tid}")
+
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # CSV / HTML export
 # ---------------------------------------------------------------------------
@@ -338,6 +404,16 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("input")
     pr.add_argument("--goals", help="Optional goals YAML for pass/fail banner.")
     pr.set_defaults(func=cmd_report)
+
+    pt = sub.add_parser("per-test",
+                         help="Analyse a coverage_per_test.json sidecar: "
+                              "rank tests by unique-owned bins, total hits, "
+                              "and optionally dump per-bin owners.")
+    pt.add_argument("input", help="Path to coverage_per_test.json.")
+    pt.add_argument("--cg", default="",
+                     help="Optional covergroup name; print the owner test_id "
+                          "for each uniquely-owned bin in this covergroup.")
+    pt.set_defaults(func=cmd_per_test)
 
     return p
 

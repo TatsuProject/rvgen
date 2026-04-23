@@ -200,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Coverage collection is cheap — always keep a per-run DB so the 'cov'
     # step can run against the same generator state without a re-run.
+    # ``per_test_cov`` holds a separate DB per test_id so the reporter can
+    # answer "which test contributed which bin".
     from chipforge_inst_gen.coverage import (
         CoverageDB,
         merge as cov_merge,
@@ -208,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     from chipforge_inst_gen.coverage.collectors import new_db as new_cov_db
 
     run_cov: CoverageDB = new_cov_db()
+    per_test_cov: dict[str, CoverageDB] = {}
 
     seen_seeds: dict[str, int] = {}
     if "gen" in steps:
@@ -232,9 +235,14 @@ def main(argv: list[str] | None = None) -> int:
                 _LOG.info("Generated %s (seed=%d, %d lines)",
                           asm_path, seed, len(lines))
 
-                # Sample the main sequence into the per-run coverage DB.
+                # Sample the main sequence into both the per-test + run DB.
+                # Fresh DB per test_id — caller can ask "which test closed
+                # which bin" by inspecting per_test_cov afterwards.
                 if gen.main_sequence is not None and gen.main_sequence.instr_stream is not None:
-                    cov_sample_sequence(run_cov, gen.main_sequence.instr_stream.instr_list)
+                    per_test = new_cov_db()
+                    cov_sample_sequence(per_test, gen.main_sequence.instr_stream.instr_list)
+                    per_test_cov[test_id] = per_test
+                    cov_merge(run_cov, per_test)
 
     if seen_seeds:
         seed_gen.dump(output_dir / "seed.yaml", seen_seeds)
@@ -317,6 +325,17 @@ def main(argv: list[str] | None = None) -> int:
         cov_merge(existing, run_cov)
         cum_path.write_text(_json.dumps(existing, indent=2, sort_keys=True))
         _LOG.info("Coverage DB updated: %s", cum_path)
+
+        # Per-test attribution sidecar — one JSON dict keyed by test_id.
+        if per_test_cov:
+            per_test_path = output_dir / "coverage_per_test.json"
+            per_test_path.write_text(
+                _json.dumps(
+                    {tid: db for tid, db in sorted(per_test_cov.items())},
+                    indent=2, sort_keys=True,
+                )
+            )
+            _LOG.info("Per-test coverage: %s", per_test_path)
 
         goals = None
         goals_paths = _resolve_cov_goals(args.cov_goals, args.target)
