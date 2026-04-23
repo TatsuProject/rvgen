@@ -18,6 +18,7 @@ tests for RV32/RV64 cores and validates them against the Spike ISA simulator.
 - [Testlist format](#testlist-format)
 - [Directed instruction streams](#directed-instruction-streams)
 - [Disable / feature-gate flags](#disable--feature-gate-flags)
+- [Functional coverage](#functional-coverage)
 - [Running the test suite](#running-the-test-suite)
 - [Project layout](#project-layout)
 - [Contributing / continuing development](#contributing--continuing-development)
@@ -359,13 +360,116 @@ All riscv-dv-compatible, set as `+flag=0/1` in `gen_opts` (or via
 | `+bare_program_mode` | 0 | Skip ALL CSR-based boot setup and trap handler (for rv32ui-style no-CSR cores). |
 | `+boot_mode=m/s/u` | m | Initial privilege mode. |
 
+## Functional coverage
+
+The generator ships a pure-Python functional-coverage model inspired by
+riscv-dv's SV covergroups and riscv-isac's CGF goals-file format.
+
+### What's collected
+
+24 covergroups across two sources:
+
+**Static** (sampled at generation time — no ISS required):
+
+| Covergroup | Bins |
+|---|---|
+| `opcode_cg` | every RiscvInstrName member |
+| `format_cg` | R / I / S / B / U / J / C{R,I,L,S,SS,A,IW,B,J} / V{SET,A,S2,L,S,LX,SX,LS,SS,AMO}_FORMAT |
+| `category_cg` | LOAD / STORE / ARITHMETIC / LOGICAL / COMPARE / SHIFT / BRANCH / JUMP / SYNCH / SYSTEM / CSR / AMO |
+| `group_cg` | RV32I / RV32M / … / RVV / ZVE32X / ZVE64D |
+| `rs1_cg`, `rs2_cg`, `rd_cg` | x0..x31 |
+| `imm_sign_cg` | pos / neg / zero |
+| `imm_range_cg` | zero / all_ones / walking_one / walking_zero / min_signed / max_signed / generic |
+| `hazard_cg` | raw / war / waw / none (8-instruction sliding window) |
+| `csr_cg` | PrivilegedReg name per CSR op |
+| `fp_rm_cg` | RNE / RTZ / RDN / RUP / RMM |
+| `vreg_cg`, `fpr_cg` | v0..v31 / ft0..ft11 |
+| `mem_align_cg` | byte / half_{aligned,unaligned} / word_{aligned,unaligned} / dword_{aligned,unaligned} |
+| `load_store_width_cg` | byte / half / word / dword |
+| `category_transition_cg` | prev_category __ current_category |
+| `opcode_transition_cg` | prev_mnem __ current_mnem |
+| `fmt_category_cross`, `category_group_cross` | crosses |
+
+**Runtime** (parsed from `spike -l` trace — set `--iss_trace`):
+
+| Covergroup | Bins |
+|---|---|
+| `branch_direction_cg` | taken / not_taken |
+| `exception_cg` | trap_entered (refined in Phase 2) |
+| `privilege_mode_cg` | M_entered / M_return / S_return / U_return |
+| `pc_reach_cg` | one bin per spike-resolved label |
+| `opcode_cg.*__dyn` | dynamic opcodes observed (vs static generation — gap = dead code) |
+
+### Goals (CGF-style YAML)
+
+```yaml
+opcode_cg:
+  ADD: 20
+  SUB: 10
+  FENCE: 2
+hazard_cg:
+  raw: 50
+  waw: 30
+```
+
+Keys map 1:1 to covergroup + bin names; the int is the required hit count.
+`0` marks a bin as tracked but optional (doesn't block "goals met").
+
+Ships four overlay files:
+
+- `chipforge_inst_gen/coverage/goals/baseline.yaml` — rv32imc-focused starter.
+- `.../rv64imc.yaml` — adds RV64I/M/C opcodes.
+- `.../rv64gcv.yaml` — vector additions.
+- `.../coralnpu.yaml` — Zve32x embedded (no FP vector, no S/U).
+- `.../no_branch_jump.yaml` — test overlay: zeroes branch/jump goals when the test sets `+no_branch_jump=1`.
+
+Layer via repeated `--cov_goals`:
+
+```bash
+--cov_goals goals/baseline.yaml --cov_goals goals/rv64gcv.yaml
+```
+
+Last writer wins per bin — overlays can both tighten *and* relax goals.
+
+### CLI workflows
+
+```bash
+# Collect static coverage (fast — no GCC/ISS):
+python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
+    --steps gen,cov --output /tmp/run \
+    --cov_goals chipforge_inst_gen/coverage/goals/baseline.yaml
+
+# Static + runtime (branch direction, pc_reach from spike trace):
+python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
+    --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
+    --output /tmp/run --cov_goals .../baseline.yaml
+
+# Auto-regression until goals hit (smart: perturbs gen_opts per-seed):
+python -m chipforge_inst_gen --target rv32imc --test riscv_rand_instr_test \
+    --auto_regress --cov_directed --max_seeds 16 \
+    --output /tmp/regress --cov_goals .../baseline.yaml
+
+# Post-run analysis:
+python -m chipforge_inst_gen.coverage.tools diff run_a/coverage.json run_b/coverage.json
+python -m chipforge_inst_gen.coverage.tools attribute run_*/coverage.json \
+    --goals .../baseline.yaml
+python -m chipforge_inst_gen.coverage.tools merge run_*/coverage.json -o all.json
+python -m chipforge_inst_gen.coverage.tools export all.json \
+    --csv cov.csv --html cov.html --goals .../baseline.yaml
+```
+
+`--cov_directed` is a heuristic that inspects missing bins and perturbs the
+next seed's `gen_opts` — e.g. if `FENCE` is uncovered it drops `+no_fence=1`;
+if `LB` is uncovered it injects a `riscv_load_store_rand_instr_stream`
+directed-stream. Baseline rv32imc goals close in 1 seed vs 8+ for blind sweep.
+
 ## Running the test suite
 
 ```bash
 python -m pytest tests/ -q
 ```
 
-Expected: `233 passed in <1s`.
+Expected: `304 passed in <2s`.
 
 ## Project layout
 
