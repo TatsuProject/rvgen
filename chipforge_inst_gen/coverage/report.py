@@ -9,7 +9,56 @@ outputs are produced via the standard library (``json.dumps`` / ``yaml.dump``)
 from __future__ import annotations
 
 from chipforge_inst_gen.coverage.cgf import Goals, missing_bins
-from chipforge_inst_gen.coverage.collectors import ALL_COVERGROUPS, CoverageDB
+from chipforge_inst_gen.coverage.collectors import (
+    ALL_COVERGROUPS, CG_CATEGORY, CG_HAZARD, CG_OPCODE, CoverageDB,
+)
+
+
+def compute_grade(db: CoverageDB, goals: Goals | None = None) -> int:
+    """Return a composite 0-100 coverage quality grade.
+
+    Components:
+
+    - **60% goals met** — primary signal. If no goals file is supplied,
+      this component scores 1.0 (no penalty).
+    - **20% hazard balance** — min(raw, war, waw) / max(raw, war, waw).
+      1.0 means each hazard type is equally represented; 0.0 means at
+      least one hazard type wasn't observed at all.
+    - **20% opcode diversity** — fraction of "a reasonable regression"
+      (60 distinct static opcode bins) that are covered.
+
+    Returns an integer in [0, 100]. Designed to be CI-friendly — pass
+    through GITHUB_OUTPUT for PR badges.
+    """
+    # Goals component (60%)
+    if goals is not None:
+        required = sum(1 for b in goals.data.values() for v in b.values() if v > 0)
+        if required > 0:
+            miss = missing_bins(db, goals)
+            missing_count = sum(len(v) for v in miss.values())
+            goals_score = max(0.0, (required - missing_count) / required)
+        else:
+            goals_score = 1.0
+    else:
+        goals_score = 1.0
+
+    # Hazard balance (20%)
+    hz = db.get(CG_HAZARD, {})
+    raws = [hz.get("raw", 0), hz.get("war", 0), hz.get("waw", 0)]
+    if min(raws) == 0:
+        hazard_score = 0.0
+    else:
+        hazard_score = min(raws) / max(raws)
+
+    # Opcode diversity (20%) — count distinct static (non-__dyn) opcode bins.
+    opc = db.get(CG_OPCODE, {})
+    static_count = sum(
+        1 for k, v in opc.items() if v > 0 and not k.endswith("__dyn")
+    )
+    opcode_score = min(1.0, static_count / 60.0)
+
+    grade = 0.6 * goals_score + 0.2 * hazard_score + 0.2 * opcode_score
+    return int(round(grade * 100))
 
 
 def render_report(db: CoverageDB, goals: Goals | None = None, *, top: int = 15) -> str:
@@ -33,7 +82,8 @@ def render_report(db: CoverageDB, goals: Goals | None = None, *, top: int = 15) 
 
     total_bins_hit = sum(len(b) for b in db.values())
     total_hits = sum(sum(b.values()) for b in db.values())
-    lines.append(f"covergroups: {len(db)}    unique bins hit: {total_bins_hit}    total samples: {total_hits}")
+    grade = compute_grade(db, goals)
+    lines.append(f"covergroups: {len(db)}    unique bins hit: {total_bins_hit}    total samples: {total_hits}    grade: {grade}/100")
     lines.append("")
 
     miss = missing_bins(db, goals) if goals else {}

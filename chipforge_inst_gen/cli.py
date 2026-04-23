@@ -386,6 +386,8 @@ def _emit_ci_summary(
     import os as _os
     from chipforge_inst_gen.coverage.cgf import missing_bins
 
+    from chipforge_inst_gen.coverage import compute_grade as _compute_grade
+
     total_unique = sum(
         1 for cg in db for bn, cnt in db.get(cg, {}).items() if cnt > 0
     )
@@ -395,6 +397,7 @@ def _emit_ci_summary(
     required = sum(1 for b in goals.data.values() for v in b.values() if v > 0) if goals else 0
     met = required - total_missing
     pct = (met / required * 100.0) if required else 100.0
+    grade = _compute_grade(db, goals)
 
     gh_output = _os.environ.get("GITHUB_OUTPUT")
     if gh_output:
@@ -407,6 +410,7 @@ def _emit_ci_summary(
                 f.write(f"goals_pct={pct:.1f}\n")
                 f.write(f"missing_bins={total_missing}\n")
                 f.write(f"tests={test_count}\n")
+                f.write(f"grade={grade}\n")
         except OSError:
             pass  # CI env may sandbox writes; don't crash.
 
@@ -415,6 +419,7 @@ def _emit_ci_summary(
         try:
             with open(gh_summary, "a") as f:
                 f.write("### chipforge-inst-gen coverage\n\n")
+                f.write(f"- **Grade: {grade}/100**\n")
                 f.write(f"- Tests run: **{test_count}**\n")
                 f.write(f"- Unique bins hit: **{total_unique}**\n")
                 f.write(f"- Total samples: **{total_hits}**\n")

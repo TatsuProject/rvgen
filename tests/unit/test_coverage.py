@@ -663,6 +663,36 @@ def test_rs1_eq_rs2_cg_equal_bumped():
     assert db[CG_RS1_EQ_RS2].get("equal", 0) == 1
 
 
+def test_coverage_grade_empty():
+    from chipforge_inst_gen.coverage import compute_grade
+    # Empty DB, no goals: goals=1.0 (no penalty), hazard=0 (nothing observed),
+    # opcode=0 (no distinct opcodes). Grade = 0.6*1 + 0.2*0 + 0.2*0 = 60.
+    g = compute_grade(new_db(), None)
+    assert g == 60
+
+
+def test_coverage_grade_high(tmp_path: Path):
+    from chipforge_inst_gen.coverage import compute_grade
+    from chipforge_inst_gen.coverage.collectors import CG_HAZARD, CG_OPCODE
+    # Balanced hazards + plenty of distinct static opcodes + no goals
+    # should produce a near-100 grade.
+    db = new_db()
+    db[CG_HAZARD] = {"raw": 100, "war": 100, "waw": 100, "none": 200}
+    db[CG_OPCODE] = {f"OP{i}": 5 for i in range(60)}
+    g = compute_grade(db, None)
+    assert g == 100  # 0.6*1 + 0.2*1 + 0.2*1
+
+
+def test_coverage_grade_penalises_missing_hazard():
+    from chipforge_inst_gen.coverage import compute_grade
+    from chipforge_inst_gen.coverage.collectors import CG_HAZARD
+    db = new_db()
+    # Missing WAW entirely → hazard_score = 0 → loses 20 points.
+    db[CG_HAZARD] = {"raw": 100, "war": 100, "none": 50}
+    g = compute_grade(db, None)
+    assert g <= 80
+
+
 def test_csr_access_read_write_cg():
     from chipforge_inst_gen.coverage.collectors import CG_CSR_ACCESS
     from chipforge_inst_gen.isa.enums import PrivilegedReg

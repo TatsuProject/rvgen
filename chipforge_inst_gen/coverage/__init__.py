@@ -34,13 +34,14 @@ from chipforge_inst_gen.coverage.cgf import (
     load_goals_layered,
     missing_bins,
 )
-from chipforge_inst_gen.coverage.report import render_report
+from chipforge_inst_gen.coverage.report import compute_grade, render_report
 from chipforge_inst_gen.coverage.runtime import sample_trace_file
 
 
 __all__ = [
     "CoverageDB",
     "Goals",
+    "compute_grade",
     "goals_met",
     "load_goals",
     "load_goals_layered",
