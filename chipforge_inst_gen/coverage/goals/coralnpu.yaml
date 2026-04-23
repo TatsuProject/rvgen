@@ -23,7 +23,11 @@ opcode_cg:
   VMV: 3
 
 group_cg:
-  ZVE32X: 10
+  # Vector instructions are all registered under group=RVV in the
+  # instruction table; the Zve* distinction lives at the target-profile
+  # level, not per-instruction. So we goal-sample RVV here (observed
+  # as ~10 vector ops emitted per-seed).
+  RVV: 10
 
 category_cg:
   ARITHMETIC: 80
