@@ -36,6 +36,10 @@ def get_stream(name: str) -> Type[DirectedInstrStream]:
 
 
 # Import (and register) concrete streams at package-load time.
+# Import order matters: load_store.py registers the canonical
+# load/store stream names and must run AFTER directed.py, whose
+# historical aliases are superseded below.
 from chipforge_inst_gen.streams import directed      # noqa: F401,E402
 from chipforge_inst_gen.streams import loop          # noqa: F401,E402
 from chipforge_inst_gen.streams import amo_streams   # noqa: F401,E402
+from chipforge_inst_gen.streams import load_store    # noqa: F401,E402

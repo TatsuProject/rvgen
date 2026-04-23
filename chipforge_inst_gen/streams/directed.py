@@ -318,13 +318,8 @@ from chipforge_inst_gen.streams import register_stream
 
 register_stream("riscv_int_numeric_corner_stream", IntNumericCornerStream)
 register_stream("riscv_jal_instr", JalInstr)
-register_stream("riscv_load_store_rand_instr_stream", LoadStoreRandInstrStream)
-# Aliases for testlist compatibility (SV stream names that map to the same
-# implementations in the Phase 1 MVP).
-register_stream("riscv_hazard_instr_stream", LoadStoreRandInstrStream)
-register_stream("riscv_load_store_hazard_instr_stream", LoadStoreRandInstrStream)
-register_stream("riscv_multi_page_load_store_instr_stream", LoadStoreRandInstrStream)
-register_stream("riscv_mem_region_stress_test", LoadStoreRandInstrStream)
-register_stream("riscv_load_store_stress_instr_stream", LoadStoreRandInstrStream)
-register_stream("riscv_load_store_shared_mem_stream", LoadStoreRandInstrStream)
-register_stream("riscv_load_store_rand_addr_instr_stream", LoadStoreRandInstrStream)
+# The scalar load/store family — riscv_load_store_rand_instr_stream and
+# friends — is now provided by streams/load_store.py with SV-faithful
+# distinctive behavior per subclass (hazard / multi-page / locality-aware).
+# The LoadStoreRandInstrStream in THIS module is the legacy simplified
+# class kept only as a fallback if load_store.py fails to import.
