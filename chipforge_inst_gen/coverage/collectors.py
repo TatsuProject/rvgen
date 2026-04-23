@@ -99,6 +99,8 @@ CG_STREAM = "directed_stream_cg"       # which directed stream contributed instr
 CG_CSR_VAL = "csr_value_cg"            # runtime: CSR × value-bucket (parsed from spike trace)
 CG_RS_VAL_CORNER = "rs_val_corner_cg"  # runtime: GPR write-value corner class
 CG_BIT_ACTIVITY = "bit_activity_cg"    # runtime: per-bit GPR-write activity (bit_N_toggled)
+CG_RS1_RS2_CROSS = "rs1_rs2_cross_cg"  # explicit rs1 × rs2 cross (for C-extension port-pair coverage)
+CG_RD_RS1_CROSS = "rd_rs1_cross_cg"    # rd × rs1 cross (in-place op pattern)
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -116,6 +118,7 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_BR_PER_MNEM, CG_VTYPE_DYN,
     CG_CSR_ACCESS, CG_LS_OFFSET, CG_STREAM, CG_CSR_VAL,
     CG_RS_VAL_CORNER, CG_BIT_ACTIVITY,
+    CG_RS1_RS2_CROSS, CG_RD_RS1_CROSS,
 )
 
 
@@ -272,8 +275,13 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
     # where both reads are meaningful.
     if isinstance(rs1_val, RiscvReg) and isinstance(rs2_val, RiscvReg):
         _bump(db, CG_RS1_EQ_RS2, "equal" if rs1_val == rs2_val else "distinct")
+        # Full rs1 × rs2 cross: ~1024 possible bins on a reg-file access.
+        # Worth tracking because port conflicts / forwarding paths often
+        # depend on the specific pair.
+        _bump(db, CG_RS1_RS2_CROSS, f"{rs1_val.name}__{rs2_val.name}")
     if isinstance(rs1_val, RiscvReg) and isinstance(rd_val, RiscvReg):
         _bump(db, CG_RS1_EQ_RD, "equal" if rs1_val == rd_val else "distinct")
+        _bump(db, CG_RD_RS1_CROSS, f"{rd_val.name}__{rs1_val.name}")
 
     # Immediate sign (only if the instr actually has one and it was
     # randomized — branches resolved to label refs skip here since they
