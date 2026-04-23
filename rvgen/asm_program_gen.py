@@ -274,6 +274,14 @@ class AsmProgramGen:
                     )
                 )
 
+        # Optional: arm a CLINT timer interrupt so the test body traps
+        # into the ISR at least once. Gated on both enable_interrupt and
+        # enable_timer_irq — the boot sequence already turned on the MIE
+        # and MSTATUS bits that make the IRQ visible to the core.
+        if self.cfg.enable_interrupt and self.cfg.enable_timer_irq:
+            from rvgen.privileged.interrupts import gen_arm_timer_irq
+            self.instr_stream.extend(gen_arm_timer_irq(self.cfg, hart=hart))
+
     def _gen_vector_init(self, hart: int) -> None:
         """Emit the vector engine init section.
 
@@ -348,11 +356,13 @@ class AsmProgramGen:
         """
         if self.cfg.bare_program_mode:
             return
-        from rvgen.isa.enums import SatpMode
-        if self.cfg.target.satp_mode != SatpMode.BARE:
-            align = 12
-        else:
-            align = self.cfg.tvec_alignment
+        # .align 12 (= 4 KiB) always — SV only uses it when paging is on,
+        # but on bare targets too it creates a gap between the random
+        # test body and the handler. Without the gap, random stores that
+        # generate small offsets from a large base (typical) can land on
+        # handler bytes, corrupting .text and causing infinite trap loops.
+        # Cost: up to 4 KiB of .text padding per hart.
+        align = 12
         for hart in range(self.cfg.num_of_harts):
             self.instr_stream.append(f".align {align}")
             self.instr_stream.extend(gen_trap_handler(self.cfg, hart=hart))

@@ -82,6 +82,8 @@ _MMODE_CSRS: tuple[PrivilegedReg, ...] = (
     PrivilegedReg.MHARTID,
     PrivilegedReg.MSTATUS,
     PrivilegedReg.MISA,
+    PrivilegedReg.MEDELEG,
+    PrivilegedReg.MIDELEG,
     PrivilegedReg.MIE,
     PrivilegedReg.MTVEC,
     PrivilegedReg.MCOUNTEREN,

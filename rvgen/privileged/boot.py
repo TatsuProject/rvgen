@@ -1,13 +1,23 @@
 """Boot CSR sequence — port of ``src/riscv_privileged_common_seq.sv`` +
 ``src/riscv_asm_program_gen.sv::pre_enter_privileged_mode``.
 
-For Phase 1 step 5 we implement the minimum viable M-mode-only path. S/U
-mode, PMP, and paging are deferred to step 8.
+Responsibilities:
+
+- Emit MISA setup for targets that have a writable MISA.
+- Program MTVEC (and STVEC when S-mode exists on the core) with the
+  trap-handler base address and the configured mode (DIRECT / VECTORED).
+- Program MSTATUS.MPP so that the final ``mret`` drops to the requested
+  initial privilege mode (M / S / U).
+- Optionally program MEDELEG / MIDELEG to route traps to a lower-
+  privilege handler (disabled by default — ``cfg.no_delegation=True`` —
+  so all traps reach the M-mode handler regardless of trapping mode).
+- Prime MIE for software / external / timer interrupts when
+  ``cfg.enable_interrupt`` is set.
+- End with ``mret`` so execution resumes at the ``init`` label in the
+  requested mode.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 from rvgen.config import Config
 from rvgen.isa.enums import (
@@ -36,7 +46,7 @@ def _line(s: str) -> str:
 
 
 def _misa_value(cfg: Config, target: TargetCfg) -> int:
-    """Compute the MISA value: MXL + extension bits.
+    """Compute MISA = MXL (high bits) | extension bits.
 
     SV: ``setup_misa`` (riscv_asm_program_gen.sv:565).
     """
@@ -58,7 +68,6 @@ def _misa_value(cfg: Config, target: TargetCfg) -> int:
         RiscvInstrGroup.RVV: MisaExt.MISA_EXT_V,
         RiscvInstrGroup.RV32B: MisaExt.MISA_EXT_B,
         RiscvInstrGroup.RV64B: MisaExt.MISA_EXT_B,
-        # Ratified bitmanip sub-groups all report as MISA.B.
         RiscvInstrGroup.RV32ZBA: MisaExt.MISA_EXT_B,
         RiscvInstrGroup.RV32ZBB: MisaExt.MISA_EXT_B,
         RiscvInstrGroup.RV32ZBC: MisaExt.MISA_EXT_B,
@@ -72,7 +81,6 @@ def _misa_value(cfg: Config, target: TargetCfg) -> int:
         if group in group_to_ext:
             ext_bits |= 1 << group_to_ext[group].value
     if target.supported_privileged_mode != (PrivilegedMode.MACHINE_MODE,):
-        # U/S modes enable MISA.U and .S bits.
         if PrivilegedMode.USER_MODE in target.supported_privileged_mode:
             ext_bits |= 1 << MisaExt.MISA_EXT_U.value
         if PrivilegedMode.SUPERVISOR_MODE in target.supported_privileged_mode:
@@ -81,7 +89,7 @@ def _misa_value(cfg: Config, target: TargetCfg) -> int:
 
 
 def gen_setup_misa(cfg: Config, scratch: RiscvReg) -> list[str]:
-    """Emit the MISA setup sequence: li + csrw MISA."""
+    """Emit MISA setup: ``li + csrw MISA``."""
     val = _misa_value(cfg, cfg.target)
     return [
         _line(f"li {scratch.abi}, 0x{val:x}"),
@@ -95,21 +103,21 @@ def gen_setup_misa(cfg: Config, scratch: RiscvReg) -> list[str]:
 
 
 def _mstatus_value(cfg: Config) -> int:
-    """Compute MSTATUS for boot: MPP=<init_mode>, MIE=0, optional MPIE/SPIE/UPIE.
+    """Compute the MSTATUS boot value.
 
-    SV: ``setup_mmode_reg`` (riscv_privileged_common_seq.sv:56).
+    Key bits:
+    - MPP[12:11] = init_privileged_mode (the mode ``mret`` will drop into).
+    - MPIE[7] / SPIE[5] / UPIE[4] set when cfg.enable_interrupt → these
+      populate xSTATUS.xIE when ``mret`` restores them.
+    - MPRV[17], SUM[18], MXR[19], TVM[20], TW[21], FS[14:13], VS[10:9]
+      reflect the cfg knobs one-for-one.
     """
     val = 0
-    # MPP (bits [12:11]).
     val |= (cfg.init_privileged_mode.value & 0b11) << 11
-    # MPIE/SPIE/UPIE set per enable_interrupt (approximate — full SV logic is
-    # per-mode; for Phase 1 we tie them all to enable_interrupt).
     if cfg.enable_interrupt:
         val |= 1 << 7   # MPIE
         val |= 1 << 5   # SPIE
         val |= 1 << 4   # UPIE
-        # MIE/SIE remain zero at boot (enabled via MPIE on mret).
-    # mstatus bits
     if cfg.mstatus_mprv:
         val |= 1 << 17
     if cfg.mstatus_sum:
@@ -128,14 +136,40 @@ def _mstatus_value(cfg: Config) -> int:
 
 
 def _mie_value(cfg: Config) -> int:
-    """Compute MIE for boot (approximate — just enables top-level IE bits)."""
+    """Compute MIE. Bits: MSIE=3, MTIE=7, MEIE=11."""
     val = 0
     if cfg.enable_interrupt:
         val |= 1 << 3   # MSIE
         val |= 1 << 11  # MEIE
         if cfg.enable_timer_irq:
-            val |= 1 << 7  # MTIE
+            val |= 1 << 7   # MTIE
     return val
+
+
+# ---------------------------------------------------------------------------
+# Delegation helpers (optional — enabled only when cfg.no_delegation=False)
+# ---------------------------------------------------------------------------
+
+
+def _medeleg_value(cfg: Config) -> int:
+    """MEDELEG bit layout: one bit per exception cause. SV's
+    ``force_m_delegation`` / ``force_s_delegation`` semantics are simpler
+    to emulate as "delegate everything benign" when delegation is on.
+
+    Bit positions match ExceptionCause values (they are the bit index).
+    We leave ECALL_MMODE (bit 11) undelegated — spec reserves that slot.
+    """
+    if cfg.no_delegation:
+        return 0
+    # Delegate the most useful exceptions (everything except ECALL_MMODE).
+    return 0xB3FF  # bits 0..9 + 12..15 of the exception vector
+
+
+def _mideleg_value(cfg: Config) -> int:
+    """MIDELEG: bits for S-software (1), S-timer (5), S-external (9)."""
+    if cfg.no_delegation:
+        return 0
+    return (1 << 1) | (1 << 5) | (1 << 9)
 
 
 # ---------------------------------------------------------------------------
@@ -150,50 +184,89 @@ def gen_pre_enter_privileged_mode(
     init_label: str = "init",
     trap_handler_label: str = "mtvec_handler",
 ) -> list[str]:
-    """Emit: kernel SP + MTVEC + MEPC + MSTATUS + MIE + MRET.
+    """Emit the CSR-write sequence that transitions from M-mode reset into
+    the configured initial privilege mode at label ``init``.
 
-    SV reference: riscv_asm_program_gen.sv pre_enter_privileged_mode (line
-    ~470) and riscv_privileged_common_seq.sv gen_csr_instr.
+    Shape: kernel SP → [STVEC] → MTVEC → [MEDELEG / MIDELEG] → MEPC →
+    MSTATUS → MIE → mret.
     """
     num_harts = cfg.num_of_harts
     scratch = cfg.scratch_reg
     gpr0 = cfg.gpr[0]
     prefix = hart_prefix(hart, num_harts)
+    target = cfg.target
+    assert target is not None
 
     lines: list[str] = []
 
-    # 1) Kernel stack pointer.
+    # 1) Kernel stack pointer (used by the trap handler's push/pop sequence).
     lines.append(_line(f"la {cfg.tp.abi}, {prefix}kernel_stack_end"))
 
-    # 2) MTVEC setup.
-    mtvec_mode_bit = cfg.mtvec_mode.value
-    lines.append(_line(f"la {gpr0.abi}, {prefix}{trap_handler_label}"))
-    lines.append(_line(f"ori {gpr0.abi}, {gpr0.abi}, {mtvec_mode_bit}"))
-    lines.append(_line(
-        f"csrw 0x{PrivilegedReg.MTVEC.value:x}, {gpr0.abi}"
-    ))
+    # 2) xTVEC setup. Always write MTVEC. If S-mode is in play and the
+    #    core advertises STVEC, program it to the same handler (traps are
+    #    handled uniformly in M-mode when delegation is off; but even so,
+    #    writing STVEC prevents a spurious read hazard and keeps spike
+    #    happy on delegated interrupts during nested-IRQ tests).
+    #
+    # The MODE bit is gated on enable_interrupt — when interrupts are
+    # disabled we emit a DIRECT layout (trap.py agrees), so MTVEC.MODE
+    # must be 0 to match. Importing trap here causes a cycle; inline the
+    # gate instead.
+    mtvec_mode_bit = cfg.mtvec_mode.value if cfg.enable_interrupt else 0
 
-    # 3) MEPC = init label (MRET will jump here).
+    def _write_xtvec(csr: PrivilegedReg, handler_label: str) -> None:
+        lines.append(_line(f"la {gpr0.abi}, {prefix}{handler_label}"))
+        lines.append(_line(f"ori {gpr0.abi}, {gpr0.abi}, {mtvec_mode_bit}"))
+        lines.append(_line(f"csrw 0x{csr.value:x}, {gpr0.abi}"))
+
+    _write_xtvec(PrivilegedReg.MTVEC, trap_handler_label)
+    # Write STVEC only when delegation is on — otherwise S-mode traps
+    # never reach STVEC (they land on MTVEC instead), and some spike
+    # builds WARL-reject the write when MISA.S is latched off, wasting
+    # an illegal-instr trap on boot.
+    if (
+        not cfg.no_delegation
+        and PrivilegedMode.SUPERVISOR_MODE in target.supported_privileged_mode
+        and PrivilegedReg.STVEC in target.implemented_csr
+    ):
+        _write_xtvec(PrivilegedReg.STVEC, "stvec_handler")
+
+    # 3) Delegation (only when explicitly requested; default is no-delegation).
+    if not cfg.no_delegation:
+        if PrivilegedReg.MEDELEG in target.implemented_csr:
+            val = _medeleg_value(cfg)
+            lines.append(_line(f"li {gpr0.abi}, 0x{val:x}"))
+            lines.append(_line(
+                f"csrw 0x{PrivilegedReg.MEDELEG.value:x}, {gpr0.abi}"
+            ))
+        if PrivilegedReg.MIDELEG in target.implemented_csr:
+            val = _mideleg_value(cfg)
+            lines.append(_line(f"li {gpr0.abi}, 0x{val:x}"))
+            lines.append(_line(
+                f"csrw 0x{PrivilegedReg.MIDELEG.value:x}, {gpr0.abi}"
+            ))
+
+    # 4) MEPC = init — MRET will jump here in the target privilege mode.
     lines.append(_line(f"la {gpr0.abi}, {prefix}{init_label}"))
     lines.append(_line(
         f"csrw 0x{PrivilegedReg.MEPC.value:x}, {gpr0.abi}"
     ))
 
-    # 4) MSTATUS.
+    # 5) MSTATUS.
     mstatus = _mstatus_value(cfg)
     lines.append(_line(f"li {gpr0.abi}, 0x{mstatus:x}"))
     lines.append(_line(
         f"csrw 0x{PrivilegedReg.MSTATUS.value:x}, {gpr0.abi}"
     ))
 
-    # 5) MIE (if target implements it).
-    if PrivilegedReg.MIE in cfg.target.implemented_csr:
+    # 6) MIE (if target implements it).
+    if PrivilegedReg.MIE in target.implemented_csr:
         mie = _mie_value(cfg)
         lines.append(_line(f"li {gpr0.abi}, 0x{mie:x}"))
         lines.append(_line(
             f"csrw 0x{PrivilegedReg.MIE.value:x}, {gpr0.abi}"
         ))
 
-    # 6) MRET — transition to init (at MPP's privilege).
+    # 7) MRET — transition to init at MPP's privilege.
     lines.append(_line("mret"))
     return lines

@@ -1,0 +1,161 @@
+# Privileged-mode + interrupt + exception testlist.
+#
+# These entries exercise rvgen's trap handler, interrupt dispatch, and
+# MSTATUS.MPP boot-mode machinery. They are intentionally small so they
+# run on any rv32imc / rv64imc core without extra toolchain setup.
+#
+# Run them via:
+#   python -m rvgen --target <T> --test <name> \
+#     --testlist docs/examples/privileged-testlist.yaml \
+#     --steps gen,gcc_compile,iss_sim --iss spike \
+#     --output out/
+#
+# Targets that match the tests below:
+#   rv32imc          — all M-mode tests
+#   rv64imc          — all M-mode tests, RV64
+#   rv32imafdc       — riscv_u_mode_rand_test, riscv_privileged_mode_rand_test,
+#                      riscv_invalid_csr_test (requires U-mode in the target)
+#   rv32imc_sv32     — same, with paging enabled in the target
+#
+# ---------------------------------------------------------------------
+# ECALL / EBREAK — scalar exceptions taken by the dispatcher.
+# ---------------------------------------------------------------------
+
+- test: riscv_ebreak_test
+  description: >
+    Random instruction stream with ebreak enabled. Every ebreak raises
+    BREAKPOINT (cause 3); the dispatcher hands off to ebreak_handler
+    which bumps MEPC by 4 and returns.
+  iterations: 2
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +instr_cnt=2000
+    +no_ebreak=0
+    +no_fence=1
+  rtl_test: core_base_test
+
+- test: riscv_ecall_test
+  description: >
+    Random stream with ecall enabled. Every ecall raises ECALL_MMODE
+    (cause 11) and the handler terminates the test cleanly via
+    write_tohost.
+  iterations: 2
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +instr_cnt=2000
+    +no_ecall=0
+    +no_fence=1
+  rtl_test: core_base_test
+
+- test: riscv_illegal_instr_test
+  description: >
+    Mixes the random stream with illegal-opcode injections. Each illegal
+    word traps at ILLEGAL_INSTRUCTION (cause 2) and the handler bumps
+    MEPC by 4.
+  iterations: 2
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +instr_cnt=2000
+    +illegal_instr_ratio=4
+    +no_fence=1
+  rtl_test: core_base_test
+
+# ---------------------------------------------------------------------
+# Interrupts — timer + software. Requires the boot MIE/MSTATUS priming
+# to be active (gated on +enable_interrupt=1).
+# ---------------------------------------------------------------------
+
+- test: riscv_full_interrupt_test
+  description: >
+    Timer interrupt arms CLINT MTIMECMP in the init section; the
+    VECTORED xtvec redirects to mmode_intr_vector_7 (M-timer);
+    mmode_intr_handler disarms MTIMECMP (pushing it to -1 so MTIP
+    deasserts before mret) and returns.
+  iterations: 2
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +enable_interrupt=1
+    +enable_timer_irq=1
+    +instr_cnt=2000
+    +no_fence=1
+  rtl_test: core_base_test
+  sim_opts: >
+    +enable_irq_seq=1
+
+- test: riscv_mtvec_vector_test
+  description: >
+    Nested-interrupt variant. Arms timer + re-enables MSTATUS.MIE inside
+    the handler so a second IRQ can preempt the first. NOTE: with only
+    the timer source active, MTIP stays asserted until MTIMECMP is re-
+    armed, so nested entry re-fires immediately and blows the kernel
+    stack. A well-formed nested test needs a second, independent IRQ
+    source (e.g. software IRQ kicked from an asm stream) — left as a
+    TODO, see docs/examples/privileged-testlist.yaml comment.
+  iterations: 0   # disabled until a second IRQ source is wired in
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +enable_interrupt=1
+    +enable_timer_irq=1
+    +enable_nested_interrupt=1
+    +instr_cnt=2000
+    +no_fence=1
+  rtl_test: core_base_test
+
+- test: riscv_software_interrupt_test
+  description: >
+    Validates the software-interrupt path (MSIP → cause 3). Currently
+    the generator enables MSIE at boot but does not auto-arm MSIP in
+    the init section; a directed stream can kick it via a store.
+  iterations: 1
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +enable_interrupt=1
+    +instr_cnt=1000
+    +no_fence=1
+  rtl_test: core_base_test
+
+# ---------------------------------------------------------------------
+# Privileged-mode boot tests. Require the target to advertise U (and
+# optionally S) in supported_privileged_mode — e.g. rv32imafdc, rv64gc.
+# ---------------------------------------------------------------------
+
+- test: riscv_u_mode_rand_test
+  description: >
+    Boot the core into U-mode (MPP=00 before mret). Random stream runs
+    in U-mode until any CSR access or ecall traps back into M-mode.
+  iterations: 2
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +boot_mode=u
+    +instr_cnt=3000
+    +no_fence=1
+    +no_csr_instr=1
+  rtl_test: core_base_test
+
+- test: riscv_privileged_mode_rand_test
+  description: >
+    Boot into M-mode and exercise privileged-CSR reads + writes.
+  iterations: 2
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +instr_cnt=5000
+    +num_of_sub_program=5
+    +no_fence=1
+  rtl_test: core_base_test
+
+- test: riscv_invalid_csr_test
+  description: >
+    Boot into U-mode, generate CSR accesses that a U-mode program is
+    not permitted to issue. Each one traps at ILLEGAL_INSTRUCTION;
+    the handler bumps MEPC and returns.
+  iterations: 2
+  gen_test: riscv_rand_instr_test
+  gen_opts: >
+    +boot_mode=u
+    +enable_access_invalid_csr_level=1
+    +instr_cnt=3000
+    +num_of_sub_program=0
+    +no_fence=1
+  rtl_test: core_invalid_csr_test
+  sim_opts: >
+    +require_signature_addr=1
