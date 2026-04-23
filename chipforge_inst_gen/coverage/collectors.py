@@ -96,6 +96,7 @@ CG_VTYPE_DYN = "vtype_dyn_cg"          # (SEW, LMUL) pair observed when sampling
 CG_CSR_ACCESS = "csr_access_cg"        # cross: CSR name × read/write access type
 CG_LS_OFFSET = "load_store_offset_cg"  # offset magnitude bins for load/store ops
 CG_STREAM = "directed_stream_cg"       # which directed stream contributed instrs
+CG_CSR_VAL = "csr_value_cg"            # runtime: CSR × value-bucket (parsed from spike trace)
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -111,7 +112,7 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_PC_REACH,
     CG_RS1_EQ_RS2, CG_RS1_EQ_RD,
     CG_BR_PER_MNEM, CG_VTYPE_DYN,
-    CG_CSR_ACCESS, CG_LS_OFFSET, CG_STREAM,
+    CG_CSR_ACCESS, CG_LS_OFFSET, CG_STREAM, CG_CSR_VAL,
 )
 
 

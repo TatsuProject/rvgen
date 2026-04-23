@@ -101,7 +101,11 @@ def run_iss(
             f"-m0x{memory_base:x}:0x{memory_size_bytes:x}",
         ]
         if enable_trace:
-            cmd += ["-l", f"--log={trace_path}"]
+            # --log-commits adds a retirement-line per instruction showing
+            # any GPR / CSR write that actually happened — lets the coverage
+            # parser sample actual runtime values (CSR destinations,
+            # destination register values).
+            cmd += ["-l", "--log-commits", f"--log={trace_path}"]
         if extra_iss_opts:
             cmd += extra_iss_opts.split()
         cmd.append(str(res.elf_path))

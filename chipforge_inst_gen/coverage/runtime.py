@@ -35,6 +35,7 @@ from pathlib import Path
 from chipforge_inst_gen.coverage.collectors import (
     CG_BR_PER_MNEM,
     CG_BRANCH_DIR,
+    CG_CSR_VAL,
     CG_EXCEPTION,
     CG_OPCODE,
     CG_PRIV_MODE,
@@ -53,6 +54,18 @@ _TRACE_RE = re.compile(
 # Label-enter line (spike's auto-symbolisation).
 _LABEL_RE = re.compile(r"^core\s+\d+:\s+>>>>\s*(?P<label>\S+)\s*$")
 
+# Commit line — emitted per-instruction when spike runs with
+# ``--log-commits``. Format is ``core N: <priv> 0x<pc> (0x<bin>) <writes>``
+# where <writes> can include register writes (``x5  0x...``) and CSR
+# writes (``c769_misa 0x...``). Multiple writes on the same line.
+_COMMIT_RE = re.compile(
+    r"^core\s+\d+:\s+(?P<pri>\d)\s+0x(?P<pc>[0-9a-f]+)\s+\(0x(?P<bin>[0-9a-f]+)\)\s*(?P<writes>.*)$"
+)
+_CSR_WRITE_IN_COMMIT_RE = re.compile(r"c[0-9a-f]+_(?P<csr>\w+)\s+0x(?P<val>[0-9a-f]+)")
+
+# Spike's priv-level mapping in commit lines.
+_PRI_LEVEL_BIN = {"0": "U_mode", "1": "S_mode", "3": "M_mode"}
+
 
 # Branch mnemonics spike emits (canonical RV names).
 _BRANCH_MNEMS = frozenset({
@@ -65,6 +78,27 @@ _BRANCH_MNEMS = frozenset({
 
 # Privilege-transition mnemonics.
 _PRIV_MNEMS = {"mret": "M_return", "sret": "S_return", "uret": "U_return"}
+
+# CSR-write mnemonics. For each we look at the rs1 (or imm) operand to
+# classify the value being written.
+_CSR_WRITE_MNEMS = frozenset({"csrw", "csrrw", "csrrwi", "csrs", "csrrs", "csrrsi", "csrc", "csrrc", "csrrci"})
+
+
+def _value_bucket(val: int, xlen: int = 64) -> str:
+    """Bucket a 2's-complement value into coverage bins."""
+    mask = (1 << xlen) - 1
+    v = val & mask
+    if v == 0:
+        return "zero"
+    if v == mask:
+        return "all_ones"
+    if v & (1 << (xlen - 1)):
+        return "msb_set"
+    if v < 0x100:
+        return "small"
+    if v < 0x10000:
+        return "medium"
+    return "large"
 
 
 # Canonical covergroup name for dynamically-observed opcodes. We reuse
@@ -113,6 +147,21 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                 # If the label is a known trap handler, count as exception-taken.
                 if "trap" in label or "mtvec" in label or "stvec" in label:
                     _bump(CG_EXCEPTION, "trap_entered")
+                continue
+
+            # Commit-line handling first (has the same prefix but includes
+            # a priv-level digit before the pc).
+            cm = _COMMIT_RE.match(line)
+            if cm:
+                writes = cm.group("writes") or ""
+                for wm in _CSR_WRITE_IN_COMMIT_RE.finditer(writes):
+                    csr = wm.group("csr").upper()
+                    val = int(wm.group("val"), 16)
+                    _bump(CG_CSR_VAL, f"{csr}__{_value_bucket(val, 64)}")
+                # Sample the priv level observed on retirement.
+                pri_bin = _PRI_LEVEL_BIN.get(cm.group("pri"))
+                if pri_bin:
+                    _bump(CG_PRIV_MODE, pri_bin)
                 continue
 
             m = _TRACE_RE.match(line)

@@ -663,6 +663,41 @@ def test_rs1_eq_rs2_cg_equal_bumped():
     assert db[CG_RS1_EQ_RS2].get("equal", 0) == 1
 
 
+def test_runtime_trace_csr_value_bin(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_CSR_VAL
+
+    trace = tmp_path / "t.trace"
+    trace.write_text(
+        # Trace line + commit line pair as spike --log-commits emits.
+        "core   0: 0x80000000 (0x30129073) csrw    misa, t0\n"
+        "core   0: 3 0x80000000 (0x30129073) c769_misa 0x40001104\n"
+        "core   0: 0x80000004 (0x30029073) csrw    mstatus, t0\n"
+        "core   0: 3 0x80000004 (0x30029073) c768_mstatus 0x0\n"
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    assert db[CG_CSR_VAL].get("MISA__large", 0) == 1
+    assert db[CG_CSR_VAL].get("MSTATUS__zero", 0) == 1
+
+
+def test_runtime_trace_priv_mode_from_commit(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_PRIV_MODE
+
+    trace = tmp_path / "t.trace"
+    trace.write_text(
+        "core   0: 0x80000000 (0x00000013) addi    x0, x0, 0\n"
+        "core   0: 3 0x80000000 (0x00000013)\n"
+        "core   0: 0x80000004 (0x00000013) addi    x0, x0, 0\n"
+        "core   0: 0 0x80000004 (0x00000013)\n"  # priv=0 → U_mode
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    assert db[CG_PRIV_MODE].get("M_mode", 0) == 1
+    assert db[CG_PRIV_MODE].get("U_mode", 0) == 1
+
+
 def test_coverage_grade_empty():
     from chipforge_inst_gen.coverage import compute_grade
     # Empty DB, no goals: goals=1.0 (no penalty), hazard=0 (nothing observed),

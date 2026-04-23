@@ -268,6 +268,21 @@ def run_auto_regression(
              f"total_new_bins={sum(new_bins_by_seed)} "
              f"median_per_seed={sorted(new_bins_by_seed)[len(new_bins_by_seed)//2]}")
 
+    # Timeline sidecar — a time-series view of coverage accumulation for
+    # external dashboards (D3 / matplotlib / grafana CSV import).
+    timeline_path = output_dir / "cov_timeline.json"
+    timeline = {
+        "start_seed": start_seed,
+        "per_seed": [
+            {"seed_offset": i,
+             "seed": start_seed + i,
+             "new_bins": n,
+             "cumulative_bins": sum(new_bins_by_seed[:i + 1])}
+            for i, n in enumerate(new_bins_by_seed)
+        ],
+    }
+    timeline_path.write_text(json.dumps(timeline, indent=2))
+
     # Convergence sidecar: per-bin first-hit seed + per-seed new-bin counts.
     conv_path = output_dir / "convergence.json"
     # Serialise the (cg, bn) tuple as "cg.bn" string key.
