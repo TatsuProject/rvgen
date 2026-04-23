@@ -362,6 +362,10 @@ All riscv-dv-compatible, set as `+flag=0/1` in `gen_opts` (or via
 
 ## Functional coverage
 
+> **Full verification engineer's walkthrough**: see
+> [`docs/verification-guide.md`](docs/verification-guide.md) for a 9-section
+> tutorial (first-run → goals → regression → CI gate → scaling).
+
 The generator ships a pure-Python functional-coverage model inspired by
 riscv-dv's SV covergroups and riscv-isac's CGF goals-file format.
 
