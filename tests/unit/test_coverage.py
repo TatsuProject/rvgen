@@ -754,6 +754,71 @@ def test_lint_goals_flags_unknown_covergroup(tmp_path: Path):
     assert "Unknown covergroup" in buf.getvalue()
 
 
+def test_golden_coverage_rv32imc_fixed_seed(tmp_path: Path):
+    """Regression guard: a fixed-seed rv32imc run must hit a known bin set.
+
+    This is an integration-style test — builds a Config, runs the
+    generator, and samples the emitted sequence into a CoverageDB. If
+    any future refactor breaks the generator such that (say) the
+    hazard_cg stops bumping raw/waw/war, or the random stream stops
+    picking the basic ARITH opcodes, this test fails loudly.
+
+    The expected bins are intentionally minimal — this is a floor, not
+    a ceiling. If we happen to add MORE coverage over time, the test
+    keeps passing.
+    """
+    import random as _rnd
+    from chipforge_inst_gen.asm_program_gen import AsmProgramGen
+    from chipforge_inst_gen.config import make_config
+    from chipforge_inst_gen.isa import enums  # noqa: F401 — ensure registrations
+    from chipforge_inst_gen.isa.filtering import create_instr_list
+    from chipforge_inst_gen.targets import get_target
+    from chipforge_inst_gen.coverage import sample_sequence
+    from chipforge_inst_gen.coverage.collectors import (
+        CG_CATEGORY, CG_FORMAT, CG_HAZARD, CG_OPCODE, CG_RS1, CG_RD,
+    )
+
+    target = get_target("rv32imc")
+    cfg = make_config(target, gen_opts="+instr_cnt=500")
+    cfg.seed = 100
+    avail = create_instr_list(cfg)
+    rng = _rnd.Random(100)
+    gen = AsmProgramGen(cfg=cfg, avail=avail, rng=rng)
+    gen.gen_program()
+
+    assert gen.main_sequence is not None and gen.main_sequence.instr_stream is not None
+    db = new_db()
+    sample_sequence(db, gen.main_sequence.instr_stream.instr_list)
+
+    # Minimum-viable opcode set we should always hit on rv32imc +
+    # default gen_opts (arith-heavy random stream).
+    for op in ("ADD", "SUB", "ADDI", "AND", "OR", "XOR", "SLL", "SRL"):
+        assert db[CG_OPCODE].get(op, 0) > 0, (
+            f"regression: {op} not emitted by rv32imc + seed=100 + default gen_opts. "
+            f"This usually means a stream refactor dropped the basic random pool. "
+            f"Observed opcodes: {sorted(db[CG_OPCODE].keys())[:20]}"
+        )
+
+    # R and I formats must both appear.
+    assert db[CG_FORMAT].get("R_FORMAT", 0) > 0
+    assert db[CG_FORMAT].get("I_FORMAT", 0) > 0
+
+    # ARITHMETIC / LOGICAL / SHIFT categories must appear.
+    for cat in ("ARITHMETIC", "LOGICAL", "SHIFT"):
+        assert db[CG_CATEGORY].get(cat, 0) > 0
+
+    # Every hazard type should fire at some point — a 500-instr run.
+    for hz in ("raw", "war", "waw", "none"):
+        assert db[CG_HAZARD].get(hz, 0) > 0, (
+            f"regression: {hz} hazard never detected. HAZARD_WINDOW or the "
+            f"hazard sampler likely broke."
+        )
+
+    # Register-file coverage must be broad (at least 5 distinct rs1s and rds).
+    assert len(db[CG_RS1]) >= 5
+    assert len(db[CG_RD]) >= 5
+
+
 def test_shipped_overlays_lint_clean():
     """Every shipped goals overlay must pass the linter with --strict=error."""
     from chipforge_inst_gen.coverage.tools import cmd_lint_goals
