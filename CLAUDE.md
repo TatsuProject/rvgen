@@ -1,6 +1,8 @@
 # rvgen
 
-A pure-Python re-implementation of **riscv-dv**, Google's UVM/SystemVerilog random instruction generator. Phase 1 = exact parity; Phase 2 = beyond. No Verilator, VCS, Questa, UVM, or PyVSC — just Python. SV reference lives at `~/Desktop/verif_env_tatsu/riscv-dv/`.
+A pure-Python re-implementation of **riscv-dv**, the CHIPS Alliance's UVM/SystemVerilog random instruction generator. Phase 1 = exact parity; Phase 2 = beyond. No Verilator, VCS, Questa, UVM, or PyVSC — just Python. SV reference lives at `~/Desktop/verif_env_tatsu/riscv-dv/`.
+
+**Public repo (as of 2026-04-23):** https://github.com/LogicX-Tatsu/rvgen — Apache-2.0, public. Filesystem dir is still `/home/qamar/chipforge/chipforge-inst-gen/` on this machine; may eventually move to a `tatsu` org.
 
 ---
 
@@ -117,17 +119,54 @@ Rules for either a generic continuation or a specific task: prefer editing exist
 
 ### Next-up queue (priority-ordered)
 
-1. **Vector loads/stores** (step 9 Phase 2). Directed `VectorLoadStoreStream` (unit-stride / strided / indexed) pinning rs1 to a legal memory region.
-2. **Vector memory stress + vector AMO** — the `riscv_vector_load_store_instr_stream` and `riscv_vector_amo_instr_stream` names in rv64gcv's testlist currently resolve to nothing.
-3. **Full privileged mode** (step 8). Paging (SV32/SV39/SV48), PMP cfg packing + NAPOT encoding, S/U-mode boot, debug ROM (DCSR/DPC/DSCRATCH, single-step).
-4. **Smart seed-picker** (Phase 2 coverage) — replay seeds that historically closed the currently-missing bins, rather than random new seeds.
-5. **Toggle / bit-activity coverage** — per-bit toggle counts across GPR writes (dead-bit detection).
-6. **Golden-file diff harness** (step 12) — structural `.S` compare vs riscv-dv's `2026-04-21/` reference.
-7. **Widen CSR-write whitelist** — port SV's `+include_write_reg=...` plusarg.
-8. **Vector FP / widening / narrowing** — classes exist but gated; flip via `+vec_fp=1` / `+vec_narrowing_widening=1`.
-9. **Zfh / Zvfh / Zc* / Zicond / Zimop** (Phase 2 extensions).
-10. **Cross-ISS compare** — ovpsim + sail + whisper trace matching.
-8. **Cross-ISS compare** (ovpsim + sail + whisper). Port `scripts/instr_trace_compare.py` properly into the library.
+> **Authoritative ranked plan with effort estimates + rationale:**
+> [`docs/research/comparison-and-next-steps.md`](docs/research/comparison-and-next-steps.md).
+> That doc compares us against riscv-dv / force-riscv / ImperasDV /
+> riscvISACOV / riscv-isac across 25 ISA extensions, test authoring, and
+> coverage methodology, and groups the remaining work into 5 tiers. The
+> queue below is a condensed version — update both files together.
+
+**Tier 1 — biggest credibility gap vs riscv-dv (pick these first):**
+
+1. **Full privileged mode + paging** (step 8). SV32/SV39/SV48 paging, PMP cfg packing + NAPOT encoding, S/U-mode boot, debug ROM (DCSR/DPC/DSCRATCH, single-step). Unlocks `riscv_mmu_stress_test` / `riscv_privileged_mode_rand_test` / `riscv_pmp_test` / `riscv_ebreak_debug_mode_test`. **~1–2 weeks.**
+2. **Vector load/store directed streams** — `riscv_vector_load_store_instr_stream` (unit-stride / strided / indexed) pinning rs1 to a legal memory region. The rv64gcv testlist references this name but it currently resolves to nothing. **~2–3 days.**
+3. **Vector AMO directed stream** — `riscv_vector_amo_instr_stream`. Same gap. **~1 day on top of #2.**
+4. **Vector FP / widening / narrowing** — classes exist but gated; flip `+vec_fp=1` / `+vec_narrowing_widening=1` and wire the VMV alignment constraints. **~1–2 days.**
+
+**Tier 2 — modern-ratified-extension checkbox (cheap wins):**
+
+5. **Zicbom / Zicboz / Zicbop** (ratified 2022 cache-management hints). **~1 day.**
+6. **Zicond** (ratified 2023 integer conditional). **~few hours.**
+7. **Zimop** (ratified 2024 may-be-operations). **~few hours.**
+8. **Zfh** (half-precision FP scalar). **~2–3 days.**
+9. **Zvfh** (vector half-precision FP). **~2–3 days on top of #8.**
+10. **Svnapot / Svpbmt** (advanced paging). **~2 days, depends on #1.**
+11. **Widen CSR-write whitelist** — port SV's `+include_write_reg=...` plusarg.
+
+**Tier 3 — deep feature additions:**
+
+12. **H-extension (hypervisor)** — two-stage translation, HS/VS modes. **1–2 weeks.**
+13. **Smaia / Ssaia** — advanced interrupt architecture. **~1 week, depends on #12.**
+14. **Multi-hart with shared-memory races** — `num_harts > 1` works but the load/store streams don't race. Needs hart-aware region allocator + LR/SC rendezvous. **~3–5 days.**
+
+**Tier 4 — coverage-subsystem polish (already strongest; these are moat-deepeners):**
+
+15. **riscvISACOV-compatible SV export** — emit our goals as SV covergroup source so teams with SV sims can reuse our goal sets. **~2–3 days.**
+16. **riscv-isac CGF-format round-trip** — speak the upstream CGF tool's output so our coverage data integrates into the broader ecosystem. **~1–2 days.**
+17. **Interactive HTML dashboard** — swap static-table export for a plotly-based one with collapsible covergroups, time-series plots from cov_timeline.json, bin-vs-seed heatmaps. Single-file HTML. **~2–3 days.**
+18. **Golden-file diff harness** (step 12) — structural `.S` compare vs riscv-dv's `2026-04-21/` reference. **~2 days.**
+
+**Tier 5 — community + polish:**
+
+19. **PyPI publication** — tag v0.1.0, build wheel, publish `pip install rvgen`. **~1 day.** Immediate next priority after Tier 1 makes the tool broadly credible.
+20. **Docker image with RISC-V toolchain** — `docker run logicxtatsu/rvgen-ci:latest` with GCC + spike + spike-vector pre-built, unlocks E2E CI (currently CI only runs pytest, not spike). **~1–2 days.**
+21. **Nightly CI job** — `scripts/regression.py` against a full matrix every midnight, uploads HTML dashboard as an artefact. Requires #20.
+22. **ReadTheDocs site** — render `docs/` via Sphinx / mkdocs + GitHub Pages. **~1 day.**
+23. **Repo move to tatsu org** (eventual) — `gh repo transfer LogicX-Tatsu/rvgen <tatsu-org>` + update URLs in README / CHANGELOG / CITATION.cff.
+
+**Tier 6 — cross-ISS compare (tiedown for exact parity):**
+
+24. **Cross-ISS compare** (ovpsim + sail + whisper). Port `scripts/instr_trace_compare.py` properly into the library. **~3–5 days.**
 
 ---
 
