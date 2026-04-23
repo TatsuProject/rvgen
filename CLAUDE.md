@@ -6,7 +6,7 @@ A pure-Python re-implementation of **riscv-dv**, Google's UVM/SystemVerilog rand
 
 ## 0 — Status and where to pick up
 
-**Current phase:** Phase 1 steps 1–7 complete + Phase 2 crypto + **RVV 1.0 baseline** + **5 Zve* embedded targets (incl. Coral NPU)** + **comprehensive functional-coverage infrastructure** + **SV-faithful scalar load/store stream family** landed. **325 unit tests passing.** End-to-end CLI pipeline (gen → gcc_compile → iss_sim → cov) passes **51/51** non-vector Spike runs + **18/18** rv64gcv vector runs + **5/5** Zve*-profile runs + **21/21 trace-level matches on chipforge-mcu RTL** (`rv32imc_zkn`). Instruction registry = **486 ops**, stream registry = **16 distinct classes** (incl. JalrInstr), **27 targets**, **28 covergroups**.
+**Current phase:** Phase 1 steps 1–7 complete + Phase 2 crypto + **RVV 1.0 baseline** + **5 Zve* embedded targets (incl. Coral NPU)** + **production-grade functional-coverage infrastructure** + **SV-faithful scalar load/store stream family** landed. **332 unit tests passing.** End-to-end CLI pipeline (gen → gcc_compile → iss_sim → cov) passes **51/51** non-vector Spike runs + **18/18** rv64gcv vector runs + **5/5** Zve*-profile runs + **21/21 trace-level matches on chipforge-mcu RTL** (`rv32imc_zkn`). Instruction registry = **486 ops**, stream registry = **16 distinct classes**, **27 targets**, **32 covergroups** (18 static + 10 runtime + 4 crosses).
 
 Last substantive session (2026-04-23) iterated on **verification-team-ready coverage**. Additions since the baseline RVV+Zve work:
 - 28 covergroups total (static: opcode/format/category/group/rs1/rs2/rd/imm_sign/imm_range/hazard/csr/csr_access/fp_rm/vtype/vreg/fpr/mem_align/load_store_width/load_store_offset/category_transition/opcode_transition/rs1_eq_rs2/rs1_eq_rd/directed_stream/fmt_category_cross/category_group_cross; runtime: branch_direction/branch_taken_per_mnem/exception/privilege_mode/pc_reach/csr_value/rs_val_corner + opcode_cg.*__dyn).
@@ -98,7 +98,7 @@ python -m chipforge_inst_gen.coverage.tools export all.json --html cov.html --go
 
 ### Prompt to resume a fresh session
 
-> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/chipforge-inst-gen/` first. 325 unit tests pass, 51/51 Spike E2E, 18/18 rv64gcv vector E2E, 5/5 Zve*-profile E2E, 21/21 chipforge-mcu trace-level match, 28 covergroups, CGF-style goals + auto-regression + CI integration in place. Docs: `docs/verification-guide.md`. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
+> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/chipforge-inst-gen/` first. 332 unit tests pass, 51/51 Spike E2E, 18/18 rv64gcv vector E2E, 5/5 Zve*-profile E2E, 21/21 chipforge-mcu trace-level match. 32 covergroups, layered CGF goals, directed auto-regression, parallel regression runner in `scripts/regression.py`, CLI tools (merge/diff/attribute/export/report/per-test/baseline-check/suggest-seeds/lint-goals). Docs: `docs/verification-guide.md`. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
 
 Rules for either a generic continuation or a specific task: prefer editing existing files, cross-check each change against the SV reference at `~/Desktop/verif_env_tatsu/riscv-dv/`, run `python -m pytest tests/` after every change, update §0 when a major milestone lands.
 
@@ -107,10 +107,11 @@ Rules for either a generic continuation or a specific task: prefer editing exist
 - **Instruction registry: 486 ops** — RV32I/M/A/C/F/FC/D/DC + RV64 counterparts + Zba/Zbb/Zbc/Zbs + draft RV32B + Zbkb/Zbkc/Zbkx + Zkne/Zknd/Zknh + Zksh/Zksed + **RVV 1.0 (184 ops)**.
 - **Stream registry: 16 distinct classes** — IntNumericCornerStream, JalInstr, JalrInstr, LoopInstr, LrScInstrStream, AmoInstrStream, LoadStoreBase, LoadStoreStress, LoadStoreRand, HazardInstrStream, LoadStoreHazardInstrStream, MultiPageLoadStoreInstrStream, MemRegionStressTest, LoadStoreRandAddrInstrStream, LoadStoreSharedMemStream, (+ legacy `LoadStoreRandInstrStream` alias in `streams/directed.py`).
 - **Targets: 27** — all previous 22 + coralnpu + rv32imc_zve32x + rv32imfc_zve32f + rv64imc_zve64x + rv64imafdc_zve64d (Zve* embedded-vector profiles).
-- **Unit tests: 325 passing** (`/home/qamar/anaconda3/bin/python -m pytest tests/`).
-- **Coverage: 28 covergroups** (16 static + 8 runtime + 4 crosses) — see `docs/verification-guide.md` for the full catalog.
+- **Unit tests: 332 passing** (`/home/qamar/anaconda3/bin/python -m pytest tests/`).
+- **Coverage: 32 covergroups** (18 static + 10 runtime + 4 crosses — incl. rs1×rs2 and rd×rs1 reg-pair crosses, bit_activity per-bit toggle detection, csr_value/rs_val_corner runtime bins, priv_mode per-retired-instruction sampling). See `docs/verification-guide.md` for the full catalog + workflow tutorial.
 - **Coverage goals shipped**: baseline + rv32imafdc + rv32imc_zkn + rv32imcb + rv32ui + rv64gc + rv64gcv + rv64imafdc + rv64imc + rv64imcb + coralnpu + no_branch_jump. Layer via repeated `--cov_goals`; auto-resolve from `goals/<target>.yaml` when omitted.
-- **Coverage tools**: `python -m chipforge_inst_gen.coverage.tools {merge, diff, attribute, export, report, per-test, baseline-check}` — CSV + HTML outputs, first-closer attribution, golden-baseline CI gate.
+- **Coverage tools**: `python -m chipforge_inst_gen.coverage.tools {merge, diff, attribute, export, report, per-test, baseline-check, suggest-seeds, lint-goals}` — CSV + HTML outputs, first-closer attribution, golden-baseline CI gate, seed-replay recommendations, typo-catching goals linter.
+- **Parallel regression runner**: `scripts/regression.py --targets ... --tests ... --seeds ... --jobs 8 --emit_html` — matrix execution + merged coverage + HTML dashboard. The one command CI invokes.
 - **Auto-regression**: `--auto_regress --cov_directed` closes 95/95 rv32imc baseline goals on seed 1 (vs 86/95 for blind-sweep). Plateau detection via `--plateau_window`. Emits convergence.json + cov_timeline.json + ASCII sparkline.
 - **CI integration**: `GITHUB_OUTPUT` + `GITHUB_STEP_SUMMARY` + composite 0-100 coverage grade.
 
