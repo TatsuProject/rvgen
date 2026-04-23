@@ -214,8 +214,25 @@ def run_auto_regression(
             gen = AsmProgramGen(cfg=cfg, avail=avail, rng=rng_i)
             lines = gen.gen_program()
 
+            # Per-seed archive — the "current" file (used by the next
+            # iteration) plus a named snapshot per seed so verif engineers
+            # can replay a specific seed's exact .S.
             asm_path = asm_dir / f"{te.test}_0.S"
             asm_path.write_text("\n".join(lines) + "\n")
+            snapshot_dir = asm_dir / "seed_archive"
+            snapshot_dir.mkdir(exist_ok=True)
+            snapshot_path = snapshot_dir / f"{te.test}_seed{seed}.S"
+            snapshot_path.write_text("\n".join(lines) + "\n")
+
+            # Rotating buffer: keep the last ``asm_archive_keep`` snapshots
+            # to avoid blowing up the disk on a 1000-seed run. Default 16.
+            keep = max(1, int(getattr(args, "asm_archive_keep", 16) or 16))
+            snapshots = sorted(snapshot_dir.glob(f"{te.test}_seed*.S"))
+            for old in snapshots[:-keep]:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
 
             if gen.main_sequence is not None and gen.main_sequence.instr_stream is not None:
                 run_db = new_db()

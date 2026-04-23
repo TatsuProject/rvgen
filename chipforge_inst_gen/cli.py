@@ -83,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plateau_window", type=int, default=4,
                    help="Auto-regress bails if the last N seeds added zero "
                         "new bins AND goals still unmet (default 4).")
+    p.add_argument("--asm_archive_keep", type=int, default=16,
+                   help="Auto-regress keeps the last N per-seed .S snapshots "
+                        "under asm_test/seed_archive/ (default 16).")
     p.add_argument("--iss_trace", action="store_true",
                    help="Enable spike -l trace output; the 'cov' step will "
                         "parse the trace for runtime coverage (branch taken/"
