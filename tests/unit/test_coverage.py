@@ -307,3 +307,159 @@ def test_render_report_goals_met_banner(tmp_path: Path):
     db[CG_OPCODE] = {"ADD": 5}
     report = render_report(db, goals)
     assert "ALL GOALS MET" in report
+
+
+# ---------------------------------------------------------------------------
+# New covergroups (mem_align, ls_width, transitions, imm_range)
+# ---------------------------------------------------------------------------
+
+
+def test_mem_align_word_aligned_bin():
+    from chipforge_inst_gen.coverage.collectors import CG_MEM_ALIGN, CG_LS_WIDTH
+    db = new_db()
+    instr = get_instr(RiscvInstrName.LW)
+    instr.rs1 = RiscvReg.T0
+    instr.rd = RiscvReg.A0
+    instr.imm_str = "8"  # 8 is word-aligned
+    instr.imm = 8
+    sample_instr(db, instr)
+    assert db[CG_MEM_ALIGN].get("word_aligned", 0) == 1
+    assert db[CG_LS_WIDTH].get("word", 0) == 1
+
+
+def test_mem_align_half_unaligned_bin():
+    from chipforge_inst_gen.coverage.collectors import CG_MEM_ALIGN
+    db = new_db()
+    instr = get_instr(RiscvInstrName.LH)
+    instr.rs1 = RiscvReg.T0
+    instr.rd = RiscvReg.A0
+    instr.imm_str = "3"  # 3 is not even
+    instr.imm = 3
+    sample_instr(db, instr)
+    assert db[CG_MEM_ALIGN].get("half_unaligned", 0) == 1
+
+
+def test_category_transition_sampled():
+    from chipforge_inst_gen.coverage.collectors import CG_CAT_TRANS
+    db = new_db()
+    seq = [
+        _make(RiscvInstrName.ADD, rd=RiscvReg.T0, rs1=RiscvReg.A0, rs2=RiscvReg.A1),
+        _make(RiscvInstrName.AND, rd=RiscvReg.T1, rs1=RiscvReg.A2, rs2=RiscvReg.A3),
+        _make(RiscvInstrName.SLT, rd=RiscvReg.T2, rs1=RiscvReg.A4, rs2=RiscvReg.A5),
+    ]
+    sample_sequence(db, seq)
+    # ADD → AND (ARITH → LOGICAL), AND → SLT (LOGICAL → COMPARE)
+    assert db[CG_CAT_TRANS].get("ARITHMETIC__LOGICAL", 0) == 1
+    assert db[CG_CAT_TRANS].get("LOGICAL__COMPARE", 0) == 1
+
+
+def test_opcode_transition_sampled():
+    from chipforge_inst_gen.coverage.collectors import CG_OP_TRANS
+    db = new_db()
+    seq = [
+        _make(RiscvInstrName.ADD, rd=RiscvReg.T0, rs1=RiscvReg.A0, rs2=RiscvReg.A1),
+        _make(RiscvInstrName.SUB, rd=RiscvReg.T1, rs1=RiscvReg.A2, rs2=RiscvReg.A3),
+    ]
+    sample_sequence(db, seq)
+    assert db[CG_OP_TRANS].get("ADD__SUB", 0) == 1
+
+
+def test_imm_range_walking_one():
+    from chipforge_inst_gen.coverage.collectors import CG_IMM_EXT
+    db = new_db()
+    instr = get_instr(RiscvInstrName.ADDI)
+    instr.rs1 = RiscvReg.ZERO
+    instr.rd = RiscvReg.A0
+    instr.imm = 1 << 5  # bit 5 set only → walking-one
+    instr.imm_len = 12
+    instr.post_randomize()
+    sample_instr(db, instr)
+    assert db[CG_IMM_EXT].get("walking_one", 0) >= 1
+
+
+def test_imm_range_zero_and_all_ones():
+    from chipforge_inst_gen.coverage.collectors import CG_IMM_EXT
+    db = new_db()
+    i0 = get_instr(RiscvInstrName.ADDI)
+    i0.rs1 = RiscvReg.ZERO
+    i0.rd = RiscvReg.A0
+    i0.imm = 0
+    i0.imm_len = 12
+    i0.post_randomize()
+    sample_instr(db, i0)
+    i1 = get_instr(RiscvInstrName.ORI)
+    i1.rs1 = RiscvReg.ZERO
+    i1.rd = RiscvReg.A1
+    i1.imm = 0xFFF
+    i1.imm_len = 12
+    i1.post_randomize()
+    sample_instr(db, i1)
+    assert db[CG_IMM_EXT].get("zero", 0) >= 1
+    assert db[CG_IMM_EXT].get("all_ones", 0) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Runtime coverage (spike trace parser)
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_trace_parse_branch_direction(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_BRANCH_DIR
+
+    # Tiny synthetic spike trace: 2 branches, one taken, one not-taken.
+    trace = tmp_path / "tiny.trace"
+    trace.write_text(
+        "core   0: 0x80000000 (0x00108093) addi    ra, ra, 1\n"
+        "core   0: 0x80000004 (0x00108463) beq     ra, ra, pc + 8\n"
+        "core   0: 0x8000000c (0x00000013) addi    x0, x0, 0\n"   # jumped to +8 → taken
+        "core   0: 0x80000010 (0x00109463) bne     ra, ra, pc + 8\n"
+        "core   0: 0x80000014 (0x00000013) addi    x0, x0, 0\n"   # fell through +4 → not_taken
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    assert db[CG_BRANCH_DIR].get("taken", 0) == 1
+    assert db[CG_BRANCH_DIR].get("not_taken", 0) == 1
+
+
+def test_runtime_trace_parse_pc_reach(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_PC_REACH, CG_EXCEPTION
+
+    trace = tmp_path / "tiny.trace"
+    trace.write_text(
+        "core   0: >>>>  init\n"
+        "core   0: 0x80000000 (0x00000013) addi    x0, x0, 0\n"
+        "core   0: >>>>  mtvec_handler\n"
+        "core   0: 0x80000100 (0x30200073) mret\n"
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    assert db[CG_PC_REACH].get("init", 0) == 1
+    assert db[CG_PC_REACH].get("mtvec_handler", 0) == 1
+    # Exception covergroup bumped because mtvec is a trap label.
+    assert db[CG_EXCEPTION].get("trap_entered", 0) == 1
+
+
+def test_runtime_trace_privilege_mret(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_PRIV_MODE
+
+    trace = tmp_path / "tiny.trace"
+    trace.write_text(
+        "core   0: 0x80000000 (0x30200073) mret\n"
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    # M_entered always bumped at start + M_return for the mret.
+    assert db[CG_PRIV_MODE].get("M_return", 0) == 1
+    assert db[CG_PRIV_MODE].get("M_entered", 0) == 1
+
+
+def test_runtime_trace_missing_file_silent(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+
+    db = new_db()
+    # Non-existent path — should not raise, return zeros.
+    meta = sample_trace_file(db, tmp_path / "does_not_exist.trace")
+    assert meta == {"lines_parsed": 0, "pc_reach_labels": 0, "branches_observed": 0}

@@ -77,6 +77,17 @@ CG_VREG = "vreg_cg"
 CG_FPR = "fpr_cg"
 CG_FMT_X_CAT = "fmt_category_cross"
 CG_CAT_X_GRP = "category_group_cross"
+# --- added in the coverage-improvement wave ---
+CG_MEM_ALIGN = "mem_align_cg"          # per load/store: byte_aligned/half/word/dword/unaligned
+CG_LS_WIDTH = "load_store_width_cg"    # byte/half/word/dword (sign vs zero ext)
+CG_CAT_TRANS = "category_transition_cg"  # prev_category -> current_category
+CG_OP_TRANS = "opcode_transition_cg"   # adjacent-instr opcode transitions (top-N coverage)
+CG_BRANCH_DIR = "branch_direction_cg"  # runtime: taken / not-taken (populated from ISS log)
+CG_EXCEPTION = "exception_cg"          # runtime: mcause exception values
+CG_PRIV_MODE = "privilege_mode_cg"     # runtime: M/S/U mode observed
+CG_REG_VAL_SIGN = "rs_val_sign_cg"     # rs-value sign class (pos/neg/zero) on the fly
+CG_IMM_EXT = "imm_range_cg"            # walking-ones / walking-zeros / corner classes
+CG_PC_REACH = "pc_reach_cg"            # runtime: unique labels entered
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -85,6 +96,11 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_IMM_SIGN, CG_HAZARD, CG_CSR,
     CG_FP_RM, CG_VTYPE, CG_VREG, CG_FPR,
     CG_FMT_X_CAT, CG_CAT_X_GRP,
+    CG_MEM_ALIGN, CG_LS_WIDTH,
+    CG_CAT_TRANS, CG_OP_TRANS,
+    CG_BRANCH_DIR, CG_EXCEPTION, CG_PRIV_MODE,
+    CG_IMM_EXT,
+    CG_PC_REACH,
 )
 
 
@@ -114,6 +130,78 @@ def _imm_sign_bin(imm: int, imm_len: int) -> str:
     if v & sign_bit:
         return "neg"
     return "pos"
+
+
+def _imm_range_bin(imm: int, imm_len: int) -> str:
+    """Classify the immediate by its bit-pattern: walking ones, walking zeros, extremes."""
+    if imm_len == 0:
+        return "none"
+    mask = (1 << imm_len) - 1
+    v = imm & mask
+    if v == 0:
+        return "zero"
+    if v == mask:
+        return "all_ones"
+    # Walking-one: exactly one bit set.
+    if v & (v - 1) == 0:
+        return "walking_one"
+    # Walking-zero: exactly one bit cleared.
+    if (~v & mask) & ((~v & mask) - 1) == 0:
+        return "walking_zero"
+    # Min-signed / max-signed corners.
+    sign_bit = 1 << (imm_len - 1)
+    if v == sign_bit:
+        return "min_signed"
+    if v == sign_bit - 1:
+        return "max_signed"
+    return "generic"
+
+
+_BYTE_OPS = frozenset({
+    RiscvInstrName.LB, RiscvInstrName.LBU, RiscvInstrName.SB,
+})
+_HALF_OPS = frozenset({
+    RiscvInstrName.LH, RiscvInstrName.LHU, RiscvInstrName.SH,
+})
+_WORD_OPS = frozenset({
+    RiscvInstrName.LW, RiscvInstrName.LWU, RiscvInstrName.SW,
+})
+_DWORD_OPS = frozenset({
+    RiscvInstrName.LD, RiscvInstrName.SD,
+})
+
+
+def _load_store_width_bin(name: RiscvInstrName) -> str | None:
+    if name in _BYTE_OPS:
+        return "byte"
+    if name in _HALF_OPS:
+        return "half"
+    if name in _WORD_OPS:
+        return "word"
+    if name in _DWORD_OPS:
+        return "dword"
+    return None
+
+
+def _mem_align_bin(offset: int, name: RiscvInstrName) -> str | None:
+    """Classify the access by its natural alignment requirement + the offset bits.
+
+    Natural alignment for ``name`` × offset mod natural width:
+
+    - byte ops: always aligned (``aligned``).
+    - half ops: ``aligned`` iff offset%2 == 0, else ``unaligned_half``.
+    - word ops: ``aligned`` iff offset%4 == 0, else ``unaligned_word``.
+    - dword ops: ``aligned`` iff offset%8 == 0, else ``unaligned_dword``.
+    """
+    if name in _BYTE_OPS:
+        return "byte_aligned"
+    if name in _HALF_OPS:
+        return "half_aligned" if offset % 2 == 0 else "half_unaligned"
+    if name in _WORD_OPS:
+        return "word_aligned" if offset % 4 == 0 else "word_unaligned"
+    if name in _DWORD_OPS:
+        return "dword_aligned" if offset % 8 == 0 else "dword_unaligned"
+    return None
 
 
 def sample_instr(db: CoverageDB, instr: Instr) -> None:
@@ -168,6 +256,24 @@ def sample_instr(db: CoverageDB, instr: Instr) -> None:
     imm_len = getattr(instr, "imm_len", 0)
     if has_imm and imm_len:
         _bump(db, CG_IMM_SIGN, _imm_sign_bin(instr.imm, imm_len))
+        _bump(db, CG_IMM_EXT, _imm_range_bin(instr.imm, imm_len))
+
+    # Load/store width + memory alignment samplers (static — we know the
+    # offset the emitter chose, which is what GCC will ultimately feed spike).
+    width_bin = _load_store_width_bin(instr.instr_name)
+    if width_bin is not None:
+        _bump(db, CG_LS_WIDTH, width_bin)
+        # Use the signed offset if available (the emitter stashes it in
+        # imm_str as a decimal number for load/stores). Fall back to
+        # instr.imm interpreted per-format.
+        off = 0
+        try:
+            off = int(instr.imm_str) if instr.imm_str.lstrip('-').isdigit() else int(instr.imm)
+        except Exception:  # noqa: BLE001
+            off = int(getattr(instr, "imm", 0))
+        align_bin = _mem_align_bin(off, instr.instr_name)
+        if align_bin is not None:
+            _bump(db, CG_MEM_ALIGN, align_bin)
 
     # CSR — CsrInstr subclasses carry a 12-bit csr addr; decode via enum.
     if isinstance(instr, CsrInstr):
@@ -234,9 +340,28 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr]) -> None:
     """
     last_writer_at: dict[RiscvReg, int] = {}
     last_reader_at: dict[RiscvReg, int] = {}
+    prev_category: str | None = None
+    prev_opcode: str | None = None
 
     for idx, instr in enumerate(seq):
         sample_instr(db, instr)
+
+        # Category + opcode transitions — valuable for finding sequencing
+        # bugs (e.g. LOAD immediately after BRANCH is a stall on some pipes).
+        try:
+            cur_cat = instr.category.name
+            if prev_category is not None:
+                _bump(db, CG_CAT_TRANS, f"{prev_category}__{cur_cat}")
+            prev_category = cur_cat
+        except (AttributeError, Exception):
+            prev_category = None
+        try:
+            cur_op = instr.instr_name.name
+            if prev_opcode is not None:
+                _bump(db, CG_OP_TRANS, f"{prev_opcode}__{cur_op}")
+            prev_opcode = cur_op
+        except (AttributeError, Exception):
+            prev_opcode = None
 
         # Collect the regs this instr reads/writes.
         reads: set[RiscvReg] = set()

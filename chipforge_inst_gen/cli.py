@@ -78,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "coverage goals are met. Requires --cov_goals.")
     p.add_argument("--max_seeds", type=int, default=64,
                    help="Upper bound on seeds tried by --auto_regress (default 64).")
+    p.add_argument("--iss_trace", action="store_true",
+                   help="Enable spike -l trace output; the 'cov' step will "
+                        "parse the trace for runtime coverage (branch taken/"
+                        "not-taken, pc_reach, privilege transitions).")
 
     # ISA
     p.add_argument("--isa", default="",
@@ -252,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
             for r in fails:
                 _LOG.error("  %s", r.test_id)
 
+    iss_results: list = []
     if "iss_sim" in steps and gcc_results:
         from chipforge_inst_gen.iss import run_iss
         isa = args.isa or _infer_isa(args.target)
@@ -262,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             isa=isa,
             priv=args.priv,
             timeout_s=args.iss_timeout,
+            enable_trace=args.iss_trace,
         )
         fails = [r for r in iss_results if r.returncode != 0]
         if fails:
@@ -278,7 +284,20 @@ def main(argv: list[str] | None = None) -> int:
             goals_met as cov_goals_met,
             load_goals as cov_load_goals,
             render_report as cov_render_report,
+            sample_trace_file,
         )
+
+        # Runtime coverage — if we enabled iss_trace and have traces, parse
+        # them into the per-run DB before we merge-up into the cumulative.
+        if args.iss_trace and iss_results:
+            for r in iss_results:
+                if r.trace_path and r.returncode == 0:
+                    meta = sample_trace_file(run_cov, r.trace_path)
+                    _LOG.info(
+                        "runtime cov: %s -> %d lines, %d labels, %d branches",
+                        r.test_id, meta["lines_parsed"],
+                        meta["pc_reach_labels"], meta["branches_observed"],
+                    )
 
         # Cumulative DB path — either explicit or per-output-dir.
         cum_path = Path(args.cov_db) if args.cov_db else output_dir / "coverage.json"

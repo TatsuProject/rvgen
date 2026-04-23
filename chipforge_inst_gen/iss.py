@@ -49,6 +49,7 @@ class IssResult:
     log_path: Path
     returncode: int
     log: str
+    trace_path: Path | None = None
 
 
 def run_iss(
@@ -62,8 +63,16 @@ def run_iss(
     extra_iss_opts: str = "",
     memory_size_bytes: int = 0x200000,
     memory_base: int = 0x80000000,
+    enable_trace: bool = False,
 ) -> list[IssResult]:
-    """Run each compiled ELF on the chosen ISS. Phase 1: spike only."""
+    """Run each compiled ELF on the chosen ISS. Phase 1: spike only.
+
+    ``enable_trace=True`` adds spike's ``-l`` flag, which produces an
+    instruction trace suitable for runtime coverage ingestion. The trace
+    is ~100x larger than the default stdout (every retired instruction
+    logs a line) so callers should request it only when runtime coverage
+    is wanted.
+    """
     iss = iss.lower()
     if iss != "spike":
         raise NotImplementedError(
@@ -80,6 +89,7 @@ def run_iss(
             _LOG.warning("Skipping ISS for %s (gcc failure)", res.test_id)
             continue
         log_path = log_dir / f"{res.test_id}.log"
+        trace_path = log_dir / f"{res.test_id}.trace" if enable_trace else None
         # ``--misaligned`` mirrors riscv-dv yaml/iss.yaml — spike otherwise
         # traps the ``addi tp, tp, -4`` / ``sd`` push prologue on RV64 (the
         # trap frame convention is 4-byte aligned, but SD is 8-byte aligned).
@@ -90,6 +100,8 @@ def run_iss(
             "--misaligned",
             f"-m0x{memory_base:x}:0x{memory_size_bytes:x}",
         ]
+        if enable_trace:
+            cmd += ["-l", f"--log={trace_path}"]
         if extra_iss_opts:
             cmd += extra_iss_opts.split()
         cmd.append(str(res.elf_path))
@@ -110,5 +122,6 @@ def run_iss(
             log_path=log_path,
             returncode=returncode,
             log=log,
+            trace_path=trace_path,
         ))
     return out

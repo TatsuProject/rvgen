@@ -34,6 +34,7 @@ from chipforge_inst_gen.coverage.cgf import (
     missing_bins,
 )
 from chipforge_inst_gen.coverage.report import render_report
+from chipforge_inst_gen.coverage.runtime import sample_trace_file
 
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "render_report",
     "sample_instr",
     "sample_sequence",
+    "sample_trace_file",
 ]
