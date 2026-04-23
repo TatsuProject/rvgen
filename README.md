@@ -20,6 +20,7 @@ tests for RV32/RV64 cores and validates them against the Spike ISA simulator.
 - [Disable / feature-gate flags](#disable--feature-gate-flags)
 - [Running the test suite](#running-the-test-suite)
 - [Project layout](#project-layout)
+- [Contributing / continuing development](#contributing--continuing-development)
 - [Non-goals](#non-goals)
 - [License](#license)
 
@@ -246,7 +247,26 @@ Flow:
    means every committed instruction matched between spike and the RTL.
 
 A reference driver script for all six steps lives in
-`scripts/mcu_validate.sh`. Latest runs:
+`scripts/mcu_validate.sh`. Invoke it with the relevant env vars pointing at
+your toolchain, the MCU checkout, and a riscv-dv checkout (for testlist
+imports):
+
+```bash
+WORK_DIR=/var/tmp/mcu/work \
+MCU_VERIF=/path/to/chipforge-mcu/verif \
+RISCV_DV=/path/to/riscv-dv \
+PYTHON=/path/to/python \
+RISCV_GCC=/path/to/riscv64-unknown-elf-gcc \
+SPIKE=/path/to/spike \
+scripts/mcu_validate.sh riscv_arithmetic_basic_test 100
+```
+
+Outputs one line: `<test> seed=<seed>: [PASSED]: N matched` or
+`[FAILED]: …`. Run it in a loop over `{arithmetic_basic, rand_instr, loop,
+jump_stress, amo, rand_jump, no_fence} × {100, 200, 300}` to reproduce the
+full 21-run sweep below.
+
+Latest results:
 
 ```
 riscv_arithmetic_basic_test seed=100: [PASSED]: 4113 matched
@@ -381,9 +401,28 @@ chipforge_inst_gen/
   testlist.py             riscv-dv YAML testlist loader
   seeding.py              SeedGen (fixed/start/rerun/random)
 
-tests/                    228 unit tests + filtering + e2e
+tests/                    233 unit tests + filtering + e2e
 research/                 11 distilled notes from reading riscv-dv SV
+scripts/mcu_validate.sh   chipforge-mcu trace-compare driver
+CLAUDE.md                 engineering log — current state, next-up queue, resume prompt
 ```
+
+## Contributing / continuing development
+
+The authoritative engineering log lives in **[`CLAUDE.md`](CLAUDE.md)**.
+`§0 — Status and where to pick up` is always kept current with:
+
+- What's finished (per SV-reference step).
+- A dated list of every fix that's landed, with root cause.
+- A priority-ordered "next-up queue" of open work (vector extension,
+  full privileged mode, golden-file diff harness, etc).
+- Ready-made prompts for resuming a session either generically ("pick
+  the next thing") or for a specific target ("add vector support").
+
+The `research/` directory contains 11 focused notes distilled from the
+riscv-dv SV source before any code was written — consult the relevant
+note before modifying the corresponding module (pointers are in the
+`§11 — Research notes` section of CLAUDE.md).
 
 ## Non-goals
 
