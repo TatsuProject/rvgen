@@ -651,6 +651,57 @@ def test_resolve_cov_goals_unknown_target_only_baseline():
     assert not any("_target_not_shipped_" in p for p in out)
 
 
+def test_rs1_eq_rs2_cg_equal_bumped():
+    from chipforge_inst_gen.coverage.collectors import CG_RS1_EQ_RS2
+    db = new_db()
+    instr = get_instr(RiscvInstrName.ADD)
+    instr.rs1 = RiscvReg.T0
+    instr.rs2 = RiscvReg.T0
+    instr.rd = RiscvReg.A0
+    instr.post_randomize()
+    sample_instr(db, instr)
+    assert db[CG_RS1_EQ_RS2].get("equal", 0) == 1
+
+
+def test_rs1_eq_rd_cg_distinct_bumped():
+    from chipforge_inst_gen.coverage.collectors import CG_RS1_EQ_RD
+    db = new_db()
+    instr = get_instr(RiscvInstrName.ADD)
+    instr.rs1 = RiscvReg.T0
+    instr.rs2 = RiscvReg.T1
+    instr.rd = RiscvReg.A0
+    instr.post_randomize()
+    sample_instr(db, instr)
+    assert db[CG_RS1_EQ_RD].get("distinct", 0) == 1
+
+
+def test_vtype_dyn_bumped_when_vector_cfg_given():
+    import random as _rnd
+    from chipforge_inst_gen.coverage.collectors import CG_VTYPE_DYN
+    from chipforge_inst_gen.isa import rv32v  # noqa: F401 — register vector
+    from chipforge_inst_gen.vector_config import VectorConfig, Vtype
+    db = new_db()
+    vcfg = VectorConfig(vtype=Vtype(vlmul=2, vsew=32), vlen=512, elen=32)
+    vadd = get_instr(RiscvInstrName.VADD)
+    vadd.randomize_vector_operands(_rnd.Random(0), vcfg)
+    sample_instr(db, vadd, vector_cfg=vcfg)
+    assert db[CG_VTYPE_DYN].get("SEW32_M2", 0) == 1
+
+
+def test_runtime_branch_per_mnem(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_BR_PER_MNEM
+    trace = tmp_path / "t.trace"
+    trace.write_text(
+        "core   0: 0x80000000 (0x00108093) addi    ra, ra, 1\n"
+        "core   0: 0x80000004 (0x00108463) beq     ra, ra, pc + 8\n"
+        "core   0: 0x8000000c (0x00000013) addi    x0, x0, 0\n"  # taken
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    assert db[CG_BR_PER_MNEM].get("BEQ__T", 0) == 1
+
+
 def test_ci_summary_writes_github_output(tmp_path: Path, monkeypatch):
     """_emit_ci_summary writes GITHUB_OUTPUT lines when the env var is set."""
     from chipforge_inst_gen.cli import _emit_ci_summary

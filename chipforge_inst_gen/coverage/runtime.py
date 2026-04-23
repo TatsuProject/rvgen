@@ -33,6 +33,7 @@ import re
 from pathlib import Path
 
 from chipforge_inst_gen.coverage.collectors import (
+    CG_BR_PER_MNEM,
     CG_BRANCH_DIR,
     CG_EXCEPTION,
     CG_OPCODE,
@@ -131,12 +132,14 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
 
             # Branch direction — the *previous* instruction was the branch;
             # now that we see this PC, we know whether the branch was taken.
-            if prev_was_branch and prev_pc is not None:
+            if prev_was_branch and prev_pc is not None and prev_mnem is not None:
                 expected_fall_through = prev_pc + prev_bin_bytes
                 if pc == expected_fall_through:
                     _bump(CG_BRANCH_DIR, "not_taken")
+                    _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__NT")
                 else:
                     _bump(CG_BRANCH_DIR, "taken")
+                    _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__T")
                 branches += 1
 
             prev_pc = pc

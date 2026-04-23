@@ -88,6 +88,11 @@ CG_PRIV_MODE = "privilege_mode_cg"     # runtime: M/S/U mode observed
 CG_REG_VAL_SIGN = "rs_val_sign_cg"     # rs-value sign class (pos/neg/zero) on the fly
 CG_IMM_EXT = "imm_range_cg"            # walking-ones / walking-zeros / corner classes
 CG_PC_REACH = "pc_reach_cg"            # runtime: unique labels entered
+# --- more-covergroups wave ---
+CG_RS1_EQ_RS2 = "rs1_eq_rs2_cg"        # R-format: rs1==rs2 (same-reg path)
+CG_RS1_EQ_RD = "rs1_eq_rd_cg"          # rd==rs1 (in-place op)
+CG_BR_PER_MNEM = "branch_taken_per_mnem_cg"  # cross: branch mnemonic × taken/not_taken (runtime)
+CG_VTYPE_DYN = "vtype_dyn_cg"          # (SEW, LMUL) pair observed when sampling a vector op
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -101,6 +106,8 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_BRANCH_DIR, CG_EXCEPTION, CG_PRIV_MODE,
     CG_IMM_EXT,
     CG_PC_REACH,
+    CG_RS1_EQ_RS2, CG_RS1_EQ_RD,
+    CG_BR_PER_MNEM, CG_VTYPE_DYN,
 )
 
 
@@ -204,12 +211,17 @@ def _mem_align_bin(offset: int, name: RiscvInstrName) -> str | None:
     return None
 
 
-def sample_instr(db: CoverageDB, instr: Instr) -> None:
+def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
     """Sample one :class:`Instr` into ``db``.
 
     Safe to call for any registered instruction, including vector / FP /
     compressed / pseudo variants. No-ops gracefully on instructions that
     lack optional slots (e.g. the ``_LiPseudo`` emitted by directed streams).
+
+    When ``vector_cfg`` is provided and the instruction is a vector op,
+    also bumps :data:`CG_VTYPE_DYN` with a ``SEW<w>_LMUL<n>`` bin name —
+    this tells the reporter what vtype was active when each vector op
+    was generated.
     """
     # Opcode — use the enum name if present, fall back to the class name.
     try:
@@ -236,18 +248,24 @@ def sample_instr(db: CoverageDB, instr: Instr) -> None:
     has_rs1 = getattr(instr, "has_rs1", False)
     has_rs2 = getattr(instr, "has_rs2", False)
     has_rd = getattr(instr, "has_rd", False)
-    if has_rs1:
-        rs1 = getattr(instr, "rs1", None)
-        if isinstance(rs1, RiscvReg):
-            _bump(db, CG_RS1, rs1.name)
-    if has_rs2:
-        rs2 = getattr(instr, "rs2", None)
-        if isinstance(rs2, RiscvReg):
-            _bump(db, CG_RS2, rs2.name)
-    if has_rd:
-        rd = getattr(instr, "rd", None)
-        if isinstance(rd, RiscvReg):
-            _bump(db, CG_RD, rd.name)
+    rs1_val = getattr(instr, "rs1", None) if has_rs1 else None
+    rs2_val = getattr(instr, "rs2", None) if has_rs2 else None
+    rd_val = getattr(instr, "rd", None) if has_rd else None
+    if isinstance(rs1_val, RiscvReg):
+        _bump(db, CG_RS1, rs1_val.name)
+    if isinstance(rs2_val, RiscvReg):
+        _bump(db, CG_RS2, rs2_val.name)
+    if isinstance(rd_val, RiscvReg):
+        _bump(db, CG_RD, rd_val.name)
+
+    # rs1==rs2: a surprisingly common pipeline-interesting case (e.g.
+    # "add x5, x5, x5" doubles x5; branches on rs1==rs2 always take/
+    # fall-through in a deterministic way). Only bump for R/B formats
+    # where both reads are meaningful.
+    if isinstance(rs1_val, RiscvReg) and isinstance(rs2_val, RiscvReg):
+        _bump(db, CG_RS1_EQ_RS2, "equal" if rs1_val == rs2_val else "distinct")
+    if isinstance(rs1_val, RiscvReg) and isinstance(rd_val, RiscvReg):
+        _bump(db, CG_RS1_EQ_RD, "equal" if rs1_val == rd_val else "distinct")
 
     # Immediate sign (only if the instr actually has one and it was
     # randomized — branches resolved to label refs skip here since they
@@ -304,11 +322,18 @@ def sample_instr(db: CoverageDB, instr: Instr) -> None:
         if reg is not None and hasattr(reg, "name"):
             _bump(db, CG_VREG, reg.name)
 
-    # vtype bin for any instr whose class advertises `allowed_va_variants`
-    # (or is a vector LOAD/STORE): tag with "SEW<sew>_LMUL<lmul>" —
-    # requires the caller to stamp .sampled_sew / .sampled_lmul OR we
-    # consult a default config. We defer this: the stream-level sampler
-    # knows the active vector_cfg and can bump vtype_cg there.
+    # vtype sampling — when the caller passed a vector_cfg and this instr
+    # came from the RVV group, record the active (SEW, LMUL) combination.
+    if vector_cfg is not None:
+        try:
+            if instr.group == RiscvInstrGroup.RVV:
+                sew = vector_cfg.vtype.vsew
+                lmul = vector_cfg.vtype.vlmul
+                frac = vector_cfg.vtype.fractional_lmul
+                lmul_tag = f"MF{lmul}" if frac and lmul > 1 else f"M{lmul}"
+                _bump(db, CG_VTYPE_DYN, f"SEW{sew}_{lmul_tag}")
+        except AttributeError:
+            pass
 
     # Crosses
     try:
@@ -326,7 +351,7 @@ def sample_instr(db: CoverageDB, instr: Instr) -> None:
 # ---------------------------------------------------------------------------
 
 
-def sample_sequence(db: CoverageDB, seq: Iterable[Instr]) -> None:
+def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) -> None:
     """Sample every instruction in ``seq`` plus inter-instruction hazards.
 
     Hazard detection looks at *register* dependencies only:
@@ -337,6 +362,9 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr]) -> None:
 
     "≤ N-1" is a sliding window of ``HAZARD_WINDOW`` instructions — beyond
     that, the register is effectively retired for hazard-counting purposes.
+
+    When ``vector_cfg`` is provided it's forwarded to each per-instruction
+    sample so vector ops can tag :data:`CG_VTYPE_DYN` bins.
     """
     last_writer_at: dict[RiscvReg, int] = {}
     last_reader_at: dict[RiscvReg, int] = {}
@@ -344,7 +372,7 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr]) -> None:
     prev_opcode: str | None = None
 
     for idx, instr in enumerate(seq):
-        sample_instr(db, instr)
+        sample_instr(db, instr, vector_cfg=vector_cfg)
 
         # Category + opcode transitions — valuable for finding sequencing
         # bugs (e.g. LOAD immediately after BRANCH is a stall on some pipes).

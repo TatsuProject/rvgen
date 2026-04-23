@@ -194,7 +194,11 @@ def run_auto_regression(
 
             if gen.main_sequence is not None and gen.main_sequence.instr_stream is not None:
                 run_db = new_db()
-                sample_sequence(run_db, gen.main_sequence.instr_stream.instr_list)
+                sample_sequence(
+                    run_db,
+                    gen.main_sequence.instr_stream.instr_list,
+                    vector_cfg=cfg.vector_cfg,
+                )
                 cov_merge(cum_db, run_db)
 
         met, total, pct = _pct_bins_met(cum_db, goals)
