@@ -1,0 +1,352 @@
+"""Coverage analysis CLI — diff / merge / export / attribute.
+
+Invoke as::
+
+    python -m chipforge_inst_gen.coverage.tools <subcommand> ...
+
+Subcommands:
+
+- ``merge``     : merge two or more coverage JSONs into one.
+- ``diff``      : report what's new in A vs B (bins added, deltas).
+- ``attribute`` : given a set of per-seed coverage JSONs, show which
+                  seed first closed each required bin (ordered input
+                  means the *earliest* contributor wins).
+- ``export``    : dump coverage as CSV or a self-contained HTML page.
+- ``report``    : render the text report (same as the ``cov`` step).
+
+These operations treat a coverage JSON as an opaque dict-of-dict from
+covergroup name to bin-count dict; compatible with the collector DB
+and riscv-isac-style observed files (as long as they use the same
+covergroup-name / bin-name conventions — crosses use ``a__b`` naming).
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import html as _html
+import json
+import sys
+from pathlib import Path
+from typing import Iterable
+
+from chipforge_inst_gen.coverage.cgf import Goals, load_goals, missing_bins
+from chipforge_inst_gen.coverage.collectors import CoverageDB, merge, new_db
+from chipforge_inst_gen.coverage.report import render_report
+
+
+# ---------------------------------------------------------------------------
+# IO helpers
+# ---------------------------------------------------------------------------
+
+
+def _read(path: Path) -> CoverageDB:
+    with open(path) as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: top-level JSON must be an object")
+    # Coerce inner values to dicts of int (be forgiving of floats from
+    # downstream tools).
+    out: CoverageDB = {}
+    for cg, bins in raw.items():
+        if not isinstance(bins, dict):
+            continue
+        out[cg] = {str(bn): int(cnt) for bn, cnt in bins.items()}
+    return out
+
+
+def _write(path: Path, db: CoverageDB) -> None:
+    with open(path, "w") as f:
+        json.dump(db, f, indent=2, sort_keys=True)
+
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+
+def cmd_merge(args: argparse.Namespace) -> int:
+    out_db: CoverageDB = new_db()
+    for p in args.inputs:
+        src = _read(Path(p))
+        merge(out_db, src)
+    _write(Path(args.output), out_db)
+    print(f"merged {len(args.inputs)} file(s) -> {args.output}")
+    return 0
+
+
+def _compute_diff(a: CoverageDB, b: CoverageDB) -> dict[str, dict[str, int]]:
+    """Return new bins and delta counts: ``b - a`` per bin.
+
+    Output shape: ``{cg: {bin_name: delta}}``. A delta is positive if b has
+    more hits than a; negative if fewer; zero bins are omitted.
+    """
+    diff: dict[str, dict[str, int]] = {}
+    all_cgs = set(a) | set(b)
+    for cg in sorted(all_cgs):
+        a_bins = a.get(cg, {})
+        b_bins = b.get(cg, {})
+        all_bins = set(a_bins) | set(b_bins)
+        cg_diff: dict[str, int] = {}
+        for bn in sorted(all_bins):
+            delta = b_bins.get(bn, 0) - a_bins.get(bn, 0)
+            if delta != 0:
+                cg_diff[bn] = delta
+        if cg_diff:
+            diff[cg] = cg_diff
+    return diff
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    a = _read(Path(args.a))
+    b = _read(Path(args.b))
+    diff = _compute_diff(a, b)
+
+    if args.json:
+        Path(args.json).write_text(json.dumps(diff, indent=2, sort_keys=True))
+        print(f"wrote diff -> {args.json}")
+    else:
+        total_new_bins = sum(
+            1 for cg_diff in diff.values() for delta in cg_diff.values() if delta > 0
+        )
+        total_lost_bins = sum(
+            1 for cg_diff in diff.values() for delta in cg_diff.values() if delta < 0
+        )
+        print(f"=== coverage diff: {args.a} -> {args.b} ===")
+        print(f"    {len(diff)} covergroups changed")
+        print(f"    +{total_new_bins} new/increased bins")
+        print(f"    -{total_lost_bins} decreased bins")
+        print()
+        for cg, cg_diff in diff.items():
+            print(f"  [{cg}]")
+            for bn, delta in cg_diff.items():
+                sign = "+" if delta > 0 else ""
+                print(f"    {bn:<32s} {sign}{delta}")
+    return 0
+
+
+def cmd_attribute(args: argparse.Namespace) -> int:
+    """First-closer attribution across a sequence of per-seed coverage files.
+
+    For each required bin in ``--goals``, prints which input file first
+    reached the required count when merging in the given order. Useful to
+    identify seeds that contributed unique coverage vs redundant seeds.
+    """
+    goals = load_goals(args.goals)
+    accumulated: CoverageDB = new_db()
+    first_closer: dict[tuple[str, str], str] = {}
+    closed_counts: list[tuple[str, int]] = []
+
+    for path in args.inputs:
+        src = _read(Path(path))
+        before = {cg: dict(bins) for cg, bins in accumulated.items()}
+        merge(accumulated, src)
+        closed_this = 0
+        for cg, bins in goals.data.items():
+            for bn, req in bins.items():
+                if req <= 0:
+                    continue
+                key = (cg, bn)
+                if key in first_closer:
+                    continue
+                if accumulated.get(cg, {}).get(bn, 0) >= req:
+                    first_closer[key] = str(path)
+                    closed_this += 1
+        closed_counts.append((str(path), closed_this))
+
+    total_closed = len(first_closer)
+    total_req = sum(1 for b in goals.data.values() for v in b.values() if v > 0)
+    print(f"=== coverage attribute: {args.goals} over {len(args.inputs)} file(s) ===")
+    print(f"    {total_closed}/{total_req} required bins closed")
+    print()
+    print("Per-input contribution (bins this file was first to close):")
+    for path, n in closed_counts:
+        print(f"    {path}: {n}")
+    print()
+    not_closed = [
+        (cg, bn)
+        for cg, bins in goals.data.items()
+        for bn, req in bins.items()
+        if req > 0 and (cg, bn) not in first_closer
+    ]
+    if not_closed:
+        print(f"Not closed ({len(not_closed)}):")
+        for cg, bn in not_closed:
+            print(f"    {cg}.{bn}")
+    return 0 if total_closed == total_req else 1
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    db = _read(Path(args.input))
+    if args.csv:
+        _export_csv(db, Path(args.csv))
+        print(f"wrote CSV -> {args.csv}")
+    if args.html:
+        _export_html(db, Path(args.html),
+                      goals=load_goals(args.goals) if args.goals else None)
+        print(f"wrote HTML -> {args.html}")
+    if not args.csv and not args.html:
+        print("no output format selected (pass --csv <path> and/or --html <path>)",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    db = _read(Path(args.input))
+    goals = load_goals(args.goals) if args.goals else None
+    print(render_report(db, goals))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# CSV / HTML export
+# ---------------------------------------------------------------------------
+
+
+def _export_csv(db: CoverageDB, path: Path) -> None:
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["covergroup", "bin", "hit_count"])
+        for cg in sorted(db):
+            for bn in sorted(db[cg]):
+                w.writerow([cg, bn, db[cg][bn]])
+
+
+_HTML_STYLE = """\
+body { font-family: -apple-system, system-ui, sans-serif; margin: 2em; max-width: 1100px; }
+h1 { border-bottom: 2px solid #333; padding-bottom: 0.25em; }
+h2 { background: #eef; padding: 0.25em 0.5em; border-left: 4px solid #55a; }
+table { border-collapse: collapse; margin-bottom: 1.5em; }
+th, td { padding: 4px 10px; border: 1px solid #ccc; text-align: left; }
+th { background: #f5f5f5; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.missed { background: #fee; color: #900; }
+td.ok { background: #efe; color: #060; }
+.summary { margin: 1em 0; padding: 1em; background: #f8f8f8; border-radius: 4px; }
+.bar { background: linear-gradient(to right, #4a6 var(--pct), #eee var(--pct)); height: 1em; border-radius: 2px; }
+"""
+
+
+def _export_html(db: CoverageDB, path: Path, *, goals: Goals | None = None) -> None:
+    lines: list[str] = []
+    lines.append("<!DOCTYPE html><html><head><meta charset='utf-8'>")
+    lines.append("<title>chipforge-inst-gen coverage</title>")
+    lines.append(f"<style>{_HTML_STYLE}</style></head><body>")
+    lines.append("<h1>Functional Coverage Report</h1>")
+
+    total_bins_hit = sum(len(b) for b in db.values())
+    total_hits = sum(sum(b.values()) for b in db.values())
+    lines.append(
+        "<div class='summary'>"
+        f"<b>{len(db)}</b> covergroups, "
+        f"<b>{total_bins_hit}</b> unique bins hit, "
+        f"<b>{total_hits}</b> total samples."
+        "</div>"
+    )
+
+    miss = missing_bins(db, goals) if goals else {}
+
+    if goals is not None:
+        total_req = sum(1 for b in goals.data.values() for v in b.values() if v > 0)
+        total_missing = sum(len(v) for v in miss.values())
+        met = total_req - total_missing
+        pct = (met / total_req * 100) if total_req else 100.0
+        lines.append(
+            "<div class='summary'>"
+            f"<b>{met}/{total_req}</b> required bins met "
+            f"(<b>{pct:.1f}%</b>)"
+            f"<div class='bar' style='--pct: {pct}%'></div>"
+            "</div>"
+        )
+
+    for cg in sorted(db):
+        bins = db[cg]
+        if not bins:
+            continue
+        goal_bins = goals.covergroup(cg) if goals else {}
+        cg_miss = miss.get(cg, {}) if goals else {}
+        lines.append(f"<h2>{_html.escape(cg)}</h2>")
+        lines.append(
+            f"<div>unique bins: {len(bins)}&nbsp;|&nbsp;total hits: {sum(bins.values())}"
+            + (f"&nbsp;|&nbsp;missing: <b>{len(cg_miss)}</b>" if cg_miss else "")
+            + "</div>"
+        )
+        lines.append("<table><tr><th>Bin</th><th>Observed</th><th>Required</th></tr>")
+        sorted_bins = sorted(bins.items(), key=lambda kv: -kv[1])
+        # also include goal bins not yet observed
+        observed_names = {bn for bn, _ in sorted_bins}
+        for bn, req in goal_bins.items():
+            if bn not in observed_names and req > 0:
+                sorted_bins.append((bn, 0))
+        for bn, cnt in sorted_bins:
+            req = goal_bins.get(bn, 0)
+            if req > 0:
+                cls = "ok" if cnt >= req else "missed"
+                row_req = str(req)
+            else:
+                cls = ""
+                row_req = "-"
+            lines.append(
+                f"<tr><td>{_html.escape(bn)}</td>"
+                f"<td class='num {cls}'>{cnt}</td>"
+                f"<td class='num'>{row_req}</td></tr>"
+            )
+        lines.append("</table>")
+
+    lines.append("</body></html>")
+    path.write_text("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Argparse entry point
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="python -m chipforge_inst_gen.coverage.tools",
+        description="Coverage analysis CLI — merge / diff / attribute / export.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    pm = sub.add_parser("merge", help="Merge N coverage JSONs into one.")
+    pm.add_argument("inputs", nargs="+")
+    pm.add_argument("-o", "--output", required=True)
+    pm.set_defaults(func=cmd_merge)
+
+    pd = sub.add_parser("diff", help="Report bin-count deltas from A to B.")
+    pd.add_argument("a")
+    pd.add_argument("b")
+    pd.add_argument("--json", help="Write the diff as JSON here.")
+    pd.set_defaults(func=cmd_diff)
+
+    pa = sub.add_parser("attribute",
+                         help="For each required bin, show which input first closed it.")
+    pa.add_argument("inputs", nargs="+", help="Per-seed coverage JSONs in chronological order.")
+    pa.add_argument("--goals", required=True, help="Coverage goals YAML.")
+    pa.set_defaults(func=cmd_attribute)
+
+    pe = sub.add_parser("export", help="Export coverage JSON to CSV and/or HTML.")
+    pe.add_argument("input")
+    pe.add_argument("--csv", help="CSV output path.")
+    pe.add_argument("--html", help="HTML output path.")
+    pe.add_argument("--goals", help="Optional goals YAML for HTML pass/fail coloring.")
+    pe.set_defaults(func=cmd_export)
+
+    pr = sub.add_parser("report", help="Render the text coverage report.")
+    pr.add_argument("input")
+    pr.add_argument("--goals", help="Optional goals YAML for pass/fail banner.")
+    pr.set_defaults(func=cmd_report)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = build_parser()
+    args = p.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

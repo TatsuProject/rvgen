@@ -463,3 +463,82 @@ def test_runtime_trace_missing_file_silent(tmp_path: Path):
     # Non-existent path — should not raise, return zeros.
     meta = sample_trace_file(db, tmp_path / "does_not_exist.trace")
     assert meta == {"lines_parsed": 0, "pc_reach_labels": 0, "branches_observed": 0}
+
+
+# ---------------------------------------------------------------------------
+# Coverage tools CLI — diff / merge / attribute / export
+# ---------------------------------------------------------------------------
+
+
+def _dump(path: Path, db):
+    import json
+    path.write_text(json.dumps(db, indent=2, sort_keys=True))
+
+
+def test_tools_merge_combines_bins(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_merge
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.json"
+    _dump(a, {"opcode_cg": {"ADD": 3, "SUB": 1}})
+    _dump(b, {"opcode_cg": {"ADD": 2, "JAL": 5}})
+    out = tmp_path / "out.json"
+    import argparse
+    ns = argparse.Namespace(inputs=[str(a), str(b)], output=str(out))
+    assert cmd_merge(ns) == 0
+    import json as _j
+    merged = _j.loads(out.read_text())
+    assert merged["opcode_cg"] == {"ADD": 5, "SUB": 1, "JAL": 5}
+
+
+def test_tools_diff_reports_delta(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import _compute_diff
+    a = {"opcode_cg": {"ADD": 3, "SUB": 1}}
+    b = {"opcode_cg": {"ADD": 5, "JAL": 7}}
+    diff = _compute_diff(a, b)
+    assert diff == {"opcode_cg": {"ADD": 2, "JAL": 7, "SUB": -1}}
+
+
+def test_tools_attribute_first_closer(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_attribute
+    g = tmp_path / "g.yaml"
+    g.write_text("opcode_cg:\n  ADD: 3\n  SUB: 2\n")
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.json"
+    # a closes ADD but not SUB; b closes both.
+    _dump(a, {"opcode_cg": {"ADD": 5, "SUB": 1}})
+    _dump(b, {"opcode_cg": {"ADD": 1, "SUB": 3}})
+    import argparse, io, contextlib
+    ns = argparse.Namespace(inputs=[str(a), str(b)], goals=str(g))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cmd_attribute(ns)
+    assert rc == 0  # all bins closed by the end
+    out = buf.getvalue()
+    assert "2/2 required bins closed" in out
+
+
+def test_tools_export_csv(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_export
+    a = tmp_path / "a.json"
+    _dump(a, {"opcode_cg": {"ADD": 3}})
+    out = tmp_path / "o.csv"
+    import argparse
+    ns = argparse.Namespace(input=str(a), csv=str(out), html=None, goals=None)
+    assert cmd_export(ns) == 0
+    txt = out.read_text()
+    assert "covergroup,bin,hit_count" in txt
+    assert "opcode_cg,ADD,3" in txt
+
+
+def test_tools_export_html(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_export
+    a = tmp_path / "a.json"
+    _dump(a, {"opcode_cg": {"ADD": 3}})
+    out = tmp_path / "o.html"
+    import argparse
+    ns = argparse.Namespace(input=str(a), csv=None, html=str(out), goals=None)
+    assert cmd_export(ns) == 0
+    txt = out.read_text()
+    assert "<html>" in txt
+    assert "opcode_cg" in txt
+    assert ">3<" in txt  # the hit count renders somewhere
