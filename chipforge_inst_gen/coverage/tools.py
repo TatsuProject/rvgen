@@ -237,6 +237,62 @@ def cmd_baseline_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_suggest_seeds(args: argparse.Namespace) -> int:
+    """Given an historical convergence.json + current goals, suggest the
+    seeds most likely to close the *currently-missing* bins.
+
+    The heuristic is simple but effective: if convergence.json[cg.bn] ==
+    SEED, then replaying SEED (possibly with its original gen_opts) is
+    the strongest move toward closing that bin again.
+
+    Usage:
+
+        python -m chipforge_inst_gen.coverage.tools suggest-seeds \\
+            --convergence out/convergence.json \\
+            --observed run/coverage.json \\
+            --goals chipforge_inst_gen/coverage/goals/baseline.yaml
+
+    Output: a ranked seed list + which bins each seed is expected to close.
+    """
+    observed = _read(Path(args.observed))
+    goals = load_goals(args.goals)
+    with open(args.convergence) as f:
+        conv = json.load(f)
+    first_hit = conv.get("first_hit_seed", {})
+    # first_hit keys are "cg.bn" strings; values are seed integers.
+    # Build {seed: list[(cg, bn)]} for bins that are *still missing* from
+    # observed (so we only suggest useful retries).
+    miss = missing_bins(observed, goals)
+    missing_keys = {
+        f"{cg}.{bn}" for cg, bins in miss.items() for bn in bins
+    }
+    suggestions: dict[int, list[str]] = {}
+    for key, seed in first_hit.items():
+        if key in missing_keys:
+            suggestions.setdefault(int(seed), []).append(key)
+    ranked = sorted(suggestions.items(), key=lambda kv: -len(kv[1]))
+
+    print(f"=== suggest-seeds: {len(missing_keys)} missing bin(s) ===")
+    if not ranked:
+        print("No historical seed closed any of the currently-missing bins.")
+        print("→ Need new seeds or custom streams; try --cov_directed.")
+        return 1
+    for seed, keys in ranked:
+        print(f"\nSeed {seed} previously closed {len(keys)} bin(s):")
+        for k in keys[:12]:
+            print(f"    {k}")
+        if len(keys) > 12:
+            print(f"    ... (+{len(keys) - 12} more)")
+    # The bins that *nothing* in history closed — genuine gaps.
+    never_closed = missing_keys - set(first_hit.keys())
+    if never_closed:
+        print(f"\nBins never closed by any historical seed ({len(never_closed)}):")
+        for k in sorted(never_closed):
+            print(f"    {k}")
+        print("→ Need a new directed stream or gen_opts perturbation for these.")
+    return 0
+
+
 def cmd_per_test(args: argparse.Namespace) -> int:
     """Analyse a coverage_per_test.json sidecar.
 
@@ -460,6 +516,17 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--baseline", required=True,
                      help="Golden baseline coverage JSON (checked in).")
     pb.set_defaults(func=cmd_baseline_check)
+
+    ps = sub.add_parser("suggest-seeds",
+                         help="Given historical convergence + current goals, "
+                              "rank seeds by how many still-missing bins "
+                              "they closed in the past.")
+    ps.add_argument("--convergence", required=True,
+                     help="Path to a prior run's convergence.json.")
+    ps.add_argument("--observed", required=True,
+                     help="Current observed coverage JSON.")
+    ps.add_argument("--goals", required=True, help="Coverage goals YAML.")
+    ps.set_defaults(func=cmd_suggest_seeds)
 
     return p
 

@@ -698,6 +698,59 @@ def test_runtime_gpr_write_corners(tmp_path: Path):
     assert db[CG_RS_VAL_CORNER].get("all_ones_32", 0) == 1
 
 
+def test_bit_activity_from_gpr_write(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_BIT_ACTIVITY
+    trace = tmp_path / "t.trace"
+    trace.write_text(
+        # Values 0x5 (bits 0, 2) and 0x80000000 (bit 31).
+        "core   0: 0x80000000 (0x00000013) addi    x0, x0, 0\n"
+        "core   0: 3 0x80000000 (0x00000013) x5  0x5\n"
+        "core   0: 0x80000004 (0x00000013) addi    x0, x0, 0\n"
+        "core   0: 3 0x80000004 (0x00000013) x6  0x80000000\n"
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    assert db[CG_BIT_ACTIVITY].get("bit_00_set", 0) == 1
+    assert db[CG_BIT_ACTIVITY].get("bit_02_set", 0) == 1
+    assert db[CG_BIT_ACTIVITY].get("bit_31_set", 0) == 1
+
+
+def test_suggest_seeds_ranks(tmp_path: Path):
+    """suggest-seeds proposes historical seeds that closed still-missing bins."""
+    from chipforge_inst_gen.coverage.tools import cmd_suggest_seeds
+
+    # Build a prior convergence.json.
+    conv = tmp_path / "convergence.json"
+    conv.write_text(
+        '{"first_hit_seed": {"opcode_cg.JALR": 117, "opcode_cg.FENCE": 200,'
+        ' "opcode_cg.MRET": 200}}'
+    )
+    # Current observed: missing JALR + FENCE (but not MRET).
+    observed = tmp_path / "obs.json"
+    _dump(observed, {"opcode_cg": {"ADD": 5, "MRET": 1}})
+    goals = tmp_path / "g.yaml"
+    goals.write_text("opcode_cg:\n  JALR: 3\n  FENCE: 2\n  MRET: 1\n")
+
+    import argparse, io, contextlib
+    ns = argparse.Namespace(
+        convergence=str(conv), observed=str(observed), goals=str(goals),
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cmd_suggest_seeds(ns)
+    out = buf.getvalue()
+    assert rc == 0
+    # Seed 200 closes FENCE (1 bin); seed 117 closes JALR (1 bin).
+    # Both appear in the ranking, MRET is already met so excluded.
+    assert "Seed 200" in out
+    assert "Seed 117" in out
+    assert "FENCE" in out
+    assert "JALR" in out
+    # MRET already covered — shouldn't appear as a missing bin.
+    assert "MRET" not in out or "never closed" in out
+
+
 def test_baseline_check_tool(tmp_path: Path):
     from chipforge_inst_gen.coverage.tools import cmd_baseline_check
     baseline = tmp_path / "base.json"

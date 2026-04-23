@@ -33,6 +33,7 @@ import re
 from pathlib import Path
 
 from chipforge_inst_gen.coverage.collectors import (
+    CG_BIT_ACTIVITY,
     CG_BR_PER_MNEM,
     CG_BRANCH_DIR,
     CG_CSR_VAL,
@@ -187,10 +188,19 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                     csr = wm.group("csr").upper()
                     val = int(wm.group("val"), 16)
                     _bump(CG_CSR_VAL, f"{csr}__{_value_bucket(val, 64)}")
-                # GPR write-values — classify against the canonical corners.
+                # GPR write-values — classify against the canonical corners,
+                # and also bump the bit-activity covergroup for each set bit
+                # (reveals dead bits — if bit_N_set never appears, no
+                # instruction ever computed a value with bit N set).
                 for wm in _GPR_WRITE_IN_COMMIT_RE.finditer(writes):
                     val = int(wm.group("val"), 16)
                     _bump(CG_RS_VAL_CORNER, _corner_bucket(val))
+                    # Cap at 64 bits; bin name = "bit_N_set".
+                    v = val & 0xFFFF_FFFF_FFFF_FFFF
+                    while v:
+                        bit = (v & -v).bit_length() - 1  # lowest set bit
+                        _bump(CG_BIT_ACTIVITY, f"bit_{bit:02d}_set")
+                        v &= v - 1
                 # Sample the priv level observed on retirement.
                 pri_bin = _PRI_LEVEL_BIN.get(cm.group("pri"))
                 if pri_bin:
