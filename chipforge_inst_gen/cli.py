@@ -80,6 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "coverage goals are met. Requires --cov_goals.")
     p.add_argument("--max_seeds", type=int, default=64,
                    help="Upper bound on seeds tried by --auto_regress (default 64).")
+    p.add_argument("--plateau_window", type=int, default=4,
+                   help="Auto-regress bails if the last N seeds added zero "
+                        "new bins AND goals still unmet (default 4).")
     p.add_argument("--iss_trace", action="store_true",
                    help="Enable spike -l trace output; the 'cov' step will "
                         "parse the trace for runtime coverage (branch taken/"

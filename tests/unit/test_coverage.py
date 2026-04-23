@@ -651,6 +651,30 @@ def test_resolve_cov_goals_unknown_target_only_baseline():
     assert not any("_target_not_shipped_" in p for p in out)
 
 
+def test_auto_regress_convergence_counts():
+    from chipforge_inst_gen.auto_regress import _count_unique_bins, _convergence_stamp
+    db = new_db()
+    db[CG_OPCODE] = {"ADD": 1, "SUB": 2, "JAL": 0}
+    assert _count_unique_bins(db) == 2  # JAL at 0 doesn't count
+
+    convergence = {}
+    new = _convergence_stamp(db, seed=100, convergence=convergence)
+    assert new == 2
+    assert convergence == {
+        ("opcode_cg", "ADD"): 100,
+        ("opcode_cg", "SUB"): 100,
+    }
+    # Stamping again with a later seed shouldn't change ownership.
+    _convergence_stamp(db, seed=200, convergence=convergence)
+    assert convergence[("opcode_cg", "ADD")] == 100
+
+    # A newly-discovered bin gets the new seed.
+    db[CG_OPCODE]["NEW_BIN"] = 3
+    new = _convergence_stamp(db, seed=200, convergence=convergence)
+    assert new == 1
+    assert convergence[("opcode_cg", "NEW_BIN")] == 200
+
+
 def test_per_test_tool_ranks_tests(tmp_path: Path):
     """Smoke test for the per-test attribution CLI."""
     import json as _j

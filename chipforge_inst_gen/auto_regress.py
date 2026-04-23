@@ -71,6 +71,29 @@ def _pct_bins_met(db: CoverageDB, goals) -> tuple[int, int, float]:
     return met, total_required, met / total_required
 
 
+def _count_unique_bins(db: CoverageDB) -> int:
+    """Total number of (cg, bin) pairs with at least one hit."""
+    return sum(1 for cg in db for bn, cnt in db.get(cg, {}).items() if cnt > 0)
+
+
+def _convergence_stamp(
+    db: CoverageDB, seed: int, convergence: dict[tuple[str, str], int]
+) -> int:
+    """For every newly-hit bin in ``db``, record ``seed`` as its first-hit
+    seed in ``convergence``. Returns the count of bins first hit this seed.
+    """
+    new = 0
+    for cg, bins in db.items():
+        for bn, cnt in bins.items():
+            if cnt <= 0:
+                continue
+            key = (cg, bn)
+            if key not in convergence:
+                convergence[key] = seed
+                new += 1
+    return new
+
+
 def run_auto_regression(
     *,
     target_cfg,
@@ -135,6 +158,18 @@ def run_auto_regression(
     if use_directed:
         from chipforge_inst_gen.coverage.directed import directed_gen_opts
 
+    # Convergence tracking:
+    # - convergence[(cg, bn)] = the seed that first caused this bin to hit.
+    # - plateau: if the last `plateau_window` seeds added zero new bins,
+    #   bail early (we've converged). This is independent of --max_seeds.
+    convergence: dict[tuple[str, str], int] = {}
+    plateau_window = max(3, int(getattr(args, "plateau_window", 4) or 4))
+    new_bins_by_seed: list[int] = []
+    # Stamp any pre-existing bins (carried forward from a prior run) with
+    # seed=-1 so the analysis distinguishes "was already there" from "closed
+    # in this run".
+    _convergence_stamp(cum_db, -1, convergence)
+
     for offset in range(max_seeds):
         seed = start_seed + offset
         rng = random.Random(seed)
@@ -163,7 +198,11 @@ def run_auto_regression(
                 cov_merge(cum_db, run_db)
 
         met, total, pct = _pct_bins_met(cum_db, goals)
-        _log(f"  seed={seed} goals_met={met}/{total} ({pct*100:.1f}%)")
+        new_bins_this_seed = _convergence_stamp(cum_db, seed, convergence)
+        new_bins_by_seed.append(new_bins_this_seed)
+        total_unique = _count_unique_bins(cum_db)
+        _log(f"  seed={seed} goals_met={met}/{total} ({pct*100:.1f}%) "
+             f"unique_bins={total_unique} new_this_seed={new_bins_this_seed}")
 
         # Periodic save so a kill doesn't lose progress.
         if offset % 8 == 0:
@@ -172,14 +211,40 @@ def run_auto_regression(
         if goals_met(cum_db, goals):
             _log(f"auto-regress: goals met at seed={seed} ({offset + 1} seeds tried)")
             break
+
+        # Plateau detection — if the last `plateau_window` seeds added zero
+        # new bins AND goals still aren't met, we've converged without
+        # closing the goals. Keep going a bit to be sure, then bail.
+        if len(new_bins_by_seed) >= plateau_window and \
+                all(n == 0 for n in new_bins_by_seed[-plateau_window:]):
+            _log(
+                f"auto-regress: plateaued at seed={seed} (last "
+                f"{plateau_window} seeds added no new bins). Bailing — "
+                f"goals NOT met; remaining gap may need target-specific "
+                f"streams or --cov_directed mode."
+            )
+            break
     else:
         _log(f"auto-regress: EXHAUSTED {max_seeds} seeds; goals NOT met")
 
-    # Final persistence + report.
+    # Final persistence + report + convergence sidecar.
     cum_path.write_text(json.dumps(cum_db, indent=2, sort_keys=True))
     report_path = output_dir / "coverage_report.txt"
     report_path.write_text(render_report(cum_db, goals) + "\n")
-    _log(f"auto-regress: wrote {cum_path} and {report_path}")
+
+    # Convergence sidecar: per-bin first-hit seed + per-seed new-bin counts.
+    conv_path = output_dir / "convergence.json"
+    # Serialise the (cg, bn) tuple as "cg.bn" string key.
+    conv_serialised = {
+        f"{cg}.{bn}": seed_no for (cg, bn), seed_no in convergence.items()
+    }
+    conv_path.write_text(json.dumps({
+        "first_hit_seed": dict(sorted(conv_serialised.items())),
+        "new_bins_per_seed": new_bins_by_seed,
+        "start_seed": start_seed,
+        "final_goals_met": goals_met(cum_db, goals),
+    }, indent=2))
+    _log(f"auto-regress: wrote {cum_path} + {report_path} + {conv_path}")
     log_file.close()
 
     return 0 if goals_met(cum_db, goals) else 1
