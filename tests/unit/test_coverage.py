@@ -716,6 +716,60 @@ def test_bit_activity_from_gpr_write(tmp_path: Path):
     assert db[CG_BIT_ACTIVITY].get("bit_31_set", 0) == 1
 
 
+def test_lint_goals_clean(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    p = tmp_path / "g.yaml"
+    p.write_text("opcode_cg:\n  ADD: 5\n  SUB: 5\nhazard_cg:\n  raw: 10\n")
+    import argparse, io, contextlib
+    ns = argparse.Namespace(input=str(p), strict="error")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert cmd_lint_goals(ns) == 0
+    assert "OK" in buf.getvalue()
+
+
+def test_lint_goals_catches_typo(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    p = tmp_path / "g.yaml"
+    p.write_text("opcode_cg:\n  AD: 5\n")  # typo: should be ADD
+    import argparse, io, contextlib
+    ns = argparse.Namespace(input=str(p), strict="error")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert cmd_lint_goals(ns) == 1  # strict=error → exit 1
+    out = buf.getvalue()
+    assert "Unknown bin" in out
+    assert "AD" in out
+
+
+def test_lint_goals_flags_unknown_covergroup(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    p = tmp_path / "g.yaml"
+    p.write_text("bogus_cg:\n  foo: 5\n")
+    import argparse, io, contextlib
+    ns = argparse.Namespace(input=str(p), strict="error")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert cmd_lint_goals(ns) == 1
+    assert "Unknown covergroup" in buf.getvalue()
+
+
+def test_shipped_overlays_lint_clean():
+    """Every shipped goals overlay must pass the linter with --strict=error."""
+    from chipforge_inst_gen.coverage.tools import cmd_lint_goals
+    goals_dir = (
+        Path(__file__).parent.parent.parent
+        / "chipforge_inst_gen" / "coverage" / "goals"
+    )
+    import argparse, io, contextlib
+    for p in sorted(goals_dir.glob("*.yaml")):
+        ns = argparse.Namespace(input=str(p), strict="error")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cmd_lint_goals(ns)
+        assert rc == 0, f"Overlay {p.name} failed lint:\n{buf.getvalue()}"
+
+
 def test_suggest_seeds_ranks(tmp_path: Path):
     """suggest-seeds proposes historical seeds that closed still-missing bins."""
     from chipforge_inst_gen.coverage.tools import cmd_suggest_seeds

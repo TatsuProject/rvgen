@@ -237,6 +237,108 @@ def cmd_baseline_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lint_goals(args: argparse.Namespace) -> int:
+    """Static-check a goals YAML against the known covergroup catalogue.
+
+    Catches typos ('opcode_cg.AD' instead of 'ADD') that would otherwise
+    silently fail — an unknown bin name never gets a hit, so the goal is
+    impossible to meet and the user gets confusing "missing" reports
+    forever.
+
+    Strict levels:
+    - ``--strict=warn``  (default): unknown bins print warnings, exit 0.
+    - ``--strict=error``: unknown bins → non-zero exit (CI gate).
+
+    Unknown *covergroups* always warn (they're legal — a user might sample
+    their own — but usually indicate a typo).
+    """
+    from chipforge_inst_gen.coverage.collectors import ALL_COVERGROUPS
+    from chipforge_inst_gen.isa.enums import (
+        FRoundingMode, PrivilegedReg, RiscvFpr, RiscvInstrCategory,
+        RiscvInstrFormat, RiscvInstrGroup, RiscvInstrName, RiscvReg, RiscvVreg,
+    )
+
+    # Known bins per covergroup. Crosses (a__b) aren't exhaustively checked
+    # — we only verify that each side is plausibly a valid bin.
+    instr_names = {n.name for n in RiscvInstrName}
+    reg_names = {r.name for r in RiscvReg}
+    fpr_names = {r.name for r in RiscvFpr}
+    vreg_names = {r.name for r in RiscvVreg}
+    format_names = {f.name for f in RiscvInstrFormat}
+    category_names = {c.name for c in RiscvInstrCategory}
+    group_names = {g.name for g in RiscvInstrGroup}
+    csr_names = {c.name for c in PrivilegedReg}
+    rm_names = {r.name for r in FRoundingMode}
+
+    known_bins: dict[str, set[str]] = {
+        "opcode_cg": instr_names,
+        "format_cg": format_names,
+        "category_cg": category_names,
+        "group_cg": group_names,
+        "rs1_cg": reg_names,
+        "rs2_cg": reg_names,
+        "rd_cg": reg_names,
+        "imm_sign_cg": {"pos", "neg", "zero"},
+        "imm_range_cg": {"zero", "all_ones", "walking_one", "walking_zero",
+                          "min_signed", "max_signed", "generic"},
+        "hazard_cg": {"raw", "war", "waw", "none"},
+        "csr_cg": csr_names,
+        "fp_rm_cg": rm_names,
+        "fpr_cg": fpr_names,
+        "vreg_cg": vreg_names,
+        "mem_align_cg": {"byte_aligned", "half_aligned", "half_unaligned",
+                          "word_aligned", "word_unaligned",
+                          "dword_aligned", "dword_unaligned"},
+        "load_store_width_cg": {"byte", "half", "word", "dword"},
+        "load_store_offset_cg": {"zero", "pos_small", "pos_medium", "pos_large",
+                                   "neg_small", "neg_medium", "neg_large"},
+        "rs1_eq_rs2_cg": {"equal", "distinct"},
+        "rs1_eq_rd_cg": {"equal", "distinct"},
+        "branch_direction_cg": {"taken", "not_taken"},
+        "privilege_mode_cg": {"M_entered", "M_return", "S_return", "U_return",
+                                "M_mode", "S_mode", "U_mode"},
+        "exception_cg": {"trap_entered"},
+    }
+
+    goals = load_goals(args.input)
+    unknown_cgs: list[str] = []
+    bad_bins: list[tuple[str, str]] = []
+
+    for cg, bins in goals.data.items():
+        if cg not in ALL_COVERGROUPS:
+            unknown_cgs.append(cg)
+            continue
+        valid = known_bins.get(cg)
+        if valid is None:
+            continue  # cross or dynamic — skip detailed check
+        for bn in bins:
+            if bn not in valid:
+                bad_bins.append((cg, bn))
+
+    print(f"=== lint-goals: {args.input} ===")
+    if not unknown_cgs and not bad_bins:
+        print("OK — all covergroup names and bin names are recognised.")
+        return 0
+    if unknown_cgs:
+        print(f"\nUnknown covergroup(s) ({len(unknown_cgs)}):")
+        for cg in sorted(unknown_cgs):
+            print(f"    {cg}")
+    if bad_bins:
+        print(f"\nUnknown bin name(s) ({len(bad_bins)}):")
+        for cg, bn in sorted(bad_bins):
+            # Try to offer a suggestion for common typos.
+            valid = known_bins.get(cg, set())
+            suggestion = ""
+            for good in sorted(valid):
+                if bn.upper() == good.upper() or good.startswith(bn.upper()):
+                    suggestion = f" (did you mean {good!r}?)"
+                    break
+            print(f"    {cg}.{bn}{suggestion}")
+    if args.strict == "error" and (unknown_cgs or bad_bins):
+        return 1
+    return 0
+
+
 def cmd_suggest_seeds(args: argparse.Namespace) -> int:
     """Given an historical convergence.json + current goals, suggest the
     seeds most likely to close the *currently-missing* bins.
@@ -516,6 +618,14 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--baseline", required=True,
                      help="Golden baseline coverage JSON (checked in).")
     pb.set_defaults(func=cmd_baseline_check)
+
+    pl = sub.add_parser("lint-goals",
+                         help="Static-check a goals YAML: unknown covergroups "
+                              "and unknown bin names warn or error.")
+    pl.add_argument("input", help="Goals YAML path.")
+    pl.add_argument("--strict", choices=("warn", "error"), default="warn",
+                     help="Exit code behavior (default: warn → exit 0).")
+    pl.set_defaults(func=cmd_lint_goals)
 
     ps = sub.add_parser("suggest-seeds",
                          help="Given historical convergence + current goals, "
