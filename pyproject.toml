@@ -4,22 +4,77 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rvgen"
-version = "0.0.1"
-description = "Pure-Python re-implementation of riscv-dv random instruction generator."
+version = "0.1.0"
+description = "Pure-Python RISC-V random instruction generator with built-in functional coverage, auto-regression, and CI-ready dashboards."
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "chipforge contributors" },
+]
+maintainers = [
+    { name = "LogicX-Tatsu", email = "qamar.moavia001@gmail.com" },
+]
+keywords = [
+    "RISC-V",
+    "riscv",
+    "riscv-dv",
+    "verification",
+    "instruction-generator",
+    "functional-coverage",
+    "hardware-verification",
+    "CGF",
+    "RVV",
+    "Zve",
+    "spike",
+    "UVM",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
 dependencies = [
     "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
+dev = [
+    "pytest>=7.0",
+    "build>=1.0",
+    "twine>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/LogicX-Tatsu/rvgen"
+Repository = "https://github.com/LogicX-Tatsu/rvgen"
+Issues = "https://github.com/LogicX-Tatsu/rvgen/issues"
+Changelog = "https://github.com/LogicX-Tatsu/rvgen/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/LogicX-Tatsu/rvgen/tree/main/docs"
 
 [project.scripts]
 rvgen = "rvgen.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["rvgen*"]
-exclude = ["tests*", "research*"]
+exclude = ["tests*", "research*", "scripts*", "docs*"]
+
+[tool.setuptools.package-data]
+"rvgen" = [
+    "coverage/goals/*.yaml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

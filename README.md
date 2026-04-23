@@ -135,6 +135,14 @@ See a real rendered example at **[`docs/examples/coverage-report.html`](docs/exa
 
 ## Install
 
+From PyPI:
+
+```bash
+pip install rvgen
+```
+
+Or from source (for development):
+
 ```bash
 git clone https://github.com/LogicX-Tatsu/rvgen.git
 cd rvgen
@@ -415,6 +423,7 @@ docs/                            # deep documentation
 ├── coverage.md                   # complete coverage reference
 ├── architecture.md               # module / data flow
 ├── testlist.md                   # gen_opts + stream reference
+├── releasing.md                  # PyPI release checklist
 ├── images/                       # SVG diagrams
 └── examples/                     # coverage HTML, annotated goals, custom stream
 
