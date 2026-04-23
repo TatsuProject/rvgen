@@ -22,6 +22,17 @@ out/
 out_*/
 /tmp_*/
 
+# Claude Code project context — local-only tooling scaffold.
+# The stable architectural reference lives under docs/; this file
+# tracks ephemeral session status that doesn't belong in public git.
+CLAUDE.md
+
+# Porting research notes — internal SV-source digests used while
+# extending the generator. The polished public summary lives at
+# docs/research/comparison-and-next-steps.md; these root-level notes
+# are working scaffolding only.
+/research/
+
 # Virtual environments
 .venv/
 venv/

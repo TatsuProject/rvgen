@@ -35,8 +35,32 @@ password = pypi-<token>
 ## Pre-flight
 
 1. **All tests pass:** `python -m pytest tests/ -q`.
-2. **Canonical regression sweep:** see CLAUDE.md §0 — the 51/51 Spike and
-   18/18 rv64gcv rows must still be green.
+2. **Canonical regression sweep** — the 51/51 Spike and 18/18 rv64gcv
+   rows must still be green. See `scripts/regression.py` for the
+   matrix runner, or run the loop below:
+
+   ```bash
+   for t in rv32imc:riscv_arithmetic_basic_test rv32imc:riscv_rand_instr_test \
+            rv32imc:riscv_jump_stress_test rv32imc:riscv_loop_test \
+            rv32imc:riscv_amo_test rv32imc:riscv_rand_jump_test \
+            rv32imc:riscv_no_fence_test rv32imc:riscv_mmu_stress_test \
+            rv32imc:riscv_unaligned_load_store_test \
+            rv32imafdc:riscv_floating_point_arithmetic_test \
+            rv32imcb:riscv_b_ext_test rv32imcb:riscv_zbb_zbt_test \
+            rv64imc:riscv_arithmetic_basic_test rv64imc:riscv_rand_instr_test \
+            rv64imc:riscv_loop_test rv64imc:riscv_jump_stress_test \
+            rv64imcb:riscv_b_ext_test; do
+     target=${t%%:*}; test=${t##*:}
+     for s in 100 200 300; do
+       rm -rf /tmp/reg_${target}_${test}_${s}
+       python -m rvgen --target $target --test $test \
+         --steps gen,gcc_compile,iss_sim --iss spike \
+         --output /tmp/reg_${target}_${test}_${s} --start_seed $s -i 1 2>&1 \
+         | grep -qE "tests passed ISS sim" \
+         && echo "PASS $target/$test/$s" || echo "FAIL $target/$test/$s"
+     done
+   done
+   ```
 3. **Version bumped in two places:**
    - `pyproject.toml` — `project.version`
    - `rvgen/__init__.py` — `__version__`

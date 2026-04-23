@@ -99,11 +99,11 @@ they don't want.
 
 | Test kind | Where | Count |
 |---|---|---|
-| Unit | `tests/unit/` | 332 |
+| Unit | `tests/unit/` | 396 |
 | Doctest (coverage API example) | `rvgen/coverage/__init__.py` | 1 |
-| End-to-end on spike (51-case scalar) | shell harness in README | 51 × 3 seeds |
-| End-to-end on spike-vector (rv64gcv) | shell harness in CLAUDE.md | 18 × 3 seeds |
-| End-to-end on spike-vector (Zve* + coralnpu) | shell harness in CLAUDE.md | 5 |
+| End-to-end on spike (51-case scalar) | `scripts/regression.py` + `docs/releasing.md` loop | 51 × 3 seeds |
+| End-to-end on spike-vector (rv64gcv) | `scripts/regression.py --targets rv64gcv` | 18 × 3 seeds |
+| End-to-end on spike-vector (Zve* + coralnpu) | `scripts/regression.py --targets coralnpu,rv32imc_zve32x,…` | 5 |
 | Trace-level match vs chipforge-mcu RTL | `scripts/mcu_validate.sh` | 7 × 3 seeds |
 | Integration regression (golden bin floor) | `tests/unit/test_coverage.py::test_golden_coverage_rv32imc_fixed_seed` | 1 |
 
