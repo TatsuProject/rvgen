@@ -8,8 +8,8 @@ type: software
 version: 0.1.0
 date-released: "2026-04-23"
 license: Apache-2.0
-url: "https://github.com/chipforge/rvgen"
-repository-code: "https://github.com/chipforge/rvgen"
+url: "https://github.com/LogicX-Tatsu/rvgen"
+repository-code: "https://github.com/LogicX-Tatsu/rvgen"
 abstract: >
   A pure-Python random instruction generator for RISC-V cores, structurally
   modelled on Google's riscv-dv but without the SystemVerilog / UVM / PyVSC
@@ -27,4 +27,4 @@ keywords:
   - open source
 authors:
   - name: "chipforge contributors"
-    website: "https://github.com/chipforge/rvgen"
+    website: "https://github.com/LogicX-Tatsu/rvgen"

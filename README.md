@@ -24,7 +24,7 @@
 
 ---
 
-rvgen replaces Google's [riscv-dv](https://github.com/chipsalliance/riscv-dv) at the generator layer with a small, single-dependency (PyYAML) Python package. Every riscv-dv testlist YAML runs unchanged. On top of that parity, the project adds a first-class **functional-coverage subsystem** — covergroups, CGF-style goal files, coverage-directed auto-regression, per-test attribution, HTML dashboards, CI integration — that in the SV world you'd normally assemble from a UVM flow, riscv-isac, and a simulator licence.
+rvgen replaces the [CHIPS Alliance's riscv-dv](https://github.com/chipsalliance/riscv-dv) at the generator layer with a small, single-dependency (PyYAML) Python package. Every riscv-dv testlist YAML runs unchanged. On top of that parity, the project adds a first-class **functional-coverage subsystem** — covergroups, CGF-style goal files, coverage-directed auto-regression, per-test attribution, HTML dashboards, CI integration — that in the SV world you'd normally assemble from a UVM flow, riscv-isac, and a simulator licence.
 
 **Who this is for:** verification engineers bringing up RISC-V cores who want the power of random instruction generation without SystemVerilog, UVM, or a simulator licence between them and their `.S` files.
 
@@ -136,7 +136,7 @@ See a real rendered example at **[`docs/examples/coverage-report.html`](docs/exa
 ## Install
 
 ```bash
-git clone https://github.com/<org>/rvgen.git
+git clone https://github.com/LogicX-Tatsu/rvgen.git
 cd rvgen
 pip install -e ".[test]"
 ```

@@ -372,5 +372,5 @@ tooling is the moat that's hardest for competitors to copy.
 - [RISC-V Verification: The 5 Levels](https://semiengineering.com/risc-v-verification-the-5-levels-of-simulation-based-processor-hardware-dv/)
 - [riscvISACOV](https://github.com/riscv-verification/riscvISACOV)
 - [riscv-isac CGF Specification](https://riscv-isac.readthedocs.io/en/latest/cgf.html)
-- [PMP support — riscv-dv open issue #459](https://github.com/google/riscv-dv/issues/459)
+- [PMP support — riscv-dv open issue #459](https://github.com/chipsalliance/riscv-dv/issues/459)
 - [Ratified RISC-V extensions](https://wiki.riscv.org/display/HOME/Ratified+Extensions)
