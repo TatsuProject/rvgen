@@ -542,3 +542,49 @@ def test_tools_export_html(tmp_path: Path):
     assert "<html>" in txt
     assert "opcode_cg" in txt
     assert ">3<" in txt  # the hit count renders somewhere
+
+
+# ---------------------------------------------------------------------------
+# Coverage-directed perturbation
+# ---------------------------------------------------------------------------
+
+
+def test_directed_drops_no_fence_when_fence_missing(tmp_path: Path):
+    from chipforge_inst_gen.coverage.directed import directed_gen_opts
+    p = tmp_path / "g.yaml"
+    p.write_text("opcode_cg:\n  FENCE: 5\n")
+    goals = load_goals(p)
+    db = new_db()  # FENCE=0 — missing
+    new_opts, reasons = directed_gen_opts("+no_fence=1 +instr_cnt=100", db, goals)
+    assert "+no_fence=1" not in new_opts
+    assert "+no_fence=0" in new_opts
+    assert any("no_fence" in r for r in reasons)
+
+
+def test_directed_injects_stream_when_load_byte_missing(tmp_path: Path):
+    from chipforge_inst_gen.coverage.directed import directed_gen_opts
+    p = tmp_path / "g.yaml"
+    p.write_text("opcode_cg:\n  LB: 3\n")
+    goals = load_goals(p)
+    db = new_db()
+    new_opts, reasons = directed_gen_opts("+instr_cnt=100", db, goals)
+    assert "riscv_load_store_rand_instr_stream" in new_opts
+    assert any("LB missing" in r for r in reasons)
+
+
+def test_directed_no_change_when_goals_met(tmp_path: Path):
+    from chipforge_inst_gen.coverage.directed import directed_gen_opts
+    p = tmp_path / "g.yaml"
+    p.write_text("opcode_cg:\n  ADD: 3\n")
+    goals = load_goals(p)
+    db = new_db()
+    db[CG_OPCODE] = {"ADD": 10}
+    new_opts, reasons = directed_gen_opts("+instr_cnt=100 +no_fence=1", db, goals)
+    assert new_opts == "+instr_cnt=100 +no_fence=1"
+    assert reasons == []
+
+
+def test_jalr_instr_stream_registered():
+    from chipforge_inst_gen.streams import get_stream
+    cls = get_stream("riscv_jalr_instr")
+    assert cls.__name__ == "JalrInstr"

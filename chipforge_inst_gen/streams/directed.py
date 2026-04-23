@@ -318,6 +318,52 @@ from chipforge_inst_gen.streams import register_stream
 
 register_stream("riscv_int_numeric_corner_stream", IntNumericCornerStream)
 register_stream("riscv_jal_instr", JalInstr)
+
+
+# ---------------------------------------------------------------------------
+# riscv_jalr_instr — emit a few JALR instructions that jump into the same
+# sequence (via an AUIPC + JALR pair). Coverage-driven addition: JALR was
+# uncovered by every existing stream because it's only used by boot/trap
+# scaffolding, not by the random stream.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JalrInstr(DirectedInstrStream):
+    """Emit ``AUIPC t0, 0; JALR ra, t0, <label_offset>`` blocks.
+
+    The actual offset is set to 0 (or a small constant); spike executes
+    the fall-through so the net effect on control flow is minimal. The
+    point is to ensure the JALR opcode appears in the emitted stream so
+    functional-coverage collectors see it.
+    """
+
+    num_of_jalr: int = 0
+
+    def build(self) -> None:
+        if self.num_of_jalr == 0:
+            self.num_of_jalr = self.rng.randint(3, 6)
+        reserved = set(self.cfg.reserved_regs)
+        reg_pool = [r for r in RiscvReg if r not in reserved and r != RiscvReg.ZERO]
+        for _ in range(self.num_of_jalr):
+            scratch = self.rng.choice(reg_pool)
+            auipc = get_instr(RiscvInstrName.AUIPC)
+            auipc.rd = scratch
+            auipc.imm = 0
+            auipc.imm_str = "0"
+            auipc.post_randomize()
+            self.instr_list.append(auipc)
+
+            jalr = get_instr(RiscvInstrName.JALR)
+            jalr.rd = RiscvReg.ZERO  # do not perturb RA
+            jalr.rs1 = scratch
+            jalr.imm = 8  # jump past this pair (auipc + jalr = 8 bytes)
+            jalr.imm_str = "8"
+            jalr.post_randomize()
+            self.instr_list.append(jalr)
+
+
+register_stream("riscv_jalr_instr", JalrInstr)
 # The scalar load/store family — riscv_load_store_rand_instr_stream and
 # friends — is now provided by streams/load_store.py with SV-faithful
 # distinctive behavior per subclass (hazard / multi-page / locality-aware).

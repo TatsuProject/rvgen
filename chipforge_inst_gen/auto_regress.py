@@ -118,11 +118,23 @@ def run_auto_regression(
         log_file.close()
         return 1
 
+    # Coverage-directed mode uses the current missing-bin set to perturb
+    # per-seed gen_opts. Enabled via args.cov_directed.
+    use_directed = bool(getattr(args, "cov_directed", False))
+    if use_directed:
+        from chipforge_inst_gen.coverage.directed import directed_gen_opts
+
     for offset in range(max_seeds):
         seed = start_seed + offset
         rng = random.Random(seed)
         for te in tests:
             merged_gen_opts = (te.gen_opts or "") + " " + (args.gen_opts or "")
+            if use_directed:
+                merged_gen_opts, reasons = directed_gen_opts(
+                    merged_gen_opts, cum_db, goals,
+                )
+                for r in reasons:
+                    _log(f"    directed: {r}")
             cfg = make_config(target_cfg, gen_opts=merged_gen_opts)
             cfg.seed = seed
             avail = create_instr_list(cfg)

@@ -82,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Enable spike -l trace output; the 'cov' step will "
                         "parse the trace for runtime coverage (branch taken/"
                         "not-taken, pc_reach, privilege transitions).")
+    p.add_argument("--cov_directed", action="store_true",
+                   help="When auto-regressing, perturb gen_opts each seed "
+                        "based on currently-missing bins (e.g. drop "
+                        "+no_fence=1 if FENCE is uncovered). Heuristic — "
+                        "see chipforge_inst_gen.coverage.directed for the "
+                        "mapping table.")
 
     # ISA
     p.add_argument("--isa", default="",
