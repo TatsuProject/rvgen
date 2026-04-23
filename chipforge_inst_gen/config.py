@@ -26,6 +26,7 @@ from chipforge_inst_gen.isa.enums import (
     VregInitMethod,
 )
 from chipforge_inst_gen.targets import TargetCfg
+from chipforge_inst_gen.vector_config import VectorConfig, Vtype
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +205,10 @@ class Config:
     # ---- Target cfg reference (for downstream code that needs e.g. XLEN) ----
     target: TargetCfg | None = None
 
+    # ---- Vector extension config (populated by make_config when the target
+    # enables RVV; None otherwise) ----
+    vector_cfg: VectorConfig | None = None
+
     # -- Runtime-only (not for SV parity) --
     seed: int | None = None
 
@@ -312,6 +317,20 @@ def make_config(target: TargetCfg, gen_opts: str = "", **overrides: Any) -> Conf
     }
     if not any(g in target.supported_isa for g in compressed_groups):
         cfg.disable_compressed_instr = True
+
+    # If the target enables RVV, flip on the cfg-level flag and stamp a
+    # VectorConfig. SV bringup_c defaults: vstart=0, vl=VLEN/vsew, vediv=1,
+    # LMUL=1, SEW=32 (matches rv64gcv's ELEN=32).
+    if target.vector_extension_enable:
+        cfg.enable_vector_extension = True
+        cfg.vector_cfg = VectorConfig(
+            vtype=Vtype(vlmul=1, vsew=min(32, target.elen), vediv=1),
+            vlen=target.vlen,
+            elen=target.elen,
+            selen=target.selen,
+            max_lmul=target.max_lmul,
+            num_vec_gpr=target.num_vec_gpr,
+        )
 
     cfg.apply_plusargs(gen_opts)
     for k, v in overrides.items():

@@ -55,6 +55,37 @@ _FP_GROUPS = frozenset({
 _VECTOR_GROUPS = frozenset({RiscvInstrGroup.RVV})
 
 
+# ---------------------------------------------------------------------------
+# Vector-specific filters — gate widening / narrowing / FP / Zvlsseg / Zvamo.
+# Applied when group == RVV.
+# ---------------------------------------------------------------------------
+
+#: Ops that SV's riscv_vector_instr::is_supported explicitly drops. Keeping
+#: the same deny-list makes our output behave like SV's random stream.
+_VECTOR_ALWAYS_DROP = frozenset({
+    RiscvInstrName.VWMACCSU,
+    RiscvInstrName.VMERGE,
+    RiscvInstrName.VFMERGE,
+    RiscvInstrName.VMADC,
+    RiscvInstrName.VMSBC,
+})
+
+#: Names with "VF"/"VMF" prefix — suppressed when vec_fp is off.
+def _is_fp_vector_name(n: RiscvInstrName) -> bool:
+    s = n.name
+    return s.startswith("VF") or s.startswith("VMF")
+
+#: Names with "VW"/"VFW" prefix — widening; gated by vec_narrowing_widening.
+def _is_widening_vector_name(n: RiscvInstrName) -> bool:
+    s = n.name
+    return s.startswith("VW") or s.startswith("VFW")
+
+#: Names with "VN"/"VFN" prefix — narrowing; gated by vec_narrowing_widening.
+def _is_narrowing_vector_name(n: RiscvInstrName) -> bool:
+    s = n.name
+    return s.startswith("VN") or s.startswith("VFN")
+
+
 @dataclass(frozen=True, slots=True)
 class AvailableInstrs:
     """Instructions that survive ``create_instr_list(cfg)``'s filters."""
@@ -132,6 +163,32 @@ def create_instr_list(cfg: Config) -> AvailableInstrs:
             continue
         if cfg.vector_instr_only and group not in _VECTOR_GROUPS:
             continue
+        # Vector-specific gating (SV: riscv_vector_instr::is_supported).
+        if group in _VECTOR_GROUPS and cfg.vector_cfg is not None:
+            vcfg = cfg.vector_cfg
+            if name in _VECTOR_ALWAYS_DROP:
+                continue
+            if not vcfg.vec_fp and _is_fp_vector_name(name):
+                continue
+            if not vcfg.vec_narrowing_widening:
+                if _is_widening_vector_name(name) or _is_narrowing_vector_name(name):
+                    continue
+            if not vcfg.enable_zvlsseg and getattr(cls, "sub_extension", "") == "zvlsseg":
+                continue
+            # Zvamo is gated by a separate flag in SV; Phase 1 keeps it on the
+            # same switch as Zvlsseg (chipforge-inst-gen's first RVV milestone
+            # doesn't register Zvamo in a core target).
+            if getattr(cls, "sub_extension", "") == "zvamo":
+                # Not yet wired into a runnable target; drop from random stream.
+                continue
+            # VSETVLI/VSETVL are emitted by the init section, not the random
+            # stream (category=CSR, but keep an explicit drop in case a future
+            # config ever puts CSR ops into the vector stream).
+            if name in (RiscvInstrName.VSETVLI, RiscvInstrName.VSETVL):
+                continue
+            # ADC/SBC need explicit mask setup in the stream — Phase 1 skips.
+            if name in (RiscvInstrName.VADC, RiscvInstrName.VSBC):
+                continue
 
         names.append(name)
         by_group.setdefault(group, []).append(name)

@@ -243,6 +243,12 @@ class AsmProgramGen:
             val = _pick_gpr_init(self.rng)
             self.instr_stream.append(_line(f"li x{i}, 0x{val:x}"))
 
+        # Vector engine init — emitted before the stack pointer load because
+        # init_vec_gpr runs in a "temporary SEW/LMUL" regime (SV line 1629)
+        # before the final vsetvli sets the real vtype.
+        if self.cfg.enable_vector_extension and self.cfg.vector_cfg is not None:
+            self._gen_vector_init(hart)
+
         # Stack pointer.
         self.instr_stream.append(
             _line(f"la {self.cfg.sp.abi}, {prefix}user_stack_end")
@@ -267,6 +273,59 @@ class AsmProgramGen:
                         gpr1=self.cfg.gpr[1],
                     )
                 )
+
+    def _gen_vector_init(self, hart: int) -> None:
+        """Emit the vector engine init section.
+
+        Port of SV ``init_vec_gpr`` + ``randomize_vec_gpr_and_csr``
+        (riscv_asm_program_gen.sv:544 and :1624).
+
+        Flow:
+          csrwi vxsat, <val>
+          csrwi vxrm, <val>
+          <temporary vsetvli with LMUL=1, SEW=min(ELEN,XLEN)>
+          vec_reg_init:
+            <per-register init — SAME_VALUES_ALL_ELEMS form:
+              vmv.v.x v<N>, x<N>>
+          <final vsetvli with cfg.vector_cfg.vtype>
+        """
+        vcfg = self.cfg.vector_cfg
+        assert vcfg is not None
+        gpr0 = self.cfg.gpr[0].abi
+        gpr1 = self.cfg.gpr[1].abi
+
+        # VXSAT / VXRM setup (SV emits unconditionally).
+        self.instr_stream.append(_line(f"csrwi vxsat, {int(vcfg.vxsat)}"))
+        self.instr_stream.append(_line(f"csrwi vxrm, {int(vcfg.vxrm)}"))
+
+        # Temporary vsetvli with LMUL=1 for vreg init. SEW = min(ELEN, XLEN).
+        # GCC 15 implements RVV v1.0 vsetvli: <sew>,<lmul>,<ta|tu>,<ma|mu>.
+        # The legacy v0.8 `d<N>` (EDIV) tail no longer assembles. We emit
+        # tail-agnostic / mask-agnostic by default — standard for random code.
+        tmp_sew = min(vcfg.elen, self.cfg.target.xlen)
+        self.instr_stream.append(_line(f"li {gpr1}, {vcfg.vl}"))
+        self.instr_stream.append(
+            _line(f"vsetvli {gpr0}, {gpr1}, e{tmp_sew}, m1, ta, ma")
+        )
+        self.instr_stream.append(_labeled(f"{hart_prefix(hart, self.cfg.num_of_harts)}vec_reg_init"))
+
+        # SAME_VALUES_ALL_ELEMS init (simplest form, assembles cleanly).
+        # Avoids the reserved scratch regs.
+        reserved = {self.cfg.sp.value, self.cfg.tp.value, self.cfg.gpr[0].value,
+                    self.cfg.gpr[1].value, self.cfg.scratch_reg.value}
+        for v in range(vcfg.num_vec_gpr):
+            # Use x<N> if safe, else x0. vmv.v.x accepts x0.
+            src = v if v not in reserved else 0
+            self.instr_stream.append(_line(f"vmv.v.x v{v}, x{src}"))
+
+        # Final vsetvli with the intended vtype.
+        self.instr_stream.append(_line(f"li {gpr1}, {vcfg.vl}"))
+        self.instr_stream.append(
+            _line(
+                f"vsetvli {gpr0}, {gpr1}, e{vcfg.vtype.vsew}, "
+                f"{vcfg.lmul_str()}, ta, ma"
+            )
+        )
 
     def _gen_test_done(self) -> None:
         """SV: gen_test_done (riscv_asm_program_gen.sv:700)."""

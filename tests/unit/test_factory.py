@@ -41,8 +41,9 @@ def test_get_instr_returns_fresh_instance():
 
 def test_get_instr_unknown_raises_keyerror():
     with pytest.raises(KeyError):
-        # VSETVL is declared in the name enum but not registered in RV32I.
-        get_instr(RiscvInstrName.VSETVL)
+        # BMATOR is declared in the name enum (draft RV64B) but not registered
+        # by any ISA module — used as a sentinel "not registered" opcode.
+        get_instr(RiscvInstrName.BMATOR)
 
 
 def test_class_name_follows_riscv_N_instr_pattern():

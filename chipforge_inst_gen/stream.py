@@ -252,6 +252,11 @@ class RandInstrStream(InstrStream):
             fp_rand = getattr(instr, "randomize_fpr_operands", None)
             if fp_rand is not None:
                 fp_rand(rng)
+            # Randomize vector operands when the instr exposes them and the
+            # cfg has a vector_cfg stamped in.
+            vec_rand = getattr(instr, "randomize_vector_operands", None)
+            if vec_rand is not None and self.cfg.vector_cfg is not None:
+                vec_rand(rng, self.cfg.vector_cfg)
             # Randomize the CSR address for CSR ops — SV riscv_csr_instr's
             # ``csr_addr_c`` + ``write_csr_c`` constraints separate READ-only
             # and WRITE-type CSR ops:

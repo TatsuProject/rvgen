@@ -25,5 +25,6 @@ from chipforge_inst_gen.isa import rv32fc  # noqa: F401,E402
 from chipforge_inst_gen.isa import rv32dc  # noqa: F401,E402
 from chipforge_inst_gen.isa import bitmanip  # noqa: F401,E402
 from chipforge_inst_gen.isa import crypto    # noqa: F401,E402
+from chipforge_inst_gen.isa import rv32v     # noqa: F401,E402
 
 __all__ = ["enums", "csrs", "utils"]
