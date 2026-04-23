@@ -1,0 +1,21 @@
+# Overlay for tests that set +no_branch_jump=1 (e.g. the FP arithmetic
+# stress test). Zeroes out branch / jump goals so they don't block
+# "goals met" status for those tests.
+opcode_cg:
+  BEQ: 0
+  BNE: 0
+  BLT: 0
+  BGE: 0
+  BLTU: 0
+  BGEU: 0
+  JAL: 0
+  JALR: 0
+category_cg:
+  BRANCH: 0
+  JUMP: 0
+format_cg:
+  B_FORMAT: 0
+  J_FORMAT: 0
+fmt_category_cross:
+  B_FORMAT__BRANCH: 0
+  J_FORMAT__JUMP: 0

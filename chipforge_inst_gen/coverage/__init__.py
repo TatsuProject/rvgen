@@ -31,6 +31,7 @@ from chipforge_inst_gen.coverage.cgf import (
     Goals,
     goals_met,
     load_goals,
+    load_goals_layered,
     missing_bins,
 )
 from chipforge_inst_gen.coverage.report import render_report
@@ -42,6 +43,7 @@ __all__ = [
     "Goals",
     "goals_met",
     "load_goals",
+    "load_goals_layered",
     "merge",
     "missing_bins",
     "render_report",

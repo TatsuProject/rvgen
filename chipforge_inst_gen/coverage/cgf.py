@@ -48,13 +48,12 @@ class Goals:
         return tuple(self.data)
 
 
-def load_goals(path: str | Path) -> Goals:
-    """Load a CGF-style YAML file. Ignores unknown keys silently."""
+def _load_one(path: str | Path) -> dict[str, dict[str, int]]:
+    """Parse a single goals YAML file into a normalised dict-of-dict."""
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Coverage goals file {path!r} must be a YAML mapping")
-    # Normalise: every value must be a dict[str, int]
     out: dict[str, dict[str, int]] = {}
     for cg, bins in raw.items():
         if not isinstance(bins, dict):
@@ -70,7 +69,39 @@ def load_goals(path: str | Path) -> Goals:
                     f"Bin {cg}.{bn} in {path!r} must be an integer; got {cnt!r}"
                 ) from e
         out[str(cg)] = normalised
-    return Goals(data=out)
+    return out
+
+
+def load_goals(path: str | Path) -> Goals:
+    """Load a CGF-style YAML file."""
+    return Goals(data=_load_one(path))
+
+
+def load_goals_layered(*paths: str | Path) -> Goals:
+    """Load multiple goals files and merge them, last-writer wins per bin.
+
+    Merge semantics (valuable for per-target / per-test overlays):
+
+    - If file A sets ``opcode_cg.FENCE: 2`` and B sets ``opcode_cg.FENCE: 0``
+      (optional), the final goal is ``0`` — bin is tracked but not required.
+    - If A sets ``opcode_cg.ADD: 5`` and B omits it, the final goal stays 5.
+    - New covergroups / bins introduced by later files are added to the
+      final view.
+
+    Useful layouts::
+
+        # Base rv32imc goals + rv64gcv overlay (adds vector bins):
+        --cov_goals baseline.yaml --cov_goals rv64gcv.yaml
+
+        # Test that disables branches explicitly:
+        --cov_goals baseline.yaml --cov_goals arithmetic_basic.yaml
+    """
+    merged: dict[str, dict[str, int]] = {}
+    for p in paths:
+        src = _load_one(p)
+        for cg, bins in src.items():
+            merged.setdefault(cg, {}).update(bins)
+    return Goals(data=merged)
 
 
 def missing_bins(db: CoverageDB, goals: Goals) -> dict[str, dict[str, tuple[int, int]]]:

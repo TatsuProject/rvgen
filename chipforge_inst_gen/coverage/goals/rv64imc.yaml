@@ -1,0 +1,46 @@
+# RV64IMC overlay — additions / overrides on top of baseline.yaml.
+# Layer as:  --cov_goals baseline.yaml --cov_goals rv64imc.yaml
+
+opcode_cg:
+  # RV64I-only load/store / RV32W integer ops.
+  LWU: 3
+  LD: 3
+  SD: 3
+  ADDIW: 10
+  SLLIW: 5
+  SRLIW: 5
+  SRAIW: 5
+  ADDW: 10
+  SUBW: 5
+  SLLW: 3
+  SRLW: 3
+  SRAW: 3
+  # RV64M-only multiply/divide.
+  MULW: 5
+  DIVW: 3
+  DIVUW: 3
+  REMW: 3
+  REMUW: 3
+  # RV64C-only compressed ops.
+  C_ADDIW: 5
+  C_SUBW: 3
+  C_ADDW: 3
+  C_LD: 5
+  C_SD: 5
+  C_LDSP: 5
+  C_SDSP: 5
+
+group_cg:
+  RV64I: 50
+  RV64M: 5
+  RV64C: 10
+
+load_store_width_cg:
+  dword: 5
+
+mem_align_cg:
+  dword_aligned: 3
+
+category_group_cross:
+  ARITHMETIC__RV64I: 20
+  ARITHMETIC__RV64M: 3

@@ -1,0 +1,53 @@
+# RV64GCV overlay — vector-extension goals on top of baseline + rv64imc.
+# Layer as:
+#   --cov_goals baseline.yaml --cov_goals rv64imc.yaml --cov_goals rv64gcv.yaml
+
+opcode_cg:
+  # Integer vector arithmetic — heavy goals because they dominate the
+  # random vector stream on rv64gcv.
+  VADD: 20
+  VSUB: 10
+  VAND: 10
+  VOR: 10
+  VXOR: 10
+  VSLL: 5
+  VSRL: 5
+  VSRA: 5
+  VMUL: 10
+  VMULH: 3
+  VDIV: 3
+  VMSEQ: 5
+  VMSNE: 5
+  VMSLTU: 3
+  VMSLT: 3
+  VMSLE: 3
+  VMIN: 3
+  VMAX: 3
+  # Vector mask + permutation
+  VMAND_MM: 3
+  VMOR_MM: 3
+  VMV: 5
+  VID_V: 2
+  VMV_X_S: 0
+  # Vector load/store — set optional until the dedicated streams land.
+  VLE_V: 0
+  VSE_V: 0
+
+format_cg:
+  VA_FORMAT: 50
+  VS2_FORMAT: 5
+
+category_cg:
+  ARITHMETIC: 150
+
+group_cg:
+  RVV: 100
+
+vreg_cg:
+  V0: 5
+  V2: 5
+  V4: 5
+  V8: 5
+  V16: 5
+  V24: 5
+  V31: 5

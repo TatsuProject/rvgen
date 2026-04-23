@@ -588,3 +588,42 @@ def test_jalr_instr_stream_registered():
     from chipforge_inst_gen.streams import get_stream
     cls = get_stream("riscv_jalr_instr")
     assert cls.__name__ == "JalrInstr"
+
+
+# ---------------------------------------------------------------------------
+# Layered goals
+# ---------------------------------------------------------------------------
+
+
+def test_load_goals_layered_last_writer_wins(tmp_path: Path):
+    from chipforge_inst_gen.coverage import load_goals_layered
+    a = tmp_path / "a.yaml"
+    b = tmp_path / "b.yaml"
+    a.write_text("opcode_cg:\n  ADD: 5\n  SUB: 3\n")
+    b.write_text("opcode_cg:\n  SUB: 0\n  JAL: 7\n")
+    merged = load_goals_layered(a, b)
+    # ADD kept from a, SUB overridden to 0 (optional) by b, JAL added by b.
+    assert merged.covergroup("opcode_cg") == {"ADD": 5, "SUB": 0, "JAL": 7}
+
+
+def test_load_goals_layered_adds_new_covergroups(tmp_path: Path):
+    from chipforge_inst_gen.coverage import load_goals_layered
+    a = tmp_path / "a.yaml"
+    b = tmp_path / "b.yaml"
+    a.write_text("opcode_cg:\n  ADD: 5\n")
+    b.write_text("group_cg:\n  RVV: 50\n")
+    merged = load_goals_layered(a, b)
+    assert merged.covergroup("opcode_cg") == {"ADD": 5}
+    assert merged.covergroup("group_cg") == {"RVV": 50}
+
+
+def test_shipped_overlay_goals_parse():
+    """Every overlay goals YAML we ship must parse cleanly."""
+    from chipforge_inst_gen.coverage import load_goals
+    goals_dir = (
+        Path(__file__).parent.parent.parent
+        / "chipforge_inst_gen" / "coverage" / "goals"
+    )
+    for p in sorted(goals_dir.glob("*.yaml")):
+        g = load_goals(p)
+        assert isinstance(g.covergroup_names(), tuple)

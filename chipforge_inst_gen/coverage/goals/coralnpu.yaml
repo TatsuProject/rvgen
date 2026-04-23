@@ -1,0 +1,38 @@
+# Coral NPU v2 overlay — ISA: rv32imf_zve32x_zicsr_zifencei_zbb.
+# Embedded vector (Zve32x), no privileged CSRs beyond the machine-mode
+# minimum, no double-precision FP.
+#
+# Layer as:  --cov_goals baseline.yaml --cov_goals coralnpu.yaml
+
+opcode_cg:
+  # Disable RV32D expectations (core has scalar F only).
+  FLD: 0
+  FSD: 0
+  FADD_D: 0
+  # Disable privileged transitions beyond M (core is M-mode only).
+  SRET: 0
+  URET: 0
+  # Vector integer ops — Zve32x enables these at SEW in {8,16,32}.
+  VADD: 10
+  VSUB: 5
+  VAND: 5
+  VOR: 5
+  VXOR: 5
+  VMUL: 5
+  VMSEQ: 3
+  VMV: 3
+
+group_cg:
+  ZVE32X: 10
+
+category_cg:
+  ARITHMETIC: 80
+
+# Zbb opcodes (scalar bit-manip), if Coral's synthesis includes them.
+# Set optional — adjust if the physical core differs.
+
+csr_cg:
+  MSCRATCH: 0
+  MSTATUS: 0
+  MISA: 0
+  MTVEC: 0

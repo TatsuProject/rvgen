@@ -39,6 +39,7 @@ from chipforge_inst_gen.config import make_config
 from chipforge_inst_gen.coverage import (
     goals_met,
     load_goals,
+    load_goals_layered,
     render_report,
 )
 from chipforge_inst_gen.coverage.collectors import (
@@ -83,7 +84,9 @@ def run_auto_regression(
     from chipforge_inst_gen.isa import enums  # noqa: F401 — trigger registrations
     from chipforge_inst_gen.isa.filtering import create_instr_list
 
-    goals = load_goals(args.cov_goals)
+    # Support both repeated --cov_goals (list) and legacy single-path string.
+    goals_paths = args.cov_goals if isinstance(args.cov_goals, list) else [args.cov_goals]
+    goals = load_goals_layered(*goals_paths) if goals_paths else load_goals(args.cov_goals)
 
     # Cumulative DB path — re-use any existing DB so sequential runs chain.
     cum_path = Path(args.cov_db) if args.cov_db else output_dir / "coverage.json"

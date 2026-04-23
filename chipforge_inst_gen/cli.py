@@ -65,10 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Do not clean the output of previous runs (default: true, same as run.py).")
 
     # Coverage
-    p.add_argument("--cov_goals", default="",
-                   help="Path to a coverage-goals YAML. If set, the 'cov' step "
-                        "compares observed coverage against these goals and "
-                        "returns non-zero if unmet (use with --auto_regress).")
+    p.add_argument("--cov_goals", action="append", default=[],
+                   help="Path to a coverage-goals YAML. Repeat to layer "
+                        "overlays (later files override earlier on a "
+                        "per-bin basis — last-writer wins, 0 marks optional). "
+                        "If set, the 'cov' step compares observed coverage "
+                        "against the merged goals and returns non-zero if unmet.")
     p.add_argument("--cov_db", default="",
                    help="Path to a cumulative coverage DB (JSON). The 'cov' step "
                         "merges this run's coverage into this file; auto-regress "
@@ -320,7 +322,8 @@ def main(argv: list[str] | None = None) -> int:
 
         goals = None
         if args.cov_goals:
-            goals = cov_load_goals(args.cov_goals)
+            from chipforge_inst_gen.coverage import load_goals_layered
+            goals = load_goals_layered(*args.cov_goals)
 
         report = cov_render_report(existing, goals)
         report_path = output_dir / "coverage_report.txt"
