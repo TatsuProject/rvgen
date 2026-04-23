@@ -1,0 +1,45 @@
+# rv32imc_zkn — chipforge MCU ISA (RV32IMC + Zkn umbrella).
+# Zkn includes: Zbkb, Zbkc, Zbkx, Zknd, Zkne, Zknh. No Zbb on this core.
+opcode_cg:
+  # Zbkb — crypto-bitmanip (subset of Zbb + extras).
+  BREV8: 2
+  ZIP: 1
+  UNZIP: 1
+  PACK: 2
+  PACKH: 2
+  ANDN: 2
+  ORN: 2
+  XNOR: 2
+  ROL: 2
+  ROR: 2
+  RORI: 2
+  # Zbkc — carry-less mul.
+  CLMUL: 2
+  CLMULH: 2
+  # Zbkx — byte/nibble perm.
+  XPERM_B: 2
+  XPERM_N: 2
+  # AES-32 (RV32 Zkne + Zknd).
+  AES32ESI: 2
+  AES32ESMI: 2
+  AES32DSI: 2
+  AES32DSMI: 2
+  # SHA-256 (Zknh — present on all widths).
+  SHA256SIG0: 2
+  SHA256SIG1: 2
+  SHA256SUM0: 2
+  SHA256SUM1: 2
+  # SHA-512 split H/L pair is deliberately marked unsupported on this
+  # target (MCU is SHA-256 only); mark optional so auto-resolution
+  # doesn't complain.
+  SHA512SIG0L: 0
+  SHA512SIG0H: 0
+  SHA512SIG1L: 0
+
+group_cg:
+  RV32ZBKB: 5
+  RV32ZBKC: 3
+  RV32ZBKX: 3
+  RV32ZKND: 3
+  RV32ZKNE: 3
+  RV32ZKNH: 5

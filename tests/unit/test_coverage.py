@@ -663,6 +663,63 @@ def test_rs1_eq_rs2_cg_equal_bumped():
     assert db[CG_RS1_EQ_RS2].get("equal", 0) == 1
 
 
+def test_csr_access_read_write_cg():
+    from chipforge_inst_gen.coverage.collectors import CG_CSR_ACCESS
+    from chipforge_inst_gen.isa.enums import PrivilegedReg
+    db = new_db()
+    # CSRRW is always a write.
+    w = get_instr(RiscvInstrName.CSRRW)
+    w.rs1 = RiscvReg.T0
+    w.rd = RiscvReg.A0
+    w.csr = int(PrivilegedReg.MSCRATCH)
+    sample_instr(db, w)
+    assert db[CG_CSR_ACCESS].get("MSCRATCH__write", 0) == 1
+
+    # CSRRS with rs1=x0 is a pure read.
+    r = get_instr(RiscvInstrName.CSRRS)
+    r.rs1 = RiscvReg.ZERO
+    r.rd = RiscvReg.A0
+    r.csr = int(PrivilegedReg.MSTATUS)
+    sample_instr(db, r)
+    assert db[CG_CSR_ACCESS].get("MSTATUS__read", 0) == 1
+
+
+def test_load_store_offset_bins():
+    from chipforge_inst_gen.coverage.collectors import CG_LS_OFFSET
+    db = new_db()
+    # Positive small.
+    i = get_instr(RiscvInstrName.LW)
+    i.rs1 = RiscvReg.T0
+    i.rd = RiscvReg.A0
+    i.imm_str = "12"
+    i.imm = 12
+    sample_instr(db, i)
+    assert db[CG_LS_OFFSET].get("pos_small", 0) == 1
+
+    # Negative medium.
+    i2 = get_instr(RiscvInstrName.SB)
+    i2.rs1 = RiscvReg.T0
+    i2.rs2 = RiscvReg.A0
+    i2.imm_str = "-500"
+    i2.imm = -500 & 0xFFF
+    sample_instr(db, i2)
+    assert db[CG_LS_OFFSET].get("neg_medium", 0) == 1
+
+
+def test_directed_stream_cg_from_comment():
+    from chipforge_inst_gen.coverage.collectors import CG_STREAM
+    db = new_db()
+    # Fake an instr with the "Start <name>" comment stamped by
+    # DirectedInstrStream.finalize().
+    i = get_instr(RiscvInstrName.ADD)
+    i.rs1 = RiscvReg.T0
+    i.rs2 = RiscvReg.T1
+    i.rd = RiscvReg.A0
+    i.comment = "Start JalInstr"
+    sample_instr(db, i)
+    assert db[CG_STREAM].get("JalInstr", 0) == 1
+
+
 def test_rs1_eq_rd_cg_distinct_bumped():
     from chipforge_inst_gen.coverage.collectors import CG_RS1_EQ_RD
     db = new_db()

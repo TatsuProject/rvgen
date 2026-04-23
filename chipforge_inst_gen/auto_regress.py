@@ -76,6 +76,31 @@ def _count_unique_bins(db: CoverageDB) -> int:
     return sum(1 for cg in db for bn, cnt in db.get(cg, {}).items() if cnt > 0)
 
 
+def _sparkline(values: list[int], width: int = 40) -> str:
+    """Render a tiny ASCII/Unicode sparkline of per-seed new-bins counts.
+
+    Uses the standard block-element glyphs (▁▂▃▄▅▆▇█) scaled to the max
+    value. Downsamples by chunk-averaging when we have more seeds than
+    target width; returns an empty-placeholder when values is empty.
+    """
+    if not values:
+        return "(no seeds)"
+    peak = max(values) or 1
+    blocks = " ▁▂▃▄▅▆▇█"  # idx 0 = zero, 1..8 = scaled
+    if len(values) > width:
+        chunk = len(values) / width
+        values = [
+            sum(values[int(i * chunk):int((i + 1) * chunk)])
+            // max(1, int((i + 1) * chunk) - int(i * chunk))
+            for i in range(width)
+        ]
+    out = []
+    for v in values:
+        idx = 0 if v == 0 else 1 + min(7, int((v / peak) * 7.999))
+        out.append(blocks[idx])
+    return "".join(out) + f"  peak={peak}"
+
+
 def _convergence_stamp(
     db: CoverageDB, seed: int, convergence: dict[tuple[str, str], int]
 ) -> int:
@@ -235,6 +260,13 @@ def run_auto_regression(
     cum_path.write_text(json.dumps(cum_db, indent=2, sort_keys=True))
     report_path = output_dir / "coverage_report.txt"
     report_path.write_text(render_report(cum_db, goals) + "\n")
+
+    # Visual convergence summary — a sparkline of new-bins-per-seed.
+    if new_bins_by_seed:
+        _log("auto-regress: convergence " + _sparkline(new_bins_by_seed))
+        _log(f"auto-regress: seeds tried={len(new_bins_by_seed)} "
+             f"total_new_bins={sum(new_bins_by_seed)} "
+             f"median_per_seed={sorted(new_bins_by_seed)[len(new_bins_by_seed)//2]}")
 
     # Convergence sidecar: per-bin first-hit seed + per-seed new-bin counts.
     conv_path = output_dir / "convergence.json"

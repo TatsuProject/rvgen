@@ -1,0 +1,74 @@
+# rv32imafdc overlay — adds single + double-precision FP goals on top
+# of baseline. Layer as:
+#   --cov_goals baseline.yaml --cov_goals rv32imafdc.yaml
+
+opcode_cg:
+  # Single-precision FP scalar ops.
+  FLW: 3
+  FSW: 3
+  FADD_S: 5
+  FSUB_S: 5
+  FMUL_S: 5
+  FDIV_S: 3
+  FSQRT_S: 2
+  FSGNJ_S: 2
+  FMIN_S: 2
+  FMAX_S: 2
+  FEQ_S: 2
+  FLT_S: 2
+  FLE_S: 2
+  FMADD_S: 3
+  FMSUB_S: 3
+  FNMSUB_S: 2
+  FNMADD_S: 2
+  FCVT_W_S: 2
+  FCVT_S_W: 2
+  FMV_W_X: 2
+  FMV_X_W: 2
+  # Double-precision FP.
+  FLD: 3
+  FSD: 3
+  FADD_D: 5
+  FSUB_D: 5
+  FMUL_D: 5
+  FDIV_D: 3
+  FSQRT_D: 2
+  FEQ_D: 2
+  FLT_D: 2
+  FLE_D: 2
+  FMADD_D: 3
+  FMSUB_D: 3
+  FCVT_D_S: 2
+  FCVT_S_D: 2
+  # RV32A atomic ops.
+  LR_W: 3
+  SC_W: 3
+  AMOSWAP_W: 2
+  AMOADD_W: 2
+  AMOAND_W: 2
+  AMOOR_W: 2
+  AMOXOR_W: 2
+  AMOMIN_W: 2
+  AMOMAX_W: 2
+
+group_cg:
+  RV32F: 30
+  RV32D: 20
+  RV32A: 5
+  RV32FC: 0   # compressed FP — optional, only when -march has zcf/zcd.
+
+fp_rm_cg:
+  RNE: 3
+  RTZ: 3
+  RDN: 3
+  RUP: 3
+  RMM: 3
+
+fpr_cg:
+  FT0: 3
+  FT1: 3
+  FS0: 3
+  FS1: 3
+  FA0: 3
+  FA5: 3
+  FT11: 3

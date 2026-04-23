@@ -93,6 +93,9 @@ CG_RS1_EQ_RS2 = "rs1_eq_rs2_cg"        # R-format: rs1==rs2 (same-reg path)
 CG_RS1_EQ_RD = "rs1_eq_rd_cg"          # rd==rs1 (in-place op)
 CG_BR_PER_MNEM = "branch_taken_per_mnem_cg"  # cross: branch mnemonic × taken/not_taken (runtime)
 CG_VTYPE_DYN = "vtype_dyn_cg"          # (SEW, LMUL) pair observed when sampling a vector op
+CG_CSR_ACCESS = "csr_access_cg"        # cross: CSR name × read/write access type
+CG_LS_OFFSET = "load_store_offset_cg"  # offset magnitude bins for load/store ops
+CG_STREAM = "directed_stream_cg"       # which directed stream contributed instrs
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -108,6 +111,7 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_PC_REACH,
     CG_RS1_EQ_RS2, CG_RS1_EQ_RD,
     CG_BR_PER_MNEM, CG_VTYPE_DYN,
+    CG_CSR_ACCESS, CG_LS_OFFSET, CG_STREAM,
 )
 
 
@@ -298,6 +302,49 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
         csr_addr = int(getattr(instr, "csr", 0)) & 0xFFF
         csr_name = _PRIV_REG_BY_ADDR.get(csr_addr, f"CSR_{csr_addr:03X}")
         _bump(db, CG_CSR, csr_name)
+        # CSR access-type — read (CSRRS/CSRRC with rs1=x0; CSRRSI/CSRRCI with
+        # imm==0), write (CSRRW / CSRRWI always; CSRRS/CSRRC when effective
+        # operand is nonzero). We conservatively treat CSRRS/C as writes
+        # unless we can prove rs1==x0 / imm==0. CSRRWI always writes.
+        name = instr.instr_name
+        write_ops = (RiscvInstrName.CSRRW, RiscvInstrName.CSRRWI)
+        clearset_ops = (RiscvInstrName.CSRRS, RiscvInstrName.CSRRC,
+                         RiscvInstrName.CSRRSI, RiscvInstrName.CSRRCI)
+        if name in write_ops:
+            access = "write"
+        elif name in clearset_ops:
+            # Read-only if operand is zero.
+            if name in (RiscvInstrName.CSRRS, RiscvInstrName.CSRRC):
+                access = "read" if getattr(instr, "rs1", None) == RiscvReg.ZERO else "write"
+            else:
+                access = "read" if getattr(instr, "imm", 0) == 0 else "write"
+        else:
+            access = "read"
+        _bump(db, CG_CSR_ACCESS, f"{csr_name}__{access}")
+
+    # Load/store offset magnitude — split by sign + magnitude so verif teams
+    # can see whether we've exercised all the offset-field corner cases.
+    if width_bin is not None:  # we already computed this above; reuse
+        off = 0
+        try:
+            off = int(instr.imm_str) if instr.imm_str.lstrip('-').isdigit() else int(getattr(instr, "imm", 0))
+        except Exception:  # noqa: BLE001
+            off = int(getattr(instr, "imm", 0))
+        if off == 0:
+            off_bin = "zero"
+        elif off > 0:
+            off_bin = "pos_small" if off < 128 else ("pos_medium" if off < 1024 else "pos_large")
+        else:
+            off_bin = "neg_small" if off > -128 else ("neg_medium" if off > -1024 else "neg_large")
+        _bump(db, CG_LS_OFFSET, off_bin)
+
+    # Directed-stream attribution: the stream's finalize() stamps a
+    # "Start <stream_name>" comment on the first instr. We sample it into
+    # the directed_stream covergroup so verif teams see which streams
+    # actually contributed at least one instruction to the main sequence.
+    comment = getattr(instr, "comment", "") or ""
+    if comment.startswith("Start "):
+        _bump(db, CG_STREAM, comment[len("Start "):].strip() or "unknown")
 
     # FP rounding mode — FloatingPointInstr carries .rm.
     rm = getattr(instr, "rm", None)

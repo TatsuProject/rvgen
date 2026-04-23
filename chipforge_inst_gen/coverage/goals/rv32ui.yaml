@@ -1,0 +1,32 @@
+# rv32ui — bare-mode, no CSRs, no privileged infra. Layer on baseline
+# and zero-out every CSR/system/trap goal since the target can't execute
+# them.
+opcode_cg:
+  ECALL: 0
+  EBREAK: 0
+  MRET: 0
+  WFI: 0
+  SRET: 0
+  URET: 0
+  DRET: 0
+  FENCE: 0
+
+category_cg:
+  CSR: 0
+  SYSTEM: 0
+  SYNCH: 0
+  TRAP: 0
+
+csr_cg:
+  MSCRATCH: 0
+  MSTATUS: 0
+  MISA: 0
+  MTVEC: 0
+
+privilege_mode_cg:
+  M_return: 0
+  S_return: 0
+  U_return: 0
+
+exception_cg:
+  trap_entered: 0

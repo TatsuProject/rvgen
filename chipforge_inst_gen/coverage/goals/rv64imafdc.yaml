@@ -1,0 +1,27 @@
+# rv64imafdc overlay — RV64 + FP + A. Layer baseline + rv64imc first.
+opcode_cg:
+  FLW: 3
+  FSW: 3
+  FADD_S: 5
+  FMUL_S: 5
+  FLD: 3
+  FSD: 3
+  FADD_D: 5
+  FMUL_D: 5
+  FCVT_L_S: 2
+  FCVT_S_L: 2
+  FCVT_L_D: 2
+  FCVT_D_L: 2
+  FMV_X_D: 2
+  FMV_D_X: 2
+  LR_D: 3
+  SC_D: 3
+  AMOSWAP_D: 2
+  AMOADD_D: 2
+
+group_cg:
+  RV32F: 30
+  RV32D: 20
+  RV64F: 5
+  RV64D: 5
+  RV64A: 5

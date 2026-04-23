@@ -1,0 +1,31 @@
+# rv64gc overlay — RV64 G (I+M+A+F+D+Zicsr+Zifencei) + C.
+# Layer baseline + rv64imc first. Adds privileged targets (U/S mode) which
+# rv64gc supports by default.
+opcode_cg:
+  FADD_S: 5
+  FMUL_S: 5
+  FADD_D: 5
+  FMUL_D: 5
+  LR_D: 3
+  SC_D: 3
+  # Supervisor / privileged ops — present in rv64gc's priv mode.
+  SRET: 0
+  SFENCE_VMA: 0
+
+category_cg:
+  CSR: 3
+  SYNCH: 2
+
+group_cg:
+  RV32A: 5
+  RV64A: 5
+  RV32F: 20
+  RV64F: 5
+  RV32D: 10
+  RV64D: 5
+
+csr_cg:
+  SSTATUS: 0
+  SEPC: 0
+  SCAUSE: 0
+  SATP: 0
