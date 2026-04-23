@@ -74,28 +74,48 @@ _DWORD_LOADS = (RiscvInstrName.LD,)
 _DWORD_STORES = (RiscvInstrName.SD,)
 
 
-def _width_allowed(addr: int, xlen: int, *, enable_unaligned: bool) -> list[RiscvInstrName]:
+_FP_WORD_LOAD = RiscvInstrName.FLW
+_FP_WORD_STORE = RiscvInstrName.FSW
+_FP_DWORD_LOAD = RiscvInstrName.FLD
+_FP_DWORD_STORE = RiscvInstrName.FSD
+
+
+def _width_allowed(
+    addr: int, xlen: int, *, enable_unaligned: bool,
+    enable_fp: bool = False, enable_fp_double: bool = False,
+) -> list[RiscvInstrName]:
     """Return the list of load/store mnemonics legal at ``addr`` on a core of ``xlen``.
 
     Direct port of the alignment lattice in
-    ``riscv_load_store_base_instr_stream::gen_load_store_instr``.
+    ``riscv_load_store_base_instr_stream::gen_load_store_instr``. When
+    ``enable_fp`` is true, FLW/FSW are included at 4-byte alignment (and
+    FLD/FSD at 8-byte alignment if ``enable_fp_double``) — mirrors SV's
+    behavior when cfg.enable_floating_point is set.
     """
     allowed: list[RiscvInstrName] = list(_BYTE_LOADS) + list(_BYTE_STORES)
     if enable_unaligned:
         # Unaligned support — every LH/LHU/SH/LW/SW is legal; still only
-        # aligned compressed ops.
+        # aligned compressed / FP ops.
         allowed += list(_HALF_LOADS) + list(_HALF_STORES)
         allowed += list(_WORD_LOADS) + list(_WORD_STORES)
         if xlen >= 64:
             allowed += list(_WORD_LOADS_RV64) + list(_DWORD_LOADS) + list(_DWORD_STORES)
+        if enable_fp and addr % 4 == 0:
+            allowed += [_FP_WORD_LOAD, _FP_WORD_STORE]
+            if enable_fp_double and addr % 8 == 0:
+                allowed += [_FP_DWORD_LOAD, _FP_DWORD_STORE]
         return allowed
 
     if addr % 2 == 0:
         allowed += list(_HALF_LOADS) + list(_HALF_STORES)
     if addr % 4 == 0:
         allowed += list(_WORD_LOADS) + list(_WORD_STORES)
+        if enable_fp:
+            allowed += [_FP_WORD_LOAD, _FP_WORD_STORE]
     if xlen >= 64 and addr % 8 == 0:
         allowed += list(_WORD_LOADS_RV64) + list(_DWORD_LOADS) + list(_DWORD_STORES)
+    if enable_fp_double and addr % 8 == 0:
+        allowed += [_FP_DWORD_LOAD, _FP_DWORD_STORE]
     return allowed
 
 
@@ -175,34 +195,55 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
         """Emit one load/store per (offset, addr) pair with width by alignment."""
         xlen = self.cfg.target.xlen
         enable_unaligned = self.cfg.enable_unaligned_load_store
+        enable_fp = self.cfg.enable_floating_point
+        # FP double precision requires both an RV32D-family group in the
+        # target AND enable_floating_point — guard against RV32F-only cores.
+        from chipforge_inst_gen.isa.enums import RiscvInstrGroup
+        target_groups = set(self.cfg.target.supported_isa)
+        has_fp_d = bool({RiscvInstrGroup.RV32D, RiscvInstrGroup.RV64D} & target_groups)
+        enable_fp_double = enable_fp and has_fp_d
+
         # Available "value" regs — anything not locked.
         val_pool = [r for r in RiscvReg if r not in base_locked]
         out: list[Instr] = []
+        fp_stores = frozenset({_FP_WORD_STORE, _FP_DWORD_STORE})
+        fp_loads = frozenset({_FP_WORD_LOAD, _FP_DWORD_LOAD})
+        int_stores = frozenset(_WORD_STORES + _HALF_STORES + _BYTE_STORES + _DWORD_STORES)
         for i in range(self.num_load_store):
             off = self._pick_offset_for_iteration(i)
             addr = self.base + off
             if 0 > addr or addr >= 4096:  # Keep a sensible cap
                 addr = (self.base + off) % 4096
-            allowed = _width_allowed(addr, xlen, enable_unaligned=enable_unaligned)
+            allowed = _width_allowed(
+                addr, xlen, enable_unaligned=enable_unaligned,
+                enable_fp=enable_fp, enable_fp_double=enable_fp_double,
+            )
             # Filter to ops actually registered for this target.
             registered = [n for n in allowed if n in self.avail.names]
             if not registered:
-                # Rare — target with no byte loads. Just pick whatever is avail.
                 registered = [n for n in allowed]
             pick = self.rng.choice(registered)
             instr = get_instr(pick)
-            if pick in _WORD_STORES + _HALF_STORES + _BYTE_STORES + _DWORD_STORES:
-                # Store: rs1 = base, rs2 = data source (must not be rs1).
+            if pick in fp_loads or pick in fp_stores:
+                # FP load/store: rs1 = base, fd/fs2 = FP reg. The FP instr
+                # class is FloatingPointInstr, which uses has_fs2 for the
+                # store-source FP reg and has_fd for the load-dest FP reg.
+                from chipforge_inst_gen.isa.enums import RiscvFpr
+                instr.rs1 = self.rs1_reg  # type: ignore[assignment]
+                fp_pool = list(RiscvFpr)
+                if pick in fp_stores:
+                    instr.fs2 = self.rng.choice(fp_pool)
+                else:
+                    instr.fd = self.rng.choice(fp_pool)
+            elif pick in int_stores:
                 instr.rs1 = self.rs1_reg  # type: ignore[assignment]
                 store_pool = [r for r in val_pool if r != self.rs1_reg]
                 instr.rs2 = self.rng.choice(store_pool) if store_pool else RiscvReg.ZERO
             else:
-                # Load: rs1 = base, rd = scratch (must not be rs1).
                 instr.rs1 = self.rs1_reg  # type: ignore[assignment]
                 rd_pool = [r for r in val_pool if r not in (self.rs1_reg, RiscvReg.ZERO)]
                 instr.rd = self.rng.choice(rd_pool) if rd_pool else RiscvReg.T0
             instr.imm = off & 0xFFF  # 12-bit signed — raw 12-bit bits
-            # Render as a signed offset literal so GCC accepts it as-is.
             instr.imm_str = str(off)
             instr.process_load_store = False
             out.append(instr)
