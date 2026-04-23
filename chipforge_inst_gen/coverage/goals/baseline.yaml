@@ -1,0 +1,173 @@
+# Baseline functional-coverage goals for chipforge-inst-gen.
+#
+# Each top-level key is a covergroup name (as defined in collectors.py).
+# Under each covergroup, each key is a bin name with the required hit count.
+# A hit count of 0 marks the bin as "optional" — it shows up in reports but
+# does not block auto-regression's "goals met" status.
+#
+# This file targets a solid rv32imc-style regression. Targets with extra
+# extensions (floating-point, vector, crypto) should supply additional
+# goals files that extend this one via YAML merge or the --goals-file CLI
+# flag (currently: union per bin, last-writer wins on required count).
+
+opcode_cg:
+  # RV32I — hit every arithmetic / logical / compare / branch / ld-st op.
+  LUI: 5
+  AUIPC: 5
+  JAL: 10
+  JALR: 5
+  BEQ: 5
+  BNE: 5
+  BLT: 5
+  BGE: 5
+  BLTU: 5
+  BGEU: 5
+  LB: 3
+  LH: 3
+  LW: 3
+  LBU: 3
+  LHU: 3
+  SB: 3
+  SH: 3
+  SW: 3
+  ADDI: 20
+  SLTI: 5
+  SLTIU: 5
+  XORI: 5
+  ORI: 5
+  ANDI: 5
+  SLLI: 10
+  SRLI: 10
+  SRAI: 10
+  ADD: 20
+  SUB: 10
+  SLL: 5
+  SLT: 5
+  SLTU: 5
+  XOR: 5
+  SRL: 5
+  SRA: 5
+  OR: 5
+  AND: 5
+  FENCE: 2
+  # Privileged / system ops (may be gated off by +no_ebreak=1 etc.; set
+  # required=0 so they're optional).
+  ECALL: 0
+  EBREAK: 0
+  MRET: 0
+
+format_cg:
+  R_FORMAT: 50
+  I_FORMAT: 50
+  S_FORMAT: 10
+  B_FORMAT: 20
+  U_FORMAT: 10
+  J_FORMAT: 5
+  # Compressed formats — also optional (only hit on RVC targets).
+  CR_FORMAT: 0
+  CI_FORMAT: 0
+  CB_FORMAT: 0
+  CJ_FORMAT: 0
+
+category_cg:
+  ARITHMETIC: 100
+  LOGICAL: 50
+  COMPARE: 20
+  SHIFT: 30
+  BRANCH: 20
+  JUMP: 5
+  LOAD: 10
+  STORE: 10
+  SYSTEM: 0        # optional — only hit when no_ebreak/ecall/wfi are off
+  SYNCH: 2
+  CSR: 0           # optional — only when no_csr_instr=0
+
+group_cg:
+  RV32I: 100
+  RV32M: 0         # optional — M-extension targets only
+  RV32C: 0         # optional
+  RV32A: 0
+  RV32F: 0
+  RV32D: 0
+  RV64I: 0         # optional — RV64 targets only
+  RVV: 0
+
+rs1_cg:
+  ZERO: 3
+  RA: 3
+  SP: 3
+  GP: 0
+  TP: 0
+  T0: 3
+  T1: 3
+  S0: 3
+  A0: 3
+  A5: 3
+  S11: 3
+  T6: 3
+
+rs2_cg:
+  ZERO: 3
+  RA: 3
+  T0: 3
+  A0: 3
+  A5: 3
+  S11: 3
+  T6: 3
+
+rd_cg:
+  RA: 3
+  T0: 3
+  S0: 3
+  A0: 3
+  A5: 3
+  S11: 3
+  T6: 3
+  # ZERO / SP / TP / GP typically reserved or special-cased; optional.
+  ZERO: 0
+  SP: 0
+  TP: 0
+  GP: 0
+
+imm_sign_cg:
+  pos: 100
+  neg: 100
+  zero: 20
+
+hazard_cg:
+  raw: 50
+  war: 50
+  waw: 30
+  none: 100
+
+fp_rm_cg:
+  RNE: 0
+  RTZ: 0
+  RDN: 0
+  RUP: 0
+  RMM: 0
+
+vtype_cg:
+  # Optional — only populated on vector targets and when we sample vector cfg.
+  SEW32_LMUL1: 0
+
+csr_cg:
+  MSCRATCH: 0
+  MSTATUS: 0
+  MISA: 0
+  MIE: 0
+  MTVEC: 0
+
+fmt_category_cross:
+  R_FORMAT__ARITHMETIC: 20
+  I_FORMAT__ARITHMETIC: 20
+  I_FORMAT__LOAD: 5
+  S_FORMAT__STORE: 5
+  B_FORMAT__BRANCH: 20
+  U_FORMAT__ARITHMETIC: 5
+  J_FORMAT__JUMP: 3
+
+category_group_cross:
+  ARITHMETIC__RV32I: 50
+  LOGICAL__RV32I: 30
+  BRANCH__RV32I: 20

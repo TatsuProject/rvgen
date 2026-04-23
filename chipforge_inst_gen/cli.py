@@ -58,11 +58,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Flow control
     p.add_argument("-s", "--steps", default="all",
-                   help="Comma-separated: gen,gcc_compile,iss_sim,iss_cmp, or 'all'.")
+                   help="Comma-separated: gen,gcc_compile,iss_sim,iss_cmp,cov, or 'all'.")
     p.add_argument("-o", "--output", default="",
                    help="Output directory (default: out_<date>).")
     p.add_argument("--noclean", action="store_true", default=True,
                    help="Do not clean the output of previous runs (default: true, same as run.py).")
+
+    # Coverage
+    p.add_argument("--cov_goals", default="",
+                   help="Path to a coverage-goals YAML. If set, the 'cov' step "
+                        "compares observed coverage against these goals and "
+                        "returns non-zero if unmet (use with --auto_regress).")
+    p.add_argument("--cov_db", default="",
+                   help="Path to a cumulative coverage DB (JSON). The 'cov' step "
+                        "merges this run's coverage into this file; auto-regress "
+                        "carries it across seeds. Defaults to <output>/coverage.json.")
+    p.add_argument("--auto_regress", action="store_true",
+                   help="Loop seeds (start_seed..start_seed+max_seeds-1) until "
+                        "coverage goals are met. Requires --cov_goals.")
+    p.add_argument("--max_seeds", type=int, default=64,
+                   help="Upper bound on seeds tried by --auto_regress (default 64).")
 
     # ISA
     p.add_argument("--isa", default="",
@@ -151,6 +166,20 @@ def main(argv: list[str] | None = None) -> int:
         _LOG.error("No tests matched %r in %s", args.test, testlist_path)
         return 1
 
+    # Auto-regression mode dispatches to a dedicated driver.
+    if args.auto_regress:
+        if not args.cov_goals:
+            _LOG.error("--auto_regress requires --cov_goals <path>")
+            return 1
+        from chipforge_inst_gen.auto_regress import run_auto_regression
+        return run_auto_regression(
+            target_cfg=target_cfg,
+            tests=tests,
+            output_dir=output_dir,
+            args=args,
+            riscv_dv_root=riscv_dv_root,
+        )
+
     steps = set(args.steps.split(",")) if args.steps != "all" else {"gen", "gcc_compile", "iss_sim", "iss_cmp"}
 
     import random
@@ -158,6 +187,17 @@ def main(argv: list[str] | None = None) -> int:
     from chipforge_inst_gen.isa import enums  # noqa: F401 — ensure ISA modules imported
     from chipforge_inst_gen.isa.filtering import create_instr_list
     from chipforge_inst_gen.asm_program_gen import AsmProgramGen
+
+    # Coverage collection is cheap — always keep a per-run DB so the 'cov'
+    # step can run against the same generator state without a re-run.
+    from chipforge_inst_gen.coverage import (
+        CoverageDB,
+        merge as cov_merge,
+        sample_sequence as cov_sample_sequence,
+    )
+    from chipforge_inst_gen.coverage.collectors import new_db as new_cov_db
+
+    run_cov: CoverageDB = new_cov_db()
 
     seen_seeds: dict[str, int] = {}
     if "gen" in steps:
@@ -181,6 +221,10 @@ def main(argv: list[str] | None = None) -> int:
                 asm_path.write_text("\n".join(lines) + "\n")
                 _LOG.info("Generated %s (seed=%d, %d lines)",
                           asm_path, seed, len(lines))
+
+                # Sample the main sequence into the per-run coverage DB.
+                if gen.main_sequence is not None and gen.main_sequence.instr_stream is not None:
+                    cov_sample_sequence(run_cov, gen.main_sequence.instr_stream.instr_list)
 
     if seen_seeds:
         seed_gen.dump(output_dir / "seed.yaml", seen_seeds)
@@ -226,6 +270,41 @@ def main(argv: list[str] | None = None) -> int:
                 _LOG.error("  %s (rc=%d)", r.test_id, r.returncode)
             return 2
         _LOG.info("%d tests passed ISS sim", len(iss_results))
+
+    # ---- Optional coverage step ----
+    if "cov" in steps or "all" in (args.steps,):
+        import json as _json
+        from chipforge_inst_gen.coverage import (
+            goals_met as cov_goals_met,
+            load_goals as cov_load_goals,
+            render_report as cov_render_report,
+        )
+
+        # Cumulative DB path — either explicit or per-output-dir.
+        cum_path = Path(args.cov_db) if args.cov_db else output_dir / "coverage.json"
+        existing: CoverageDB = new_cov_db()
+        if cum_path.exists():
+            try:
+                existing = _json.loads(cum_path.read_text())
+            except Exception as exc:  # noqa: BLE001
+                _LOG.warning("Could not read %s (%s); starting fresh", cum_path, exc)
+                existing = new_cov_db()
+        cov_merge(existing, run_cov)
+        cum_path.write_text(_json.dumps(existing, indent=2, sort_keys=True))
+        _LOG.info("Coverage DB updated: %s", cum_path)
+
+        goals = None
+        if args.cov_goals:
+            goals = cov_load_goals(args.cov_goals)
+
+        report = cov_render_report(existing, goals)
+        report_path = output_dir / "coverage_report.txt"
+        report_path.write_text(report + "\n")
+        _LOG.info("Coverage report: %s", report_path)
+
+        if goals is not None and not cov_goals_met(existing, goals):
+            _LOG.warning("Coverage goals NOT met — see %s", report_path)
+            return 3
 
     return 0
 
