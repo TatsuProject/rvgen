@@ -259,6 +259,12 @@ _TARGET_ISA_MABI: dict[str, tuple[str, str]] = {
     "rv64imcb": ("rv64imc_zba_zbb_zbc_zbs_zicsr_zifencei", "lp64"),
     "rv64gc": ("rv64gc_zicsr_zifencei", "lp64"),
     "rv64gcv": ("rv64gcv_zicsr_zifencei", "lp64"),
+    # Embedded vector (Zve*) profiles
+    "coralnpu": ("rv32imf_zve32x_zicsr_zifencei_zbb", "ilp32f"),
+    "rv32imc_zve32x": ("rv32imc_zve32x_zicsr_zifencei", "ilp32"),
+    "rv32imfc_zve32f": ("rv32imfc_zve32f_zicsr_zifencei", "ilp32f"),
+    "rv64imc_zve64x": ("rv64imc_zve64x_zicsr_zifencei", "lp64"),
+    "rv64imafdc_zve64d": ("rv64imafdc_zve64d_zicsr_zifencei", "lp64d"),
     "rv64imafdc": ("rv64imafdc_zicsr_zifencei", "lp64"),
     "ml": ("rv64imc_zicsr_zifencei", "lp64"),
 }

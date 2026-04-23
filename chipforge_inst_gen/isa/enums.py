@@ -159,6 +159,21 @@ class RiscvInstrGroup(IntEnum):
     RV32ZKSED = 42
     RV64ZKSH = 43
     RV64ZKSED = 44
+    # --- Embedded vector (Zve*) — RVV v1.0 subset profiles. ---
+    # Vector instructions themselves stay in RiscvInstrGroup.RVV (so the registry
+    # class doesn't care which subset the host selects); targets list *one* of
+    # these to advertise partial vector support.
+    #
+    # Zve32x  : ELEN=32, SEW∈{8,16,32}, integer+fixed-point only.
+    # Zve32f  : Zve32x + FP32 vector ops (requires scalar F).
+    # Zve64x  : Zve32x + SEW=64 integer.
+    # Zve64f  : Zve64x + FP32 vector.
+    # Zve64d  : Zve64f + FP64 vector (requires scalar D).
+    ZVE32X = 45
+    ZVE32F = 46
+    ZVE64X = 47
+    ZVE64F = 48
+    ZVE64D = 49
 
 
 # ---------------------------------------------------------------------------

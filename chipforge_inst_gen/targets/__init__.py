@@ -422,6 +422,70 @@ _TARGETS: dict[str, TargetCfg] = {
         vlen=512, elen=32, selen=8, max_lmul=8,
         **_m_only(),
     ),
+    # ---- Embedded vector (Zve*) profiles ----
+    #
+    # coralnpu-v2 — Google's open-source NPU.
+    # Public ISA string: rv32imf_zve32x_zicsr_zifencei_zbb.
+    # So: RV32I/M, single-precision scalar F, Zve32x (embedded vector with
+    # 32-bit element, integer+fixed-point, NO FP vector), Zbb bitmanip.
+    # VLEN=256 is a common embedded choice; ELEN=32 is mandatory for Zve32x.
+    "coralnpu": TargetCfg(
+        name="coralnpu", xlen=32,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV32F,
+            _G.ZVE32X,
+            _G.RV32ZBB,
+        ),
+        vlen=256, elen=32, selen=8, max_lmul=8,
+        support_unaligned_load_store=False,
+        **_m_only(),
+    ),
+    # Zve32x reference target without scalar F / Zbb — baseline embedded.
+    "rv32imc_zve32x": TargetCfg(
+        name="rv32imc_zve32x", xlen=32,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV32C,
+            _G.ZVE32X,
+        ),
+        vlen=256, elen=32, selen=8, max_lmul=8,
+        **_m_only(),
+    ),
+    # Zve32f — adds FP32 vector on top of Zve32x (needs scalar F).
+    "rv32imfc_zve32f": TargetCfg(
+        name="rv32imfc_zve32f", xlen=32,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV32C, _G.RV32F,
+            _G.ZVE32F,
+        ),
+        vlen=256, elen=32, selen=8, max_lmul=8,
+        support_unaligned_load_store=False,
+        **_m_only(),
+    ),
+    # Zve64x — 64-bit integer vector, no FP vector.
+    "rv64imc_zve64x": TargetCfg(
+        name="rv64imc_zve64x", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV32C,
+            _G.RV64I, _G.RV64M, _G.RV64C,
+            _G.ZVE64X,
+        ),
+        vlen=512, elen=64, selen=8, max_lmul=8,
+        **_m_only(),
+    ),
+    # Zve64d — full embedded-vector-with-double profile (closest to RVV).
+    "rv64imafdc_zve64d": TargetCfg(
+        name="rv64imafdc_zve64d", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV32C,
+            _G.RV64I, _G.RV64M, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.ZVE64D,
+        ),
+        vlen=512, elen=64, selen=8, max_lmul=8,
+        support_unaligned_load_store=False,
+        **_m_only(),
+    ),
     # ---- Specialty ----
     "ml": TargetCfg(
         name="ml", xlen=32,

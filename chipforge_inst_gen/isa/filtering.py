@@ -54,6 +54,57 @@ _FP_GROUPS = frozenset({
 
 _VECTOR_GROUPS = frozenset({RiscvInstrGroup.RVV})
 
+# Any vector-capable group (full RVV or an embedded Zve* subset).
+_ANY_VECTOR_CAPABLE_GROUPS = frozenset({
+    RiscvInstrGroup.RVV,
+    RiscvInstrGroup.ZVE32X,
+    RiscvInstrGroup.ZVE32F,
+    RiscvInstrGroup.ZVE64X,
+    RiscvInstrGroup.ZVE64F,
+    RiscvInstrGroup.ZVE64D,
+})
+
+# Vector-capable groups that support FP-vector ops (vec_fp=True can emit them).
+_FP_VECTOR_CAPABLE_GROUPS = frozenset({
+    RiscvInstrGroup.RVV,
+    RiscvInstrGroup.ZVE32F,
+    RiscvInstrGroup.ZVE64F,
+    RiscvInstrGroup.ZVE64D,
+})
+
+# Vector-capable groups that support SEW=64 (and EEW=64 for loads/stores).
+_SEW64_VECTOR_CAPABLE_GROUPS = frozenset({
+    RiscvInstrGroup.RVV,
+    RiscvInstrGroup.ZVE64X,
+    RiscvInstrGroup.ZVE64F,
+    RiscvInstrGroup.ZVE64D,
+})
+
+# Vector-capable groups that support FP64 vector (Zve64d + full RVV).
+_FP64_VECTOR_CAPABLE_GROUPS = frozenset({
+    RiscvInstrGroup.RVV,
+    RiscvInstrGroup.ZVE64D,
+})
+
+
+def target_has_any_vector(target) -> bool:
+    """Return True if the target's supported_isa advertises any vector profile."""
+    return any(g in target.supported_isa for g in _ANY_VECTOR_CAPABLE_GROUPS)
+
+
+def target_supports_fp_vector(target) -> bool:
+    """Return True if the target's supported_isa covers FP vector ops."""
+    return any(g in target.supported_isa for g in _FP_VECTOR_CAPABLE_GROUPS)
+
+
+def target_supports_sew64_vector(target) -> bool:
+    """Return True if the target's supported_isa covers SEW=64 vector ops."""
+    return any(g in target.supported_isa for g in _SEW64_VECTOR_CAPABLE_GROUPS)
+
+
+def target_supports_fp64_vector(target) -> bool:
+    return any(g in target.supported_isa for g in _FP64_VECTOR_CAPABLE_GROUPS)
+
 
 # ---------------------------------------------------------------------------
 # Vector-specific filters — gate widening / narrowing / FP / Zvlsseg / Zvamo.
@@ -153,7 +204,14 @@ def create_instr_list(cfg: Config) -> AvailableInstrs:
             continue
 
         group = cls.group
-        if group not in supported_isa:
+        # Vector-group instrs (group == RVV) are allowed when the target
+        # advertises *any* vector profile — full RVV or one of the Zve*
+        # subsets. The per-instr FP/SEW/etc. gates below do the further
+        # narrowing for embedded-vector targets.
+        if group in _VECTOR_GROUPS:
+            if target and not target_has_any_vector(target):
+                continue
+        elif group not in supported_isa:
             continue
         if cfg.disable_compressed_instr and group in _COMPRESSED_GROUPS:
             continue
@@ -168,8 +226,13 @@ def create_instr_list(cfg: Config) -> AvailableInstrs:
             vcfg = cfg.vector_cfg
             if name in _VECTOR_ALWAYS_DROP:
                 continue
-            if not vcfg.vec_fp and _is_fp_vector_name(name):
-                continue
+            # FP-vector ops: need vec_fp=True AND target must advertise an
+            # FP-vector-capable profile (full RVV / Zve32f / Zve64f / Zve64d).
+            if _is_fp_vector_name(name):
+                if not vcfg.vec_fp:
+                    continue
+                if target is not None and not target_supports_fp_vector(target):
+                    continue
             if not vcfg.vec_narrowing_widening:
                 if _is_widening_vector_name(name) or _is_narrowing_vector_name(name):
                     continue

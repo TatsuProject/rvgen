@@ -14,17 +14,24 @@ from chipforge_inst_gen.targets import TargetCfg, get_target, target_names
 
 
 def test_all_expected_targets_present():
-    # 18 targets from riscv-dv's target/ tree + local extensions:
-    #  * rv32ui           — bare no-CSR core.
-    #  * rv32imc_zkn      — chipforge MCU ISA (RV32IMC + ratified Zkn crypto).
-    #  * rv32imc_zkn_zks  — full ratified K-family including SM3/SM4.
-    #  * rv64imc_zkn      — RV64 M-mode + AES64/SHA-512.
+    # riscv-dv's target/ tree + local extensions:
+    #  * rv32ui              — bare no-CSR core.
+    #  * rv32imc_zkn         — chipforge MCU ISA (RV32IMC + ratified Zkn crypto).
+    #  * rv32imc_zkn_zks     — full ratified K-family including SM3/SM4.
+    #  * rv64imc_zkn         — RV64 M-mode + AES64/SHA-512.
+    #  * coralnpu            — Google Coral NPU v2 (Zve32x embedded vector).
+    #  * rv32imc_zve32x      — baseline Zve32x reference.
+    #  * rv32imfc_zve32f     — Zve32f (embedded + FP32 vector).
+    #  * rv64imc_zve64x      — Zve64x (embedded + SEW=64 integer).
+    #  * rv64imafdc_zve64d   — Zve64d (full embedded + FP64 vector).
     expected = {
         "rv32i", "rv32ia", "rv32iac", "rv32ic", "rv32if", "rv32im",
         "rv32imac", "rv32imafdc", "rv32imc", "rv32imcb", "rv32imc_sv32",
         "rv32ui", "rv32imc_zkn", "rv32imc_zkn_zks", "rv64imc_zkn",
         "rv64gc", "rv64gcv", "rv64imafdc", "rv64imc", "rv64imcb",
         "ml", "multi_harts",
+        "coralnpu", "rv32imc_zve32x", "rv32imfc_zve32f",
+        "rv64imc_zve64x", "rv64imafdc_zve64d",
     }
     assert set(target_names()) == expected
 

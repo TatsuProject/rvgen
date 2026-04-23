@@ -318,11 +318,17 @@ def make_config(target: TargetCfg, gen_opts: str = "", **overrides: Any) -> Conf
     if not any(g in target.supported_isa for g in compressed_groups):
         cfg.disable_compressed_instr = True
 
-    # If the target enables RVV, flip on the cfg-level flag and stamp a
-    # VectorConfig. SV bringup_c defaults: vstart=0, vl=VLEN/vsew, vediv=1,
-    # LMUL=1, SEW=32 (matches rv64gcv's ELEN=32).
-    if target.vector_extension_enable:
+    # If the target enables RVV (or advertises a Zve* subset), flip on the
+    # cfg-level flag and stamp a VectorConfig. SV bringup_c defaults:
+    # vstart=0, vl=VLEN/vsew, vediv=1, LMUL=1, SEW=min(32, ELEN).
+    from chipforge_inst_gen.isa.filtering import (
+        target_has_any_vector,
+        target_supports_fp_vector,
+    )
+    if target.vector_extension_enable or target_has_any_vector(target):
         cfg.enable_vector_extension = True
+        # For embedded Zve32x-style profiles the target may not set
+        # vector_extension_enable=True; honor the ISA advertisement either way.
         cfg.vector_cfg = VectorConfig(
             vtype=Vtype(vlmul=1, vsew=min(32, target.elen), vediv=1),
             vlen=target.vlen,
@@ -330,6 +336,9 @@ def make_config(target: TargetCfg, gen_opts: str = "", **overrides: Any) -> Conf
             selen=target.selen,
             max_lmul=target.max_lmul,
             num_vec_gpr=target.num_vec_gpr,
+            # vec_fp defaults False; a target with an FP-vector profile can
+            # opt in via a testlist plusarg (+vec_fp=1).
+            vec_fp=False,
         )
 
     cfg.apply_plusargs(gen_opts)
