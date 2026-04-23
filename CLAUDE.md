@@ -8,9 +8,18 @@ A pure-Python re-implementation of **riscv-dv**, the CHIPS Alliance's UVM/System
 
 ## 0 — Status and where to pick up
 
-**Current phase:** Phase 1 steps 1–7 complete + Phase 2 crypto + **RVV 1.0 baseline** + **5 Zve* embedded targets (incl. Coral NPU)** + **production-grade functional-coverage infrastructure** + **SV-faithful scalar load/store stream family** landed. **332 unit tests passing.** End-to-end CLI pipeline (gen → gcc_compile → iss_sim → cov) passes **51/51** non-vector Spike runs + **18/18** rv64gcv vector runs + **5/5** Zve*-profile runs + **21/21 trace-level matches on chipforge-mcu RTL** (`rv32imc_zkn`). Instruction registry = **486 ops**, stream registry = **16 distinct classes**, **27 targets**, **32 covergroups** (18 static + 10 runtime + 4 crosses).
+**Current phase:** Phase 1 steps 1–7 complete + **step-8 trap/interrupt/privileged subsystem landed** + Phase 2 crypto + **RVV 1.0 baseline** + **5 Zve* embedded targets (incl. Coral NPU)** + **production-grade functional-coverage infrastructure** + **SV-faithful scalar load/store stream family** + **PyPI-ready pyproject**. **373 unit tests passing.** End-to-end CLI pipeline (gen → gcc_compile → iss_sim → cov) passes **51/51** non-vector Spike runs + **18/18** rv64gcv vector runs + **48/48 new privileged/interrupt/exception tests** (rv32imc + rv64imc + rv64gc across ebreak / ecall / illegal-instr / timer-IRQ / software-IRQ / U-mode boot / invalid-CSR-access) + **21/21 trace-level matches on chipforge-mcu RTL** (`rv32imc_zkn`). Instruction registry = **486 ops**, stream registry = **16 distinct classes**, **27 targets**, **32 covergroups** (18 static + 10 runtime + 4 crosses).
 
-Last substantive session (2026-04-23) iterated on **verification-team-ready coverage**. Additions since the baseline RVV+Zve work:
+**Latest session (2026-04-23, evening):** Step 8's easier half landed — trap / exception / interrupt / boot-mode infrastructure. User asked for "interrupt handler support, exceptions, privileged mode" explicitly, so paging + PMP + debug ROM were deliberately deferred. Changes:
+- `rvgen/privileged/trap.py` rewrite (140 → ~400 lines): parameterized `_ModeCtx` covers M + S handlers, DIRECT + VECTORED `xtvec` layout, full 11-cause exception dispatch, sub-handlers share one body via stacked labels (size optimisation — keeps random stores from corrupting .text), nested-interrupt guard, timer-IRQ auto-disarm (MTIMECMP ← -1 since MTIP is hardware-driven).
+- `rvgen/privileged/boot.py`: MSTATUS.MPP packed from `cfg.init_privileged_mode` so `mret` drops to the requested mode; optional MEDELEG/MIDELEG + STVEC writes when delegation is on; MTVEC.MODE gated on `enable_interrupt`.
+- New `rvgen/privileged/interrupts.py`: CLINT MTIMECMP/MTIME/MSIP helpers (spike CLINT @ `0x02000000`) — `gen_arm_timer_irq` / `gen_clear_timer_irq` / `gen_arm_software_irq` / `gen_clear_software_irq`.
+- `asm_program_gen.py`: arms the timer in the init section when `enable_interrupt + enable_timer_irq`; aligns trap handler to 4 KiB so random stores don't corrupt handler code; `ecall_handler` sets `gp=1` before `write_tohost` so stray random ecalls terminate cleanly.
+- Sample testlist: `docs/examples/privileged-testlist.yaml` with 9 entries mapping to the new tests.
+- 41 new unit tests (`test_trap.py`, `test_boot.py`, `test_interrupts.py`). Total 373 passing.
+- PyPI metadata landed in the prior commit: `pyproject.toml` fleshed out, version bumped to `0.1.0`, wheel + sdist verified (built, twine-checked, installed in a fresh venv and smoke-run).
+
+Prior session (earlier 2026-04-23) iterated on **verification-team-ready coverage**. Additions since the baseline RVV+Zve work:
 - 28 covergroups total (static: opcode/format/category/group/rs1/rs2/rd/imm_sign/imm_range/hazard/csr/csr_access/fp_rm/vtype/vreg/fpr/mem_align/load_store_width/load_store_offset/category_transition/opcode_transition/rs1_eq_rs2/rs1_eq_rd/directed_stream/fmt_category_cross/category_group_cross; runtime: branch_direction/branch_taken_per_mnem/exception/privilege_mode/pc_reach/csr_value/rs_val_corner + opcode_cg.*__dyn).
 - CGF-style YAML goals with layered overlays (baseline + rv32imcb/rv32imafdc/rv32imc_zkn/rv32ui/rv64imc/rv64imcb/rv64imafdc/rv64gc/rv64gcv/coralnpu/no_branch_jump shipped, auto-resolved from `goals/<target>.yaml` when omitted).
 - Coverage-directed auto-regression (closes 95/95 rv32imc goals on seed 1 vs 86/95 for blind-sweep after 8 seeds). Plateau detection bails early when seeds stop adding bins.
@@ -100,7 +109,7 @@ python -m rvgen.coverage.tools export all.json --html cov.html --goals ...
 
 ### Prompt to resume a fresh session
 
-> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/rvgen/` first. 332 unit tests pass, 51/51 Spike E2E, 18/18 rv64gcv vector E2E, 5/5 Zve*-profile E2E, 21/21 chipforge-mcu trace-level match. 32 covergroups, layered CGF goals, directed auto-regression, parallel regression runner in `scripts/regression.py`, CLI tools (merge/diff/attribute/export/report/per-test/baseline-check/suggest-seeds/lint-goals). Docs: `docs/verification-guide.md`. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
+> Read `CLAUDE.md` §0 in `/home/qamar/chipforge/rvgen/` first. 373 unit tests pass, 51/51 Spike E2E baseline + 18/18 rv64gcv vector + 48/48 new privileged/interrupt/exception tests + 21/21 chipforge-mcu trace-level match. Trap / exception / interrupt / U-mode-boot subsystem landed (`rvgen/privileged/{trap,boot,interrupts}.py` + `docs/examples/privileged-testlist.yaml`). PyPI metadata ready for v0.1.0 upload (pyproject.toml, docs/releasing.md). 32 covergroups, layered CGF goals, directed auto-regression, parallel regression runner in `scripts/regression.py`, CLI tools (merge/diff/attribute/export/report/per-test/baseline-check/suggest-seeds/lint-goals). Docs: `docs/verification-guide.md`. Pick the next item from §0 "Next-up queue" and work on it. Keep running `python -m pytest tests/` after every change. Update §0 when a major milestone lands.
 
 Rules for either a generic continuation or a specific task: prefer editing existing files, cross-check each change against the SV reference at `~/Desktop/verif_env_tatsu/riscv-dv/`, run `python -m pytest tests/` after every change, update §0 when a major milestone lands.
 
@@ -128,7 +137,7 @@ Rules for either a generic continuation or a specific task: prefer editing exist
 
 **Tier 1 — biggest credibility gap vs riscv-dv (pick these first):**
 
-1. **Full privileged mode + paging** (step 8). SV32/SV39/SV48 paging, PMP cfg packing + NAPOT encoding, S/U-mode boot, debug ROM (DCSR/DPC/DSCRATCH, single-step). Unlocks `riscv_mmu_stress_test` / `riscv_privileged_mode_rand_test` / `riscv_pmp_test` / `riscv_ebreak_debug_mode_test`. **~1–2 weeks.**
+1. **Full privileged mode + paging** (step 8). **Partially landed 2026-04-23:** trap dispatch (all 11 causes), VECTORED xtvec, M/S-mode handlers, U/S-mode boot via MSTATUS.MPP, CLINT timer + software IRQ priming, nested-interrupt guard. Unlocks `riscv_ebreak_test` / `riscv_ecall_test` / `riscv_illegal_instr_test` / `riscv_full_interrupt_test` / `riscv_software_interrupt_test` / `riscv_u_mode_rand_test` / `riscv_privileged_mode_rand_test` / `riscv_invalid_csr_test` (see `docs/examples/privileged-testlist.yaml`). **Still missing:** SV32/SV39/SV48 paging (page-table generator + SATP programming + page-fault handler), PMP cfg packing + NAPOT encoding + TOR monotonicity, debug ROM (DCSR/DPC/DSCRATCH, single-step). Those would unlock `riscv_mmu_stress_test` / `riscv_pmp_test` / `riscv_ebreak_debug_mode_test` / `riscv_page_table_exception_test`. **~1 week remaining** for the three deferred pieces.
 2. **Vector load/store directed streams** — `riscv_vector_load_store_instr_stream` (unit-stride / strided / indexed) pinning rs1 to a legal memory region. The rv64gcv testlist references this name but it currently resolves to nothing. **~2–3 days.**
 3. **Vector AMO directed stream** — `riscv_vector_amo_instr_stream`. Same gap. **~1 day on top of #2.**
 4. **Vector FP / widening / narrowing** — classes exist but gated; flip `+vec_fp=1` / `+vec_narrowing_widening=1` and wire the VMV alignment constraints. **~1–2 days.**
@@ -158,7 +167,7 @@ Rules for either a generic continuation or a specific task: prefer editing exist
 
 **Tier 5 — community + polish:**
 
-19. **PyPI publication** — tag v0.1.0, build wheel, publish `pip install rvgen`. **~1 day.** Immediate next priority after Tier 1 makes the tool broadly credible.
+19. **PyPI publication** — tag v0.1.0, build wheel, publish `pip install rvgen`. **Packaging landed 2026-04-23** (pyproject metadata, package-data, build verified, docs/releasing.md). Only the `twine upload` remains — needs maintainer's API token. See `docs/releasing.md` for the checklist.
 20. **Docker image with RISC-V toolchain** — `docker run logicxtatsu/rvgen-ci:latest` with GCC + spike + spike-vector pre-built, unlocks E2E CI (currently CI only runs pytest, not spike). **~1–2 days.**
 21. **Nightly CI job** — `scripts/regression.py` against a full matrix every midnight, uploads HTML dashboard as an artefact. Requires #20.
 22. **ReadTheDocs site** — render `docs/` via Sphinx / mkdocs + GitHub Pages. **~1 day.**
