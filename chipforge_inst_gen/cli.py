@@ -178,11 +178,9 @@ def main(argv: list[str] | None = None) -> int:
         _LOG.error("No tests matched %r in %s", args.test, testlist_path)
         return 1
 
-    # Auto-regression mode dispatches to a dedicated driver.
+    # Auto-regression mode dispatches to a dedicated driver. Goals are
+    # auto-resolved from the shipped defaults if --cov_goals wasn't given.
     if args.auto_regress:
-        if not args.cov_goals:
-            _LOG.error("--auto_regress requires --cov_goals <path>")
-            return 1
         from chipforge_inst_gen.auto_regress import run_auto_regression
         return run_auto_regression(
             target_cfg=target_cfg,
@@ -321,9 +319,12 @@ def main(argv: list[str] | None = None) -> int:
         _LOG.info("Coverage DB updated: %s", cum_path)
 
         goals = None
-        if args.cov_goals:
+        goals_paths = _resolve_cov_goals(args.cov_goals, args.target)
+        if goals_paths:
             from chipforge_inst_gen.coverage import load_goals_layered
-            goals = load_goals_layered(*args.cov_goals)
+            goals = load_goals_layered(*goals_paths)
+            _LOG.info("Coverage goals layered from: %s",
+                      ", ".join(str(p) for p in goals_paths))
 
         report = cov_render_report(existing, goals)
         report_path = output_dir / "coverage_report.txt"
@@ -389,6 +390,29 @@ def _infer_mabi(target: str) -> str:
         return _TARGET_ISA_MABI[target][1]
     except KeyError:
         raise SystemExit(f"Cannot infer mabi for target {target!r}; pass --mabi.")
+
+
+def _resolve_cov_goals(explicit: list[str], target: str) -> list[str]:
+    """Return the effective goals-file list for this run.
+
+    If ``explicit`` is non-empty, use exactly those (user knows best).
+    Otherwise, look up the shipped defaults: always layer
+    ``coverage/goals/baseline.yaml`` and, if present,
+    ``coverage/goals/<target>.yaml`` on top. Returns an empty list if
+    there are no shipped defaults either, meaning the 'cov' step will
+    run without goals-based pass/fail (DB still written).
+    """
+    if explicit:
+        return list(explicit)
+    root = Path(__file__).parent / "coverage" / "goals"
+    out: list[str] = []
+    base = root / "baseline.yaml"
+    if base.exists():
+        out.append(str(base))
+    tgt = root / f"{target}.yaml"
+    if tgt.exists():
+        out.append(str(tgt))
+    return out
 
 
 # _emit_wrapped_asm removed — AsmProgramGen now emits the full program.

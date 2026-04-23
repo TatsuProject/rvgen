@@ -1,0 +1,44 @@
+# rv32imcb overlay — adds Zba/Zbb/Zbc/Zbs opcodes on top of baseline.
+opcode_cg:
+  # Zba
+  SH1ADD: 3
+  SH2ADD: 3
+  SH3ADD: 3
+  # Zbb
+  ANDN: 3
+  ORN: 3
+  XNOR: 3
+  CLZ: 2
+  CTZ: 2
+  CPOP: 2
+  MIN: 3
+  MINU: 3
+  MAX: 3
+  MAXU: 3
+  ROL: 2
+  ROR: 2
+  RORI: 2
+  SEXT_B: 2
+  SEXT_H: 2
+  ZEXT_H: 2
+  REV8: 2
+  ORC_B: 2
+  # Zbc
+  CLMUL: 2
+  CLMULH: 2
+  CLMULR: 2
+  # Zbs
+  BCLR: 2
+  BCLRI: 2
+  BEXT: 2
+  BEXTI: 2
+  BINV: 2
+  BINVI: 2
+  BSET: 2
+  BSETI: 2
+
+group_cg:
+  RV32ZBA: 5
+  RV32ZBB: 10
+  RV32ZBC: 3
+  RV32ZBS: 5

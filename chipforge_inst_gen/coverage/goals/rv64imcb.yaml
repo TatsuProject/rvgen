@@ -1,0 +1,31 @@
+# rv64imcb overlay — rv64imc + Zba/Zbb/Zbc/Zbs goals.
+# Layer baseline.yaml + rv64imc.yaml before this.
+opcode_cg:
+  SH1ADD: 3
+  SH2ADD: 3
+  SH3ADD: 3
+  ANDN: 3
+  ORN: 3
+  XNOR: 3
+  CLZ: 2
+  CTZ: 2
+  CPOP: 2
+  MIN: 3
+  MINU: 3
+  MAX: 3
+  MAXU: 3
+  ROL: 2
+  ROR: 2
+  RORI: 2
+  REV8: 2
+  BCLR: 2
+  BCLRI: 2
+  BEXT: 2
+  BEXTI: 2
+  BSET: 2
+  CLMUL: 2
+  CLMULH: 2
+
+group_cg:
+  RV32ZBB: 10
+  RV32ZBA: 5

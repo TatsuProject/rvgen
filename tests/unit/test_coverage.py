@@ -627,3 +627,25 @@ def test_shipped_overlay_goals_parse():
     for p in sorted(goals_dir.glob("*.yaml")):
         g = load_goals(p)
         assert isinstance(g.covergroup_names(), tuple)
+
+
+def test_resolve_cov_goals_uses_explicit_when_given(tmp_path: Path):
+    from chipforge_inst_gen.cli import _resolve_cov_goals
+    out = _resolve_cov_goals(["/a.yaml", "/b.yaml"], "rv32imc")
+    assert out == ["/a.yaml", "/b.yaml"]
+
+
+def test_resolve_cov_goals_falls_back_to_shipped():
+    from chipforge_inst_gen.cli import _resolve_cov_goals
+    out = _resolve_cov_goals([], "rv32imcb")
+    # Should pick baseline.yaml + rv32imcb.yaml.
+    assert any("baseline.yaml" in p for p in out)
+    assert any("rv32imcb.yaml" in p for p in out)
+
+
+def test_resolve_cov_goals_unknown_target_only_baseline():
+    from chipforge_inst_gen.cli import _resolve_cov_goals
+    out = _resolve_cov_goals([], "_target_not_shipped_")
+    # Baseline is always there; target-specific file absent.
+    assert any("baseline.yaml" in p for p in out)
+    assert not any("_target_not_shipped_" in p for p in out)

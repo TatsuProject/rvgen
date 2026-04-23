@@ -85,8 +85,16 @@ def run_auto_regression(
     from chipforge_inst_gen.isa.filtering import create_instr_list
 
     # Support both repeated --cov_goals (list) and legacy single-path string.
-    goals_paths = args.cov_goals if isinstance(args.cov_goals, list) else [args.cov_goals]
-    goals = load_goals_layered(*goals_paths) if goals_paths else load_goals(args.cov_goals)
+    from chipforge_inst_gen.cli import _resolve_cov_goals  # lazy import — avoids cycle
+    explicit = args.cov_goals if isinstance(args.cov_goals, list) else [args.cov_goals]
+    explicit = [p for p in explicit if p]
+    goals_paths = _resolve_cov_goals(explicit, target_cfg.name)
+    if not goals_paths:
+        _LOG.error("--auto_regress needs goals; none explicit and no shipped "
+                   "goals/%s.yaml or goals/baseline.yaml found.", target_cfg.name)
+        return 1
+    goals = load_goals_layered(*goals_paths)
+    _LOG.info("auto-regress: goals layered from %s", ", ".join(str(p) for p in goals_paths))
 
     # Cumulative DB path — re-use any existing DB so sequential runs chain.
     cum_path = Path(args.cov_db) if args.cov_db else output_dir / "coverage.json"
