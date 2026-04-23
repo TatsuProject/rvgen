@@ -227,24 +227,41 @@ When running under GitHub Actions, the `cov` step writes:
 
 ## 7 — Scaling up
 
-For a real regression sweep:
+Use the shipped parallel runner — it handles matrix execution, merging,
+summarisation, and HTML export in one command:
 
-1. Loop through every `(target, test)` combination you care about.
-2. Merge the coverage JSONs:
-   ```
-   python -m chipforge_inst_gen.coverage.tools merge run_*/coverage.json \
-       -o regression_total.json
-   ```
-3. Render the HTML dashboard:
-   ```
-   python -m chipforge_inst_gen.coverage.tools export regression_total.json \
-       --html regression.html --goals .../baseline.yaml
-   ```
-4. Check it into your artefacts dir. The HTML is fully self-contained
-   (inline CSS, no JS) — safe to serve from S3 / GCS.
+```bash
+./scripts/regression.py \
+    --targets rv32imc,rv64imc,rv32imcb,rv64imcb \
+    --tests riscv_arithmetic_basic_test,riscv_rand_instr_test \
+    --seeds 100,200,300 \
+    --iss_trace --jobs 8 --emit_html \
+    --output out/regression/
+```
+
+Under `out/regression/`:
+
+- `per_run/<target>_<test>_<seed>/` — each individual run's full output.
+- `combined_coverage.json`          — merged view.
+- `summary.txt`, `summary.html`     — reports.
+- `regression.log`                  — PASS/FAIL line per run.
+
+Exit 0 iff every run finished without an ISS error (coverage-goals-unmet
+is still counted as a passing simulation — use `baseline-check` after to
+gate on monotonic coverage). This maps cleanly onto a CI "required check".
 
 The `convergence.json` + `cov_timeline.json` sidecars from each
 auto-regress run let external dashboards plot "coverage over time".
+
+## 7.5 — Debugging workflows
+
+| Scenario | Tool |
+|---|---|
+| Goals YAML typo | `tools lint-goals goals.yaml --strict=error` |
+| "Which seed closed X last time?" | `tools suggest-seeds --convergence ... --observed ... --goals ...` |
+| "Which test owns which bins?" | `tools per-test coverage_per_test.json` |
+| "Did this PR regress coverage?" | `tools baseline-check --baseline golden.json observed.json` |
+| Replay a specific seed's `.S` | `asm_test/seed_archive/<test>_seedNNN.S` |
 
 ---
 
