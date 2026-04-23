@@ -199,6 +199,44 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_baseline_check(args: argparse.Namespace) -> int:
+    """Gate CI: every bin hit by ``--baseline`` must also be hit in ``input``.
+
+    Coverage is expected to be monotonic for a healthy regression — a
+    change that causes previously-observed bins to disappear is almost
+    always a regression (goal removed, stream broken, test disabled).
+    This subcommand makes that guarantee testable:
+
+        python -m chipforge_inst_gen.coverage.tools baseline-check \\
+            --baseline tests/golden/coverage_golden.json \\
+            run/coverage.json
+
+    Exit 0 if every baseline-hit bin is still hit. Exit 1 otherwise,
+    listing the lost bins per covergroup.
+    """
+    observed = _read(Path(args.input))
+    baseline = _read(Path(args.baseline))
+
+    lost: dict[str, list[str]] = {}
+    for cg, bins in baseline.items():
+        obs_bins = observed.get(cg, {})
+        for bn, base_cnt in bins.items():
+            if base_cnt > 0 and obs_bins.get(bn, 0) == 0:
+                lost.setdefault(cg, []).append(bn)
+
+    if lost:
+        total = sum(len(v) for v in lost.values())
+        print(f"baseline-check: REGRESSION — {total} bin(s) lost across "
+              f"{len(lost)} covergroup(s)")
+        for cg, bns in sorted(lost.items()):
+            print(f"  [{cg}]")
+            for bn in sorted(bns):
+                print(f"    - {bn}")
+        return 1
+    print("baseline-check: OK — all previously-hit bins still hit")
+    return 0
+
+
 def cmd_per_test(args: argparse.Namespace) -> int:
     """Analyse a coverage_per_test.json sidecar.
 
@@ -414,6 +452,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="Optional covergroup name; print the owner test_id "
                           "for each uniquely-owned bin in this covergroup.")
     pt.set_defaults(func=cmd_per_test)
+
+    pb = sub.add_parser("baseline-check",
+                         help="Gate CI: every bin hit in baseline must also "
+                              "be hit in the observed run.")
+    pb.add_argument("input", help="Observed coverage JSON.")
+    pb.add_argument("--baseline", required=True,
+                     help="Golden baseline coverage JSON (checked in).")
+    pb.set_defaults(func=cmd_baseline_check)
 
     return p
 

@@ -97,6 +97,7 @@ CG_CSR_ACCESS = "csr_access_cg"        # cross: CSR name × read/write access ty
 CG_LS_OFFSET = "load_store_offset_cg"  # offset magnitude bins for load/store ops
 CG_STREAM = "directed_stream_cg"       # which directed stream contributed instrs
 CG_CSR_VAL = "csr_value_cg"            # runtime: CSR × value-bucket (parsed from spike trace)
+CG_RS_VAL_CORNER = "rs_val_corner_cg"  # runtime: GPR write-value corner class
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -113,6 +114,7 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_RS1_EQ_RS2, CG_RS1_EQ_RD,
     CG_BR_PER_MNEM, CG_VTYPE_DYN,
     CG_CSR_ACCESS, CG_LS_OFFSET, CG_STREAM, CG_CSR_VAL,
+    CG_RS_VAL_CORNER,
 )
 
 

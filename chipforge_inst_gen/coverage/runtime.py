@@ -39,6 +39,7 @@ from chipforge_inst_gen.coverage.collectors import (
     CG_EXCEPTION,
     CG_OPCODE,
     CG_PRIV_MODE,
+    CG_RS_VAL_CORNER,
     CoverageDB,
 )
 
@@ -62,6 +63,34 @@ _COMMIT_RE = re.compile(
     r"^core\s+\d+:\s+(?P<pri>\d)\s+0x(?P<pc>[0-9a-f]+)\s+\(0x(?P<bin>[0-9a-f]+)\)\s*(?P<writes>.*)$"
 )
 _CSR_WRITE_IN_COMMIT_RE = re.compile(r"c[0-9a-f]+_(?P<csr>\w+)\s+0x(?P<val>[0-9a-f]+)")
+# GPR (and FPR) write inside commit: matches "x5 0x..." / "f5 0x..." with
+# any-width hex value. Using the register name as a hint for covergroup
+# dimensionality (only GPR writes matter for the corner-value coverage).
+_GPR_WRITE_IN_COMMIT_RE = re.compile(r"\b(?P<reg>x\d+)\s+0x(?P<val>[0-9a-f]+)")
+
+
+def _corner_bucket(val: int) -> str:
+    """Classify a 64-bit value against the canonical corner set."""
+    v64 = val & 0xFFFF_FFFF_FFFF_FFFF
+    if v64 == 0:
+        return "zero"
+    if v64 == 0xFFFF_FFFF_FFFF_FFFF:
+        return "all_ones_64"
+    if v64 == 0xFFFF_FFFF:
+        return "all_ones_32"
+    if v64 == 0x8000_0000_0000_0000:
+        return "min_signed_64"
+    if v64 == 0x8000_0000:
+        return "min_signed_32"
+    if v64 == 0x7FFF_FFFF_FFFF_FFFF:
+        return "max_signed_64"
+    if v64 == 0x7FFF_FFFF:
+        return "max_signed_32"
+    if v64 <= 0xFF:
+        return "small_pos"
+    if v64 & 0x8000_0000_0000_0000:
+        return "msb64_set"
+    return "generic"
 
 # Spike's priv-level mapping in commit lines.
 _PRI_LEVEL_BIN = {"0": "U_mode", "1": "S_mode", "3": "M_mode"}
@@ -158,6 +187,10 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                     csr = wm.group("csr").upper()
                     val = int(wm.group("val"), 16)
                     _bump(CG_CSR_VAL, f"{csr}__{_value_bucket(val, 64)}")
+                # GPR write-values — classify against the canonical corners.
+                for wm in _GPR_WRITE_IN_COMMIT_RE.finditer(writes):
+                    val = int(wm.group("val"), 16)
+                    _bump(CG_RS_VAL_CORNER, _corner_bucket(val))
                 # Sample the priv level observed on retirement.
                 pri_bin = _PRI_LEVEL_BIN.get(cm.group("pri"))
                 if pri_bin:

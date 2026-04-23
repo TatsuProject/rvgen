@@ -681,6 +681,47 @@ def test_runtime_trace_csr_value_bin(tmp_path: Path):
     assert db[CG_CSR_VAL].get("MSTATUS__zero", 0) == 1
 
 
+def test_runtime_gpr_write_corners(tmp_path: Path):
+    from chipforge_inst_gen.coverage import sample_trace_file
+    from chipforge_inst_gen.coverage.collectors import CG_RS_VAL_CORNER
+
+    trace = tmp_path / "t.trace"
+    trace.write_text(
+        "core   0: 0x80000000 (0x00000013) addi    x0, x0, 0\n"
+        "core   0: 3 0x80000000 (0x00000013) x5  0x0\n"
+        "core   0: 0x80000004 (0x00000013) addi    x0, x0, 0\n"
+        "core   0: 3 0x80000004 (0x00000013) x6  0xffffffff\n"
+    )
+    db = new_db()
+    sample_trace_file(db, trace)
+    assert db[CG_RS_VAL_CORNER].get("zero", 0) == 1
+    assert db[CG_RS_VAL_CORNER].get("all_ones_32", 0) == 1
+
+
+def test_baseline_check_tool(tmp_path: Path):
+    from chipforge_inst_gen.coverage.tools import cmd_baseline_check
+    baseline = tmp_path / "base.json"
+    observed = tmp_path / "obs.json"
+    _dump(baseline, {"opcode_cg": {"ADD": 10, "SUB": 5}})
+
+    # Observed hits both — OK.
+    _dump(observed, {"opcode_cg": {"ADD": 3, "SUB": 2, "JAL": 7}})
+    import argparse, io, contextlib
+    ns = argparse.Namespace(input=str(observed), baseline=str(baseline))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert cmd_baseline_check(ns) == 0
+    assert "OK" in buf.getvalue()
+
+    # Observed lost SUB — regression.
+    _dump(observed, {"opcode_cg": {"ADD": 3}})
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        assert cmd_baseline_check(ns) == 1
+    assert "REGRESSION" in buf2.getvalue()
+    assert "SUB" in buf2.getvalue()
+
+
 def test_runtime_trace_priv_mode_from_commit(tmp_path: Path):
     from chipforge_inst_gen.coverage import sample_trace_file
     from chipforge_inst_gen.coverage.collectors import CG_PRIV_MODE
