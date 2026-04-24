@@ -214,12 +214,17 @@ def gen_pre_enter_privileged_mode(
     # gate instead.
     mtvec_mode_bit = cfg.mtvec_mode.value if cfg.enable_interrupt else 0
 
-    def _write_xtvec(csr: PrivilegedReg, handler_label: str) -> None:
-        lines.append(_line(f"la {gpr0.abi}, {prefix}{handler_label}"))
+    def _write_xtvec(csr: PrivilegedReg, handler_label: str, *, prefixed: bool = True) -> None:
+        # ``handler_label`` may already carry the hart prefix (the caller
+        # passes e.g. "h1_mtvec_handler"). Only prepend ``prefix`` for
+        # handlers the caller didn't already qualify (stvec_handler, which
+        # is a per-mode label, not per-hart).
+        full = handler_label if prefixed else f"{prefix}{handler_label}"
+        lines.append(_line(f"la {gpr0.abi}, {full}"))
         lines.append(_line(f"ori {gpr0.abi}, {gpr0.abi}, {mtvec_mode_bit}"))
         lines.append(_line(f"csrw 0x{csr.value:x}, {gpr0.abi}"))
 
-    _write_xtvec(PrivilegedReg.MTVEC, trap_handler_label)
+    _write_xtvec(PrivilegedReg.MTVEC, trap_handler_label, prefixed=True)
     # Write STVEC only when delegation is on — otherwise S-mode traps
     # never reach STVEC (they land on MTVEC instead), and some spike
     # builds WARL-reject the write when MISA.S is latched off, wasting
@@ -229,7 +234,7 @@ def gen_pre_enter_privileged_mode(
         and PrivilegedMode.SUPERVISOR_MODE in target.supported_privileged_mode
         and PrivilegedReg.STVEC in target.implemented_csr
     ):
-        _write_xtvec(PrivilegedReg.STVEC, "stvec_handler")
+        _write_xtvec(PrivilegedReg.STVEC, "stvec_handler", prefixed=False)
 
     # 3) Delegation (only when explicitly requested; default is no-delegation).
     if not cfg.no_delegation:
@@ -247,7 +252,8 @@ def gen_pre_enter_privileged_mode(
             ))
 
     # 4) MEPC = init — MRET will jump here in the target privilege mode.
-    lines.append(_line(f"la {gpr0.abi}, {prefix}{init_label}"))
+    # ``init_label`` is pre-qualified by the caller (includes hart prefix).
+    lines.append(_line(f"la {gpr0.abi}, {init_label}"))
     lines.append(_line(
         f"csrw 0x{PrivilegedReg.MEPC.value:x}, {gpr0.abi}"
     ))
