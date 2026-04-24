@@ -115,6 +115,34 @@ reserved_rd[i]` (`riscv_instr_stream.sv:~275`). We didn't port it.
 **Fix:** For instr ∈ {C_ANDI, C_SRLI, C_SRAI}, fold `rd_forbidden` into
 `rs1_forbidden`.
 
+### F13 — `+no_data_page=1` left regions undefined for LS streams · [2cea06d]
+**Symptom:** Linker fails:
+  `undefined reference to 'region_0'` / `'region_1'`
+Caught when knob-fuzz set `+no_data_page=1` on `riscv_rand_instr_test`.
+`.data` section is suppressed (no `region_N` labels), but the base
+testlist still activates `+directed_instr_N=riscv_hazard_instr_stream,4`
+etc. Those streams still emit `la rs1, region_0` → dangling ref.
+**Fix:** In `asm_program_gen._gen_main_section()`, when
+`cfg.no_data_page=True`, skip any directive whose stream name is in the
+data-region-using set (load_store_* / hazard / multi_page /
+mem_region_stress / load_store_rand_addr / load_store_shared_mem).
+Non-data-region streams (int_numeric_corner, loop, jal) still run.
+
+### F12 — Duplicate labels across directive entries with same stream name (U4) · [b68e68e]
+**Symptom:** GCC assembler rejects:
+  `symbol 'main_riscv_hazard_instr_stream_3' is already defined`
+Caught when directed-pressure stress campaign set
+`+directed_instr_1=riscv_hazard_instr_stream,20` on top of a testlist
+already carrying `+directed_instr_2=riscv_hazard_instr_stream,4`. Each
+directive ran its own per-directive 0..count-1 counter, so labels 0..3
+collided.
+**Fix:** Use a stream-name-keyed global counter that increments across
+all directive entries. Labels stay sequential (no gaps) and are
+guaranteed unique.
+**SV reference:** SV doesn't hit this because its testlists don't
+duplicate stream names across indices, but nothing in SV prevents it —
+it would hit the same assembler error. Our global counter is SV-safe.
+
 ### F11 — MultiPage LS interleave split preludes from stores (U3) · [8a97d4a]
 **Symptom:** Random `fsw fa5, 404(t0)` in sub B at PC 0x8000015a fires
 before sub B's `la t0, region_1` at PC 0x80000166. t0 still had its
