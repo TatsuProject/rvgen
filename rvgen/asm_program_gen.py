@@ -211,11 +211,30 @@ class AsmProgramGen:
         # once per directive — two directives with the same stream name
         # emitted the same labels and GCC rejected the asm with
         # "symbol 'main_riscv_hazard_instr_stream_3' is already defined".
+        #
+        # When +no_data_page=1, the .data section is empty and the region_N
+        # symbols are never defined. Any stream that does `la rs1, region_N`
+        # would then fail to link. Skip those streams up front.
         from rvgen.streams import get_stream
         from rvgen.stream import InstrStream
+        # Streams that reference region_N labels in their generated asm.
+        _DATA_REGION_STREAMS = frozenset({
+            "riscv_load_store_rand_instr_stream",
+            "riscv_load_store_stress_instr_stream",
+            "riscv_load_store_hazard_instr_stream",
+            "riscv_hazard_instr_stream",
+            "riscv_multi_page_load_store_instr_stream",
+            "riscv_mem_region_stress_test",
+            "riscv_load_store_rand_addr_instr_stream",
+            "riscv_load_store_shared_mem_stream",
+        })
         self.main_sequence.directed_instr = []
         stream_counter: dict[str, int] = {}
         for idx, (name, count) in sorted(self.cfg.directed_instr.items()):
+            if self.cfg.no_data_page and name in _DATA_REGION_STREAMS:
+                # Testlist asked for LS stream but data pages are disabled —
+                # emitting it would produce undefined region_N references.
+                continue
             try:
                 stream_cls = get_stream(name)
             except KeyError:
