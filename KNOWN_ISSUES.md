@@ -70,41 +70,74 @@ doesn't implement.
 
 ---
 
+## Fixed (continued)
+
+### F7 — MultiPage LS stream siblings clobber each other's base · [712daca]
+**Symptom:** Random store landed in .text, silently corrupted an
+instruction byte, later trap took a wrong branch → 30s livelock. Seed
+10059 on fp_mmu_stress reliably reproduced.
+**Root cause:** `MultiPageLoadStoreInstrStream` generates N interleaved
+sub-streams, each pinning its own `rs1_reg` via `la rs1, region_N`.
+Each sub's `_add_mixed_instr` protected ONLY its own rs1_reg from being
+overwritten — but not its siblings'. After interleave, sub A's `la t6,
+region_0; sh foo, imm(t6)` could have sub B's `mulhu t6, ra, t4`
+sandwiched between them, leaving the store pointing anywhere.
+**Fix:** New `extra_locked_regs` field on LoadStoreBaseInstrStream;
+propagated to mixed-op reserved_rd. `MultiPageLoadStoreInstrStream`
+collects all sibling rs1_regs up-front and forbids mixed writes to any
+of them across all subs.
+**SV divergence:** SV handles this implicitly via constraint-solver
+cross-stream hard constraints; we do it explicitly.
+
+### F8 — Compressed 3-bit fallback leaked to full GPR pool · [ccc40bf]
+**Symptom:** GCC-15 rejected generated asm:
+`c.addi4spn s3, sp, 816` — s3=x19 not in compressed GPR set (x8..x15).
+Hit rv32imc/rand_instr and rv64imc/rand_instr reliably at seeds
+200/300.
+**Root cause:** `randomize_gpr_operands` picks from `_COMPRESSED_REGS ∩
+avail_regs`. When `avail_regs` is a tight set (e.g. HazardInstrStream
+samples 6 random regs), the intersection is often empty. `_pick`
+fallback widened to `_NON_CSR_REGS` — the full 31-reg pool — emitting
+physically-illegal encodings.
+**Fix:** When `compressed_3bit=True`, fallback widens only to
+`_COMPRESSED_REGS`, never to the full pool. Hard constraint from the
+encoding.
+**SV reference:** rvc_csr_c in riscv_compressed_instr.sv:21.
+**Regression:** Canonical sweep 51/51 (was 48/51 pre-fix).
+
+### F9 — Multi-hart double-prefix on mtvec/init labels · [cbe75d7]
+**Symptom:** Linker rejects multi_harts build:
+`undefined reference to 'h1_h1_mtvec_handler'`. 0/N pass.
+**Root cause:** Caller in `asm_program_gen.py` passes
+`trap_handler_label=f"{prefix}mtvec_handler"` (already hart-qualified).
+`boot.py::_write_xtvec` then prepended `prefix` again, producing
+`h1_h1_mtvec_handler`. Same bug for `init_label`.
+**Fix:** Trust caller's label — stop re-prefixing inside `_write_xtvec`
+and the MEPC write. `stvec_handler` still prefixed (caller doesn't
+qualify it).
+
+---
+
 ## Unfixed (live bugs)
 
-### U1 — Random stores can corrupt `.text`
-**Symptom:** Random integer store with rs1=`t6` (or similar) that was
-set by a prior `auipc t6, X` or `lui t6, Y` can land inside .text. A
-single byte-flip in an instruction corrupts control flow — seed 10059
-(old Set 2) flipped an `sb a5, imm(t6)` at `0x800051fa` to write `0xff`
-at `0x8000805c`, corrupting the trap dispatch `bne` from
-`0x04029f63` → `0x04ff9f63` (different register operands), hanging the
-handler. Hit rate ~1/100 on fp_mmu_stress.
-**Root cause:** `random_instr_stream` doesn't constrain rs1 of STORE
-ops to be "known data-region" registers. SV has the same weakness
-(`riscv_instr_stream.sv` random path).
-**Candidate fix:** Post-init, load a data-region base address (region_0)
-into a known subset of GPRs, flag them as "data-base" in avail_regs,
-and force `STORE.rs1 ∈ {data-base} ∪ {sp}` in the random stream. Or
-more faithfully: check preceding `auipc`/`lui` writes to the chosen rs1
-and re-randomize if the upper bits look like .text (`0x80…`).
-**Workaround:** pick seeds that don't hit this (Set 2 uses 20000+ →
-100/100).
+_None known_ — all diagnosed bugs are in Fixed section. Wide sweep
+(2430 runs across 9 targets × 9 tests × 30 seeds) + 1000-seed stress +
+targeted rv32imckf sweep all green.
 
-### U2 — Compressed instructions emitted with non-compressed-GPR destinations
-**Symptom:** GCC-15 rejects generated asm:
-`c.addi4spn s3, sp, 816` — rd=s3=x19 not in compressed GPR set
-(x8..x15). Pre-existing; hits `riscv_rand_instr_test` on
-rv32imc/rv64imc seeds 200, 300 reliably.
-**Root cause:** Either format classification in `filtering.py` doesn't
-flag `C_ADDI4SPN` as 3-bit-rd, or a code path emits instruction bypassing
-`randomize_gpr_operands`. Needs audit of every compressed-instr class
-against SV `riscv_compressed_instr.sv`.
-**Impact:** Blocks rv32imc/rand_instr canonical sweep at ~3/51.
+---
 
-### U3 — Aliased load/store addresses can still occasionally escape directed-stream bounds
-(To investigate — placeholder for pattern we've seen in sporadic
-timeouts. May overlap with U1.)
+## Known architectural gaps (not "bugs" — features not ported yet)
+
+- SV32/SV39/SV48 paging (blocks `riscv_mmu_stress_test` on rv64gc,
+  `riscv_page_table_exception_test`).
+- PMP cfg packing + NAPOT (blocks `riscv_pmp_test`).
+- Debug ROM + DCSR / DPC (blocks `riscv_ebreak_debug_mode_test`).
+- H-extension (hypervisor, two-stage translation).
+- Zfh / Zvfh (half-precision scalar + vector).
+- Smaia / Ssaia (advanced interrupt architecture).
+
+See Tier 1/2 in `docs/research/comparison-and-next-steps.md` for the
+ranked port plan.
 
 ---
 
