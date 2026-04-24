@@ -465,7 +465,14 @@ def randomize_gpr_operands(
     def _pick(pool: set[RiscvReg], exclude: set[RiscvReg] = frozenset()) -> RiscvReg:
         choices = [r for r in pool if r not in exclude]
         if not choices:
-            choices = [r for r in _NON_CSR_REGS if r not in exclude]
+            # Fallback widens to the physically-legal set, not the full
+            # GPR pool. For 3-bit compressed formats (CIW/CL/CS/CB/CA)
+            # the encoding cannot represent registers outside S0..A5 —
+            # widening to _NON_CSR_REGS would emit illegal asm like
+            # "c.addi4spn s3, sp, ..." which gas rejects with "illegal
+            # operands". Mirrors SV rvc_csr_c: riscv_compressed_instr.sv:21.
+            fallback = _COMPRESSED_REGS if compressed_3bit else _NON_CSR_REGS
+            choices = [r for r in fallback if r not in exclude]
         return rng.choice(choices)
 
     if instr.has_rs1:
