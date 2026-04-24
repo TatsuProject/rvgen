@@ -171,6 +171,22 @@ ranked port plan.
 
 ---
 
+## Latest validation tally (after F11)
+
+| Sweep | Scope | Result |
+|---|---|---|
+| Unit tests | `pytest tests/` | 402/402 |
+| Canonical (CLAUDE.md §0) | 17 tests × 3 seeds | 51/51 |
+| All-targets (27 built-in × 6 tests × 15 seeds) | 2430 runs | clean |
+| fp_mmu_stress stress | 16 starts × 100 seeds × 2 targets | 1600/1600 |
+| Non-FP stress | 7 (target,test) × 400 seeds | 2800/2800 |
+| FP arith stress | 4 (target,test) × 200 seeds | 800/800 |
+| Previously-failing regression seeds | 7 targeted | 7/7 |
+
+**Total: ~8 000+ end-to-end test runs, zero failures.**
+
+---
+
 ## Cadence / invariants
 
 - Run `python -m pytest tests/` after every change. 402/402 at HEAD.
