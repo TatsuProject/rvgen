@@ -115,6 +115,21 @@ reserved_rd[i]` (`riscv_instr_stream.sv:~275`). We didn't port it.
 **Fix:** For instr ∈ {C_ANDI, C_SRLI, C_SRAI}, fold `rd_forbidden` into
 `rs1_forbidden`.
 
+### F14 — Multi-hart streams referenced unprefixed region labels (U6) · [fed7478]
+**Symptom:** Linker fails on the `multi_harts` target for any test that
+activates a load/store directed stream:
+  `undefined reference to 'region_0'` / `'region_1'`
+The data-page generator emits `h0_region_0`, `h1_region_0`, etc. (each
+hart has its own data pages), but `LoadStoreBaseInstrStream._pick_region`
+returned the bare `region_0` name. The stream then emitted `la rs1,
+region_0` and link failed.
+**Root cause:** The stream didn't know it was in multi-hart context.
+**Fix:** `_pick_region` now composes `hart_prefix(self.hart,
+cfg.num_of_harts) + region.name`, matching the data-page section names.
+Single-hart (num_harts=1) still produces empty prefix → unchanged
+behaviour.
+**Validation:** multi_harts + rand_instr went from 0/40 to clean 40/40.
+
 ### F13 — `+no_data_page=1` left regions undefined for LS streams · [2cea06d]
 **Symptom:** Linker fails:
   `undefined reference to 'region_0'` / `'region_1'`
