@@ -203,16 +203,27 @@ class AsmProgramGen:
             instr_cnt=self.cfg.main_program_instr_cnt,
         )
         # Build directed-stream instances from cfg.directed_instr = {idx: (name, cnt)}.
+        # Label uniqueness: use a stream-name-keyed global counter so that
+        # two directive entries naming the same stream (e.g. testlist has
+        # +directed_instr_2=riscv_hazard_instr_stream,4 and a plusarg adds
+        # +directed_instr_1=riscv_hazard_instr_stream,20) produce
+        # non-colliding labels. The old per-directive counter ran 0..N-1
+        # once per directive — two directives with the same stream name
+        # emitted the same labels and GCC rejected the asm with
+        # "symbol 'main_riscv_hazard_instr_stream_3' is already defined".
         from rvgen.streams import get_stream
         from rvgen.stream import InstrStream
         self.main_sequence.directed_instr = []
+        stream_counter: dict[str, int] = {}
         for idx, (name, count) in sorted(self.cfg.directed_instr.items()):
             try:
                 stream_cls = get_stream(name)
             except KeyError:
                 # Unknown streams are skipped silently for Phase 1 forward-compat.
                 continue
-            for i in range(max(count, 1)):
+            for _ in range(max(count, 1)):
+                i = stream_counter.get(name, 0)
+                stream_counter[name] = i + 1
                 stream = stream_cls(
                     cfg=self.cfg,
                     avail=self.avail,
