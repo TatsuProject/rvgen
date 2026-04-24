@@ -136,6 +136,14 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
     region_name: str = ""
     rs1_reg: RiscvReg | None = None
     base: int = 0
+    # Additional GPRs that must not be clobbered by mixed filler ops. Used by
+    # MultiPageLoadStoreInstrStream to protect SIBLING sub-streams' base regs
+    # when several LS streams are interleaved — without this, one sub's random
+    # `mulhu t6, ra, t4` can stomp another sub's `la t6, region_0`, leaving
+    # its later stores pointing anywhere (including .text → self-modifying
+    # code → livelock). SV handles this implicitly via its constraint solver;
+    # we make it explicit.
+    extra_locked_regs: tuple[RiscvReg, ...] = ()
 
     # SV default ranges (see legal_c in SV subclasses):
     _num_ld_st_range: ClassVar[tuple[int, int]] = (10, 30)
@@ -268,10 +276,15 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
                     RiscvInstrCategory.SHIFT,
                 ],
             )
+            # Protect both this stream's base AND any sibling streams' bases
+            # (needed when interleaved in MultiPageLoadStoreInstrStream). Mixed
+            # writes to a sibling's base point its later stores into random
+            # memory — including .text, which silently self-modifies code.
+            forbidden_rd = tuple(base_locked - {RiscvReg.ZERO})
             randomize_gpr_operands(
                 instr, self.rng, self.cfg,
                 avail_regs=avail_regs,
-                reserved_rd=[self.rs1_reg] if self.rs1_reg else (),
+                reserved_rd=forbidden_rd,
             )
             if instr.has_imm:
                 instr.randomize_imm(self.rng, xlen=xlen)
@@ -316,7 +329,11 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
         self.base = self._pick_base(region_size)
         self._randomize_offsets(region_size)
 
-        base_locked = set(self.cfg.reserved_regs) | {self.rs1_reg, RiscvReg.ZERO}
+        base_locked = (
+            set(self.cfg.reserved_regs)
+            | {self.rs1_reg, RiscvReg.ZERO}
+            | set(self.extra_locked_regs)
+        )
 
         load_store = self._gen_load_store_instr(base_locked)
         mixed = self._add_mixed_instr(base_locked)
@@ -468,6 +485,13 @@ class MultiPageLoadStoreInstrStream(DirectedInstrStream):
             region_ids = region_ids[:len(pool)]
         rs1_choices = self.rng.sample(pool, len(region_ids))
 
+        # Collect all sibling bases up-front so each sub can forbid mixed-op
+        # writes to any OTHER sub's base register. Without this, interleaved
+        # mixed ops from one sub can clobber another's `la rs1, region_N`
+        # initialization, leaving later stores pointing anywhere (including
+        # .text → self-modifying code → livelock).
+        all_bases: tuple[RiscvReg, ...] = tuple(rs1_choices)
+
         sub_streams: list[list[Instr]] = []
         for rid, rs1 in zip(region_ids, rs1_choices):
             sub = LoadStoreStressInstrStream(
@@ -480,6 +504,8 @@ class MultiPageLoadStoreInstrStream(DirectedInstrStream):
             sub.num_load_store = 0
             sub.num_mixed_instr = 0
             sub.locality = self.rng.choice(tuple(_LOCALITY_RANGES))
+            # Protect sibling bases — not just this sub's own base.
+            sub.extra_locked_regs = tuple(r for r in all_bases if r != rs1)
             sub.generate()  # build + finalize
             # Strip the stream's Start/End comments since we're wrapping.
             for i in sub.instr_list:
