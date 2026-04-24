@@ -164,12 +164,22 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
         return self.rng.choice(pool)
 
     def _pick_region(self) -> tuple[int, str, int]:
-        """Pick a data-page id, its region name, and its size."""
+        """Pick a data-page id, its region name, and its size.
+
+        In multi-hart mode (num_of_harts > 1) the data_page_gen prefixes
+        every region label with ``h<N>_`` so the sections for each hart
+        stay distinct. Streams must reference the hart-prefixed label or
+        the linker will fail with "undefined reference to 'region_0'".
+        """
+        from rvgen.isa.utils import hart_prefix
         regions = DEFAULT_MEM_REGIONS
         idx = self.rng.randrange(len(regions))
         self.data_page_id = idx
-        self.region_name = regions[idx].name
-        return idx, regions[idx].name, regions[idx].size_in_bytes
+        base_name = regions[idx].name
+        num_harts = self.cfg.num_of_harts if self.cfg else 1
+        full_name = hart_prefix(self.hart, num_harts) + base_name
+        self.region_name = full_name
+        return idx, full_name, regions[idx].size_in_bytes
 
     def _pick_base(self, region_size: int) -> int:
         """Pick an intra-region starting offset that leaves room for locality."""
