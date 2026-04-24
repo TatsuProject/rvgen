@@ -119,7 +119,11 @@ def run_iss(
         except subprocess.TimeoutExpired as e:
             returncode = 124
             log = f"TIMEOUT after {timeout_s}s\n{e.stderr or ''}"
-        log_path.write_text(log)
+        # Only emit the .log file when spike has something to say — on a
+        # clean pass spike is silent, so writing an empty file just clutters
+        # spike_sim/. Errors, timeouts, and trace mode all produce output.
+        if log.strip():
+            log_path.write_text(log)
         out.append(IssResult(
             test_id=res.test_id,
             elf_path=res.elf_path,

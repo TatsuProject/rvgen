@@ -138,8 +138,23 @@ def gen_stack_section(
 
 
 def gen_tohost_fromhost() -> list[str]:
-    """Emit the HTIF ``tohost``/``fromhost`` symbols (always present)."""
+    """Emit the HTIF ``tohost``/``fromhost`` symbols into the dedicated
+    ``.tohost`` output section.
+
+    The linker script isolates ``.tohost`` on its own 4 KiB page between
+    ``.text`` and ``.data``. Emitting into ``.data`` (like the SV reference
+    does) puts ``tohost`` right next to ``.region_0`` — 72 bytes apart in
+    practice — so a random store with a small negative offset from the
+    region base silently overwrites ``tohost`` with garbage. Spike then
+    interprets that garbage as an HTIF device pointer and aborts with
+    ``Memory address 0x... is invalid`` (rc=255).
+
+    Keeping them in ``.tohost`` puts them on their own page; random stores
+    target ``.region_*`` inside ``.data`` whose ±2 KiB offsets can't reach
+    across a page boundary.
+    """
     return [
+        ".section .tohost,\"aw\",@progbits",
         ".align 6; .global tohost; tohost: .dword 0;",
         ".align 6; .global fromhost; fromhost: .dword 0;",
     ]

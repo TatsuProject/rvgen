@@ -376,8 +376,10 @@ class AsmProgramGen:
     def _gen_data_section(self) -> None:
         """SV: gen_data_page_begin + gen_data_page + stack_section."""
         self.instr_stream.append("")
-        self.instr_stream.append(".section .data")
+        # tohost/fromhost live in their own .tohost section (isolated page)
+        # so random stores into .data regions cannot corrupt them.
         self.instr_stream.extend(gen_tohost_fromhost())
+        self.instr_stream.append(".section .data")
 
         # Data pages (skip when cfg.no_data_page=True).
         if not self.cfg.no_data_page:

@@ -218,6 +218,16 @@ class Config:
         self._finalize_stack_sizing()
         self._finalize_reserved_regs()
         self._finalize_main_program_cnt()
+        self._finalize_extension_csr_state()
+
+    def _finalize_extension_csr_state(self) -> None:
+        """SV ``floating_point_c`` / vector constraints: MSTATUS.FS (and VS)
+        must be at least ``INITIAL`` (0b01) when the corresponding extension
+        is enabled — otherwise FP / vector ops trap as illegal_instruction."""
+        if self.enable_floating_point and self.mstatus_fs == 0:
+            self.mstatus_fs = 0b01
+        if self.enable_vector_extension and self.mstatus_vs == 0:
+            self.mstatus_vs = 0b01
 
     def _finalize_stack_sizing(self) -> None:
         """SV post_randomize: ``min_stack_len_per_program = 2*(XLEN/8)``."""

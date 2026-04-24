@@ -97,6 +97,48 @@ def test_mie_zero_when_interrupts_off():
 # ---------- Boot sequence emit ----------
 
 
+def test_mstatus_fs_set_initial_when_fp_enabled():
+    """SV ``floating_point_c``: MSTATUS.FS[14:13] = 0b01 (INITIAL) so FP
+    instructions don't trap as illegal_instruction. Regression for the
+    livelock that hit riscv_floating_point_mmu_stress_test on seeds that
+    emitted an FP op before any explicit FS write.
+    """
+    cfg = make_config(get_target("rv32imafdc"), enable_floating_point=True)
+    val = _mstatus_value(cfg)
+    assert (val >> 13) & 0b11 == 0b01
+
+
+def test_mstatus_fs_zero_when_fp_disabled():
+    cfg = make_config(get_target("rv32imc"))
+    val = _mstatus_value(cfg)
+    assert (val >> 13) & 0b11 == 0b00
+
+
+def test_mstatus_vs_set_initial_when_vector_enabled():
+    """Same parity rule for the vector extension: MSTATUS.VS[10:9]=0b01."""
+    cfg = make_config(get_target("rv64gcv"))
+    val = _mstatus_value(cfg)
+    assert (val >> 9) & 0b11 == 0b01
+
+
+def test_tohost_in_dedicated_section():
+    """Regression for the tohost-corruption bug that caused rc=255 failures
+    on riscv_floating_point_mmu_stress_test. tohost must land in its own
+    ``.tohost`` section — if it sits in ``.data`` alongside region_0/1 with
+    only 72 bytes between them, a random store with a small negative offset
+    silently overwrites it and spike aborts.
+    """
+    from rvgen.sections.data_page import gen_tohost_fromhost
+    lines = gen_tohost_fromhost()
+    joined = "\n".join(lines)
+    assert ".section .tohost" in joined, (
+        "tohost/fromhost must emit into the .tohost section so the linker "
+        "script can isolate them on their own page"
+    )
+    assert "tohost: .dword 0" in joined
+    assert "fromhost: .dword 0" in joined
+
+
 def test_boot_emits_mret():
     assert "mret" in _emit_rv32imc()
 
