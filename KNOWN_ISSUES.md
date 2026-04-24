@@ -105,6 +105,36 @@ encoding.
 **SV reference:** rvc_csr_c in riscv_compressed_instr.sv:21.
 **Regression:** Canonical sweep 51/51 (was 48/51 pre-fix).
 
+### F10 — CB_FORMAT rs1 not excluded from reserved set · [0f0bc6d]
+**Symptom:** C_ANDI / C_SRLI / C_SRAI can write to a reserved register
+(tp, sp, LS-stream base) because those ops have no separate rd field —
+the encoding writes back to rs1. Our randomizer checked `rd_forbidden`
+but CB_FORMAT rs1 was free to land on reserved regs.
+**Root cause:** SV has explicit `if (format == CB_FORMAT) rs1 !=
+reserved_rd[i]` (`riscv_instr_stream.sv:~275`). We didn't port it.
+**Fix:** For instr ∈ {C_ANDI, C_SRLI, C_SRAI}, fold `rd_forbidden` into
+`rs1_forbidden`.
+
+### F11 — MultiPage LS interleave split preludes from stores (U3) · [8a97d4a]
+**Symptom:** Random `fsw fa5, 404(t0)` in sub B at PC 0x8000015a fires
+before sub B's `la t0, region_1` at PC 0x80000166. t0 still had its
+random init value (e.g. 0x8000abb4), so the store landed in `.text` at
+0x80000cab. One byte flip corrupted the 4-byte `fcvt.d.s` at 0x80000cae
+into a 2-byte encoding. Later trap via length-aware bump landed
+mid-instruction, executed garbage as `c.lwsp tp, 192(sp)`, poisoned tp,
+handler prologue livelocked. Seed 1021 on fp_mmu_stress reliably
+reproduced.
+**Root cause:** `MultiPageLoadStoreInstrStream.build()` interleaved each
+sub's full instr_list (`la` + `addi` + stores + mix) as a flat pool of
+instructions. The randomized insertion could place sub B's body before
+sub B's prelude.
+**Fix:** Record `_prelude_len` on each sub after its `build()`. Split
+its instr_list into `preludes[i]` + `bodies[i]`. Emit **all** preludes
+first (flat concat), then randomly interleave only the bodies. Every
+sub's base register is initialized before any body op uses it.
+**Validation:** 1600 seeds of fp_mmu_stress across rv32imafdc +
+rv32imckf all green.
+
 ### F9 — Multi-hart double-prefix on mtvec/init labels · [cbe75d7]
 **Symptom:** Linker rejects multi_harts build:
 `undefined reference to 'h1_h1_mtvec_handler'`. 0/N pass.
