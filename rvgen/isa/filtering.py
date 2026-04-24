@@ -462,6 +462,15 @@ def randomize_gpr_operands(
         # Must use SP as rd (handled below by fixed assignment).
         pass
 
+    # CB_FORMAT parity with SV (riscv_instr_stream.sv:randomize_gpr):
+    # C_ANDI / C_SRLI / C_SRAI read AND write rs1 (there's no separate rd
+    # field in the encoding). If any of those instructions lands with rs1 ==
+    # a reserved register, it silently corrupts reserved state — e.g.
+    # C_SRLI on rs1=x8 (s0) clobbers s0 even when s0 is a load/store base.
+    # C_BEQZ / C_BNEZ are read-only and skip this rule.
+    if name in (N.C_ANDI, N.C_SRLI, N.C_SRAI):
+        rs1_forbidden |= rd_forbidden
+
     def _pick(pool: set[RiscvReg], exclude: set[RiscvReg] = frozenset()) -> RiscvReg:
         choices = [r for r in pool if r not in exclude]
         if not choices:
