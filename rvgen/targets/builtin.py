@@ -104,6 +104,26 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         ),
         **_m_only(),
     ),
+    "rv32imckf": TargetCfg(
+        # RV32 I + M + C + K (scalar crypto) + F (single-precision FP only).
+        # No D, no A. Matches the chipforge Challenge-0014 core ISA.
+        name="rv32imckf", xlen=32,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV32C,
+            _G.RV32F, _G.RV32FC,
+            _G.RV32ZBKB, _G.RV32ZBKC, _G.RV32ZBKX,
+            _G.RV32ZKND, _G.RV32ZKNE, _G.RV32ZKNH,
+        ),
+        unsupported_instr=(
+            # SHA-512 split-pair instructions are RV32-only helpers not all
+            # cores implement; mirror rv32imc_zkn's deny list.
+            RiscvInstrName.SHA512SIG0L, RiscvInstrName.SHA512SIG0H,
+            RiscvInstrName.SHA512SIG1L, RiscvInstrName.SHA512SIG1H,
+            RiscvInstrName.SHA512SUM0R, RiscvInstrName.SHA512SUM1R,
+        ),
+        support_unaligned_load_store=False,
+        **_m_only(),
+    ),
     "rv32imc_zkn_zks": TargetCfg(
         name="rv32imc_zkn_zks", xlen=32,
         supported_isa=(

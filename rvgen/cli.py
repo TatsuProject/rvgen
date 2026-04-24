@@ -519,6 +519,12 @@ _TARGET_ISA_MABI: dict[str, tuple[str, str]] = {
     "rv32ui": ("rv32i", "ilp32"),
     # rv32imc_zkn: RV32IMC + ratified Zkn crypto umbrella (chipforge MCU ISA).
     "rv32imc_zkn": ("rv32imc_zbkb_zbkc_zbkx_zknd_zkne_zknh_zicsr_zifencei", "ilp32"),
+    # rv32imckf: chipforge Challenge-0014 — RV32IMC + Zkn crypto + single-FP.
+    # No A, no D. mabi=ilp32f because F is implemented but D is not.
+    "rv32imckf": (
+        "rv32imfc_zbkb_zbkc_zbkx_zknd_zkne_zknh_zicsr_zifencei",
+        "ilp32f",
+    ),
     # Full-crypto rv32 target used for stress regressions.
     "rv32imc_zkn_zks": (
         "rv32imc_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zkn_zks_zicsr_zifencei",

@@ -27,7 +27,8 @@ def test_all_expected_targets_present():
     expected = {
         "rv32i", "rv32ia", "rv32iac", "rv32ic", "rv32if", "rv32im",
         "rv32imac", "rv32imafdc", "rv32imc", "rv32imcb", "rv32imc_sv32",
-        "rv32ui", "rv32imc_zkn", "rv32imc_zkn_zks", "rv64imc_zkn",
+        "rv32ui", "rv32imc_zkn", "rv32imc_zkn_zks", "rv32imckf",
+        "rv64imc_zkn",
         "rv64gc", "rv64gcv", "rv64imafdc", "rv64imc", "rv64imcb",
         "ml", "multi_harts",
         "coralnpu", "rv32imc_zve32x", "rv32imfc_zve32f",
