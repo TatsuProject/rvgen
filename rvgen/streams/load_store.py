@@ -152,6 +152,10 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
     # Populated during build (informational).
     _offsets: list[int] = field(default_factory=list)
     _addrs: list[int] = field(default_factory=list)
+    # Number of prelude instructions (la + optional addi) at the head of
+    # instr_list. Used by MultiPage parent to interleave bodies without
+    # splitting the prelude from its stores.
+    _prelude_len: int = 0
 
     def _pick_rs1_reg(self) -> RiscvReg:
         """Pick a GPR not in the reserved set for use as the base register."""
@@ -350,6 +354,9 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
         addi = self._emit_addi_base()
         if addi is not None:
             self.instr_list.append(addi)
+        # Record where the LS body starts so parent streams (MultiPage*)
+        # can preserve the prelude-before-body invariant during interleave.
+        self._prelude_len = len(self.instr_list)
         self.instr_list.extend(combined)
 
 
@@ -492,7 +499,13 @@ class MultiPageLoadStoreInstrStream(DirectedInstrStream):
         # .text → self-modifying code → livelock).
         all_bases: tuple[RiscvReg, ...] = tuple(rs1_choices)
 
-        sub_streams: list[list[Instr]] = []
+        # Track preludes and bodies separately. Each sub's prelude
+        # (`la rs1, region_N` + optional `addi rs1, rs1, base`) MUST appear
+        # before any LS op that uses that sub's rs1_reg — otherwise the LS
+        # op reads whatever random init value landed in that register,
+        # which is often a .text address → memory corruption.
+        preludes: list[list[Instr]] = []
+        bodies: list[list[Instr]] = []
         for rid, rs1 in zip(region_ids, rs1_choices):
             sub = LoadStoreStressInstrStream(
                 cfg=self.cfg, avail=self.avail, rng=self.rng,
@@ -511,19 +524,28 @@ class MultiPageLoadStoreInstrStream(DirectedInstrStream):
             for i in sub.instr_list:
                 if i.comment in ("Start ", "End "):
                     i.comment = ""
-            sub_streams.append(sub.instr_list)
+            split = sub._prelude_len
+            preludes.append(sub.instr_list[:split])
+            bodies.append(sub.instr_list[split:])
 
-        if not sub_streams:
+        if not bodies:
             self.instr_list = []
             return
 
-        # Interleave: take the first sub_stream as base, mix-insert the rest.
-        base = list(sub_streams[0])
-        for stream in sub_streams[1:]:
-            for ins in stream:
+        # Flatten all preludes up-front (every base register is now
+        # initialized before any body op runs).
+        emitted: list[Instr] = []
+        for p in preludes:
+            emitted.extend(p)
+
+        # Interleave bodies: take the first as base, random-insert the rest.
+        base = list(bodies[0])
+        for body in bodies[1:]:
+            for ins in body:
                 pos = self.rng.randint(0, len(base))
                 base.insert(pos, ins)
-        self.instr_list = base
+        emitted.extend(base)
+        self.instr_list = emitted
 
 
 @dataclass
