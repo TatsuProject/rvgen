@@ -272,7 +272,11 @@ def _emit_exception_dispatch(cfg: Config, ctx: _ModeCtx, hart: int) -> list[str]
         (ExceptionCause.INSTRUCTION_ACCESS_FAULT, "instr_fault_handler"),
         (ExceptionCause.LOAD_ACCESS_FAULT,       "load_fault_handler"),
         (ExceptionCause.STORE_AMO_ACCESS_FAULT,  "store_fault_handler"),
-        (ExceptionCause.INSTRUCTION_PAGE_FAULT,  "pt_fault_handler"),
+        # Instruction-fetch faults (access + page) — we can't safely read the
+        # faulting instruction to determine its length, so route to the
+        # terminate-path. Data-side page faults go to pt_fault_handler which
+        # bumps MEPC by the correct 2/4 bytes and resumes.
+        (ExceptionCause.INSTRUCTION_PAGE_FAULT,  "instr_fault_handler"),
         (ExceptionCause.LOAD_PAGE_FAULT,         "pt_fault_handler"),
         (ExceptionCause.STORE_AMO_PAGE_FAULT,    "pt_fault_handler"),
         (ExceptionCause.ILLEGAL_INSTRUCTION,     "illegal_instr_handler"),
@@ -320,24 +324,47 @@ def _emit_exception_subhandlers(cfg: Config, ctx: _ModeCtx, hart: int) -> list[s
     lines.append(_line(f"la {scratch.abi}, write_tohost"))
     lines.append(_line(f"jalr x0, {scratch.abi}, 0"))
 
-    # All non-ecall sub-handlers share one body: bump xEPC by 4, pop, mret.
-    # We emit multiple labels pointing at the same body (label stacking)
-    # — this keeps the generated .text small. The +4 fixup matches SV's
-    # convention: the generator guarantees PC+4 is a valid instruction
-    # boundary for BREAKPOINT / ILLEGAL / ACCESS / PAGE_FAULT. For random
-    # stress tests this is critical — an oversized handler eats address
-    # range that random stores can accidentally target, corrupting code.
+    # Instruction-fetch faults (access + page): MEPC points at an unmapped
+    # address, so we can't read the faulting instruction's opcode to know
+    # its size. Any attempt to resume re-faults at the same PC → livelock.
+    # Safe path: terminate the test cleanly via write_tohost.
+    lines.append(_labeled(f"{prefix}instr_fault_handler"))
+    lines.append(_line("li gp, 1"))
+    lines.append(_line(f"la {scratch.abi}, write_tohost"))
+    lines.append(_line(f"jalr x0, {scratch.abi}, 0"))
+
+    # Other resumable exceptions share one body: compute the faulting
+    # instruction's length (2 for compressed, 4 for standard) from MEPC's
+    # first halfword, bump xEPC by that amount, pop, mret.
+    #
+    # The old "+4 unconditional" bump was a trap-handler livelock generator.
+    # When the faulting instruction was 2 bytes (e.g. c.fsw on an invalid
+    # address, or a compressed op trapping as illegal), +4 skipped into the
+    # middle of the next 4-byte instruction. Spike re-decoded those middle
+    # two bytes as a compressed op — and if it happened to be executable
+    # (c.lwsp tp, ... was the seed-56 case), it silently wrote garbage into
+    # reserved registers. A later trap with a bogus tp hangs the handler
+    # prologue forever.
+    #
+    # Fix: read the halfword at MEPC, check bits [1:0] == 11 (4-byte) or
+    # not (2-byte), bump MEPC by the correct delta. t1/t2 are caller-saved
+    # and all 31 GPRs were already pushed to the kernel stack.
     for label in (
         "ebreak_handler",
         "illegal_instr_handler",
-        "instr_fault_handler",
         "load_fault_handler",
         "store_fault_handler",
         "pt_fault_handler",
     ):
         lines.append(_labeled(f"{prefix}{label}"))
     lines.append(_line(f"csrr {gpr0.abi}, 0x{ctx.epc.value:x}"))
-    lines.append(_line(f"addi {gpr0.abi}, {gpr0.abi}, 4"))
+    lines.append(_line(f"lhu t1, 0({gpr0.abi})"))
+    lines.append(_line("andi t1, t1, 3"))
+    lines.append(_line("li t2, 3"))
+    lines.append(_line(f"addi {gpr0.abi}, {gpr0.abi}, 2"))
+    lines.append(_line(f"bne t1, t2, 1f"))
+    lines.append(_line(f"addi {gpr0.abi}, {gpr0.abi}, 2"))
+    lines.append(_line("1: nop"))
     lines.append(_line(f"csrw 0x{ctx.epc.value:x}, {gpr0.abi}"))
     lines.extend(_pop(cfg, ctx))
     lines.append(_line(ctx.ret_insn))

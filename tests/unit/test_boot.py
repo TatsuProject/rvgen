@@ -121,6 +121,54 @@ def test_mstatus_vs_set_initial_when_vector_enabled():
     assert (val >> 9) & 0b11 == 0b01
 
 
+def test_trap_handler_bumps_mepc_by_instr_length():
+    """Regression for the compressed-instruction livelock.
+
+    The exception handler used to blindly do ``addi mepc, mepc, 4``. When
+    the faulting instruction was a 2-byte compressed op (e.g. a c.fsw that
+    traps as store_access_fault), +4 landed in the middle of the next
+    4-byte instruction. Spike re-decoded those middle halfwords as a new
+    compressed op — and if that halfword happened to encode c.lwsp tp (a
+    valid write to a reserved register), it silently poisoned tp. A
+    subsequent trap then livelocked in the handler prologue. Seed 2556 on
+    riscv_floating_point_mmu_stress_test reproduced this reliably.
+
+    The handler must read the halfword at MEPC, check bits[1:0] == 11
+    (4-byte) vs anything else (2-byte), and bump MEPC accordingly.
+    """
+    from rvgen.privileged.trap import gen_trap_handler
+    from rvgen.targets import get_target
+    cfg = make_config(get_target("rv32imafdc"), enable_floating_point=True)
+    asm = "\n".join(gen_trap_handler(cfg, hart=0))
+    # Must read the halfword at MEPC to inspect instruction size.
+    assert "lhu t1" in asm or "lhu  t1" in asm, (
+        "Trap handler must load the halfword at MEPC to determine "
+        "instruction length — a blind +4 bump walks into the middle of "
+        "the next 4-byte instruction when the faulting op is compressed."
+    )
+
+
+def test_instr_fetch_faults_terminate():
+    """Instruction access fault and instruction page fault cannot resume:
+    MEPC points at unmapped memory, so we can't read the instruction to
+    determine its length. The only safe path is to terminate (set gp=1
+    and jump to write_tohost), not to retry at the same PC.
+    """
+    from rvgen.privileged.trap import gen_trap_handler
+    from rvgen.targets import get_target
+    cfg = make_config(get_target("rv32imafdc"), enable_floating_point=True)
+    asm = "\n".join(gen_trap_handler(cfg, hart=0))
+    assert "instr_fault_handler:" in asm
+    # Must terminate (jump to write_tohost), not attempt resume via mret.
+    handler_start = asm.find("instr_fault_handler:")
+    ebreak_start = asm.find("ebreak_handler:")
+    body = asm[handler_start:ebreak_start]
+    assert "write_tohost" in body, (
+        "instr_fault_handler must terminate via write_tohost — attempting "
+        "to resume at an unmapped PC causes an infinite trap loop."
+    )
+
+
 def test_tohost_in_dedicated_section():
     """Regression for the tohost-corruption bug that caused rc=255 failures
     on riscv_floating_point_mmu_stress_test. tohost must land in its own
