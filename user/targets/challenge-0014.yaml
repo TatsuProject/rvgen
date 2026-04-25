@@ -1,0 +1,62 @@
+# Challenge_0014 evaluator core — rv32imckf with single-precision FP.
+#
+# DUT layout (verified from challenge artefacts):
+#   IMEM @ 0x80000000, 32 KiB    (DMEM_DEPTH = 32*256 words)
+#   DMEM @ 0x80008000, 32 KiB    (same depth)
+#   ROM  @ 0x00000000,  8 KiB    (boot trampoline; tests don't exercise)
+#
+# Use:
+#   python -m rvgen --target challenge-0014 \
+#       --test riscv_floating_point_arithmetic_test \
+#       --steps gen,gcc_compile,iss_sim --iss spike \
+#       --start_seed 100 -i 100 \
+#       --output /tmp/c14_fp_arith
+
+name: challenge-0014
+xlen: 32
+
+# RV32IMC + single-precision FP (no double, no atomics) + Zkn crypto.
+supported_isa:
+  - RV32I
+  - RV32M
+  - RV32C
+  - RV32F
+  - RV32FC
+  - RV32ZBKB
+  - RV32ZBKC
+  - RV32ZBKX
+  - RV32ZKND
+  - RV32ZKNE
+  - RV32ZKNH
+
+supported_privileged_mode:
+  - MACHINE_MODE
+
+satp_mode: BARE
+support_sfence: false
+support_unaligned_load_store: true
+num_harts: 1
+
+isa_string: rv32imfc_zbkb_zbkc_zbkx_zknd_zkne_zknh_zicsr_zifencei
+mabi: ilp32f
+
+# DMEM budget = 32 KiB. The data section sits at 0x80008000-0x8000FFFF;
+# load/store streams must stay inside that window or Spike-vs-DUT
+# diverges (Spike returns 0 for unmapped reads, DUT returns whatever
+# its memory holds).
+data_section_size_bytes: 32KiB
+
+# SHA-512 split-pair opcodes are RV32-only Zknh artefacts and not
+# implemented in the challenge core — exclude even though Zknh is in
+# supported_isa.
+unsupported_instr:
+  - SHA512SIG0L
+  - SHA512SIG0H
+  - SHA512SIG1L
+  - SHA512SIG1H
+  - SHA512SUM0R
+  - SHA512SUM1R
+
+implemented_csr: MMODE_CSRS
+implemented_interrupt: MMODE_INTERRUPTS
+implemented_exception: MMODE_EXCEPTIONS

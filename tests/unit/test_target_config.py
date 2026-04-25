@@ -137,6 +137,58 @@ def test_load_target_yaml_isa_mabi(tmp_path):
     assert t.mabi == "ilp32"
 
 
+def test_load_target_yaml_data_section_size_parses(tmp_path):
+    """Regression for the dmem-overflow risk on small DUTs (Challenge_0014
+    has 32 KiB DMEM). YAML accepts plain bytes, ``"32KiB"`` /
+    ``"32KB"``, or hex strings; loader normalizes to int bytes."""
+    for raw, expected in (
+        (32768, 32768),
+        ("32KiB", 32 * 1024),
+        ("32 KB", 32 * 1024),
+        ("0x8000", 0x8000),
+        (None, None),
+    ):
+        path = _write_yaml(tmp_path, f"core_{expected}", {
+            "name": f"core_{expected}",
+            "xlen": 32,
+            "supported_isa": ["RV32I"],
+            "supported_privileged_mode": ["MACHINE_MODE"],
+            **({"data_section_size_bytes": raw} if raw is not None else {}),
+        })
+        t = load_target_yaml(path)
+        assert t.data_section_size_bytes == expected
+
+
+def test_config_mem_regions_scaled_when_target_caps_size():
+    """Regression for the MMU-stress-overflows-DMEM risk. When
+    ``target.data_section_size_bytes`` is set, the per-region size must
+    shrink so ``LoadStoreBaseInstrStream`` doesn't generate offsets past
+    the end of physical DMEM."""
+    from rvgen.config import make_config
+    from rvgen.sections.data_page import DEFAULT_MEM_REGIONS
+    from rvgen.targets.builtin import BUILTIN_TARGETS
+
+    # Default: SV-parity, no cap.
+    cfg = make_config(BUILTIN_TARGETS["rv32imc"])
+    assert cfg.mem_regions() == DEFAULT_MEM_REGIONS
+
+    # Cap to 4 KiB total — each region must shrink, but stay ≥ 64 B.
+    capped = TargetCfg(
+        name="capped",
+        xlen=32,
+        supported_isa=(RiscvInstrGroup.RV32I,),
+        supported_privileged_mode=(PrivilegedMode.MACHINE_MODE,),
+        data_section_size_bytes=4 * 1024,
+    )
+    cfg = make_config(capped)
+    regions = cfg.mem_regions()
+    assert len(regions) == len(DEFAULT_MEM_REGIONS)
+    assert sum(r.size_in_bytes for r in regions) <= 4 * 1024
+    assert all(r.size_in_bytes >= 64 for r in regions)
+    # Names preserved so `la rs1, region_N` references still link.
+    assert {r.name for r in regions} == {r.name for r in DEFAULT_MEM_REGIONS}
+
+
 def test_load_target_yaml_satp_mode_parses(tmp_path):
     path = _write_yaml(tmp_path, "sv39_core", {
         "name": "sv39_core",

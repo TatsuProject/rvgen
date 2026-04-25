@@ -172,7 +172,11 @@ class LoadStoreBaseInstrStream(DirectedInstrStream):
         the linker will fail with "undefined reference to 'region_0'".
         """
         from rvgen.isa.utils import hart_prefix
-        regions = DEFAULT_MEM_REGIONS
+        regions = (
+            self.cfg.mem_regions()
+            if self.cfg is not None and hasattr(self.cfg, "mem_regions")
+            else DEFAULT_MEM_REGIONS
+        )
         idx = self.rng.randrange(len(regions))
         self.data_page_id = idx
         base_name = regions[idx].name
@@ -478,19 +482,24 @@ class MultiPageLoadStoreInstrStream(DirectedInstrStream):
     _NUM_RANGE: ClassVar[tuple[int, int]] = (2, 8)
 
     def build(self) -> None:
+        regions = (
+            self.cfg.mem_regions()
+            if self.cfg is not None and hasattr(self.cfg, "mem_regions")
+            else DEFAULT_MEM_REGIONS
+        )
         if self.num_of_instr_stream == 0:
             lo, hi = self._NUM_RANGE
             self.num_of_instr_stream = self.rng.randint(
-                lo, min(hi, len(DEFAULT_MEM_REGIONS))
+                lo, min(hi, len(regions))
             )
         # Bound by number of regions available.
-        self.num_of_instr_stream = min(self.num_of_instr_stream, len(DEFAULT_MEM_REGIONS))
+        self.num_of_instr_stream = min(self.num_of_instr_stream, len(regions))
         if self.num_of_instr_stream < 2:
             self.num_of_instr_stream = 1
 
         # Pick distinct regions.
         region_ids = self.rng.sample(
-            range(len(DEFAULT_MEM_REGIONS)),
+            range(len(regions)),
             self.num_of_instr_stream,
         )
 
@@ -592,9 +601,14 @@ class LoadStoreSharedMemStream(LoadStoreStressInstrStream):
 
     def _pick_region(self) -> tuple[int, str, int]:
         # Always use the first region (shared name).
+        regions = (
+            self.cfg.mem_regions()
+            if self.cfg is not None and hasattr(self.cfg, "mem_regions")
+            else DEFAULT_MEM_REGIONS
+        )
         self.data_page_id = 0
-        self.region_name = DEFAULT_MEM_REGIONS[0].name
-        return 0, DEFAULT_MEM_REGIONS[0].name, DEFAULT_MEM_REGIONS[0].size_in_bytes
+        self.region_name = regions[0].name
+        return 0, regions[0].name, regions[0].size_in_bytes
 
 
 # ---------------------------------------------------------------------------

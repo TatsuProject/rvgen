@@ -305,6 +305,26 @@ class Config:
         """Snapshot the config for debugging / YAML dump."""
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
+    def mem_regions(self) -> tuple:
+        """Effective data-memory regions, scaled by ``target.data_section_size_bytes``.
+
+        Returns the SV-default (two 3000-byte regions) when the target
+        leaves the cap unset. When set, splits the cap evenly across the
+        default region count, leaving 256 B headroom for the AMO region
+        (128 B) plus alignment slack — so an MMU stress run on a DUT
+        with N KiB of DMEM never generates an address past the end of
+        physical memory.
+        """
+        from rvgen.sections.data_page import DEFAULT_MEM_REGIONS, MemRegion
+        cap = getattr(self.target, "data_section_size_bytes", None)
+        if cap is None:
+            return DEFAULT_MEM_REGIONS
+        usable = max(0, cap - 256)
+        per_region = max(64, usable // len(DEFAULT_MEM_REGIONS))
+        return tuple(
+            MemRegion(r.name, per_region, r.xwr) for r in DEFAULT_MEM_REGIONS
+        )
+
 
 # ---------------------------------------------------------------------------
 # Construction helper

@@ -63,3 +63,9 @@ unsupported_instr:
 implemented_csr: MMODE_CSRS
 implemented_interrupt: MMODE_INTERRUPTS
 implemented_exception: MMODE_EXCEPTIONS
+
+# Physical DMEM budget — MCU has 32 KiB of data RAM. Caps load/store
+# stream offsets so MMU stress tests don't generate addresses past
+# the end of memory. Without this, the SV-default 2 × 3000 B regions
+# fit easily but a future bump to larger regions could overflow.
+data_section_size_bytes: 32KiB

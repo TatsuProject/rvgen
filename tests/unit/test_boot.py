@@ -187,6 +187,47 @@ def test_tohost_in_dedicated_section():
     assert "fromhost: .dword 0" in joined
 
 
+def test_fp_init_emits_per_register():
+    """Regression for the FP-init gap that caused Spike-vs-DUT mismatches.
+
+    Spike resets FPRs to canonical qNaN (0x7FC00000); typical DUTs reset
+    them to 0. Reading any uninitialized f0..f31 before the test writes
+    it produces a divergent trace within ~100 instructions. Generator must
+    emit `fmv.w.x f0..f31` at init, then `fsrmi <rm>` to seed the rounding
+    mode. Port of SV ``init_floating_point_gpr``.
+    """
+    from rvgen.asm_program_gen import AsmProgramGen
+    from rvgen.isa.filtering import create_instr_list
+    import random as _random
+
+    cfg = make_config(get_target("rv32imckf"), enable_floating_point=True)
+    avail = create_instr_list(cfg)
+    gen = AsmProgramGen(cfg=cfg, avail=avail, rng=_random.Random(0))
+    asm = "\n".join(gen.gen_program())
+    init_idx = asm.index("init:")
+    main_idx = asm.index("main:")
+    init_body = asm[init_idx:main_idx]
+    for i in range(32):
+        assert f"fmv.w.x f{i}," in init_body, f"missing fmv.w.x f{i}"
+    assert "fsrmi 0" in init_body  # default RNE
+
+
+def test_fp_init_skipped_when_fp_disabled():
+    from rvgen.asm_program_gen import AsmProgramGen
+    from rvgen.isa.filtering import create_instr_list
+    import random as _random
+
+    cfg = make_config(get_target("rv32imc"))
+    avail = create_instr_list(cfg)
+    gen = AsmProgramGen(cfg=cfg, avail=avail, rng=_random.Random(0))
+    asm = "\n".join(gen.gen_program())
+    init_idx = asm.index("init:")
+    main_idx = asm.index("main:")
+    init_body = asm[init_idx:main_idx]
+    assert "fmv.w.x" not in init_body
+    assert "fsrmi" not in init_body
+
+
 def test_boot_emits_mret():
     assert "mret" in _emit_rv32imc()
 

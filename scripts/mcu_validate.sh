@@ -122,7 +122,7 @@ def write_hex(data, out):
             f.write(f"{int.from_bytes(chunk, 'little'):08X}\n")
 
 write_hex(parse("$WORK_DIR/test.hex", 0x80000000, 32 * 1024), "$WORK_DIR/imem.mem")
-write_hex(parse("$WORK_DIR/test.hex", 0x80008000, 16 * 1024), "$WORK_DIR/dmem.mem")
+write_hex(parse("$WORK_DIR/test.hex", 0x80008000, 32 * 1024), "$WORK_DIR/dmem.mem")
 PYEOF
 
 cp "$WORK_DIR/imem.mem" "$WORK_DIR/dmem.mem" "$MCU_VERIF/"

@@ -94,3 +94,13 @@ class TargetCfg:
     # directly so no code change is needed to build their tests.
     isa_string: str = ""
     mabi: str = ""
+
+    # --- DUT memory layout (used by load/store stream offset clamping) ---
+    # ``data_section_size_bytes`` is the total available space the linker
+    # places ``.data`` / ``region_*`` / stacks into. When set, the per-
+    # region default of 3000 B is scaled down so MMU stress streams don't
+    # generate addresses past the end of the DUT's DMEM (which on small
+    # cores like Challenge_0014 / chipforge-mcu is 32 KiB total — minus
+    # the user/kernel stacks, AMO region and any tohost padding).
+    # Default ``None`` keeps SV-parity (two 3000-byte regions = 6 KiB).
+    data_section_size_bytes: int | None = None

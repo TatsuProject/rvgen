@@ -37,6 +37,12 @@ and ``supported_privileged_mode``):
     # group is in supported_isa.
     unsupported_instr: [MUL, MULH]
 
+    # DUT data-memory budget. When set, load/store streams cap their
+    # offsets so MMU stress tests stay within physical DMEM. Accepts
+    # raw bytes (``32768``), ``"32KB"``/``"32KiB"``, or hex
+    # (``0x8000``). Default unset = SV-parity 6 KiB total.
+    data_section_size_bytes: 32KiB
+
     # Which architectural CSRs / interrupts / exceptions the core
     # implements. Supports ``preset: <NAME>`` for the canonical sets
     # defined in :mod:`rvgen.targets.presets`.
@@ -198,8 +204,37 @@ def load_target_yaml(path: Path | str) -> TargetCfg:
         "mtime_offset": int(clint.get("mtime_offset", 0xBFF8)),
         "isa_string": str(data.get("isa_string", "") or ""),
         "mabi": str(data.get("mabi", "") or ""),
+        "data_section_size_bytes": _parse_size(
+            data.get("data_section_size_bytes")
+        ),
     }
     return TargetCfg(**kwargs)
+
+
+def _parse_size(value: Any) -> int | None:
+    """Accept ``None``, an int (bytes), or a human-friendly string like
+    ``"32KB"`` / ``"32 KiB"`` / ``"0x8000"``. Returns bytes."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        s = value.strip().lower().replace(" ", "").replace("_", "")
+        if s.startswith("0x"):
+            return int(s, 16)
+        mult = 1
+        for suffix, factor in (("kib", 1024), ("kb", 1024), ("k", 1024),
+                               ("mib", 1024 * 1024), ("mb", 1024 * 1024),
+                               ("m", 1024 * 1024)):
+            if s.endswith(suffix):
+                mult = factor
+                s = s[: -len(suffix)]
+                break
+        return int(float(s) * mult)
+    raise TypeError(
+        f"data_section_size_bytes must be int, str, or null; got "
+        f"{type(value).__name__}: {value!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

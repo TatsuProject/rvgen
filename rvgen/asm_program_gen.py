@@ -97,6 +97,54 @@ def _pick_gpr_init(rng: random.Random) -> int:
     return fn(rng)
 
 
+# Random SPF / DPF value buckets — port of SV ``get_rand_spf_value`` and
+# ``get_rand_dpf_value`` (riscv_asm_program_gen.sv:648, :675). Uniform pick
+# across {±inf, ±largest, ±0, sNaN/qNaN, normal, subnormal} so FP init
+# stresses every classification of float operand.
+def _rand_spf_value(rng: random.Random) -> int:
+    bucket = rng.randrange(6)
+    match bucket:
+        case 0:  # ±infinity
+            return rng.choice((0x7F800000, 0xFF800000))
+        case 1:  # ±largest finite
+            return rng.choice((0x7F7FFFFF, 0xFF7FFFFF))
+        case 2:  # ±zero
+            return rng.choice((0x00000000, 0x80000000))
+        case 3:  # sNaN / qNaN
+            return rng.choice((0x7F800001, 0x7FC00000))
+        case 4:  # normal (exponent != 0)
+            sign = rng.randrange(2) << 31
+            exp = rng.randint(1, 0xFE) << 23
+            frac = rng.randrange(1 << 23)
+            return sign | exp | frac
+        case _:  # subnormal (exponent == 0, frac != 0)
+            sign = rng.randrange(2) << 31
+            frac = rng.randint(1, (1 << 23) - 1)
+            return sign | frac
+
+
+def _rand_dpf_value(rng: random.Random) -> int:
+    bucket = rng.randrange(6)
+    match bucket:
+        case 0:
+            return rng.choice((0x7FF0000000000000, 0xFFF0000000000000))
+        case 1:
+            return rng.choice((0x7FEFFFFFFFFFFFFF, 0xFFEFFFFFFFFFFFFF))
+        case 2:
+            return rng.choice((0x0000000000000000, 0x8000000000000000))
+        case 3:
+            return rng.choice((0x7FF0000000000001, 0x7FF8000000000000))
+        case 4:
+            sign = rng.randrange(2) << 63
+            exp = rng.randint(1, 0x7FE) << 52
+            frac = rng.randrange(1 << 52)
+            return sign | exp | frac
+        case _:
+            sign = rng.randrange(2) << 63
+            frac = rng.randint(1, (1 << 52) - 1)
+            return sign | frac
+
+
 @dataclass
 class AsmProgramGen:
     """Top-level assembler-file composer."""
@@ -262,8 +310,16 @@ class AsmProgramGen:
         self.instr_stream.extend(self.main_sequence.instr_string_list)
 
     def _gen_init_section(self, hart: int) -> None:
-        """GPR init + stack pointer + signature INITIALIZED handshake."""
+        """FP init + GPR init + stack pointer + signature INITIALIZED handshake."""
         prefix = hart_prefix(hart, self.cfg.num_of_harts)
+        # Floating-point register init runs FIRST so the random GPR scratch
+        # used by `fmv.w.x` / `fmv.d.x` doesn't clobber a freshly-loaded GPR.
+        # Without this, an uninitialized f0..f31 read produces Spike-vs-DUT
+        # mismatches: Spike resets FPRs to canonical qNaN (0x7FC00000), most
+        # DUTs reset to 0. SV: gen_init_section → init_floating_point_gpr.
+        if self.cfg.enable_floating_point:
+            self._gen_fp_init()
+
         # Initialize x1..x31 with biased random values (skip SP and TP — they
         # will be set below / via the trap handler).
         skip = {self.cfg.sp.value, self.cfg.tp.value, 0}
@@ -311,6 +367,40 @@ class AsmProgramGen:
         if self.cfg.enable_interrupt and self.cfg.enable_timer_irq:
             from rvgen.privileged.interrupts import gen_arm_timer_irq
             self.instr_stream.extend(gen_arm_timer_irq(self.cfg, hart=hart))
+
+    def _gen_fp_init(self) -> None:
+        """Emit per-FP-register initialization.
+
+        SV port (riscv_asm_program_gen.sv:601 init_floating_point_gpr):
+        for each f0..f31 emit `li xGPR0, <rand_spf>; fmv.w.x fN, xGPR0`,
+        then `fsrmi <fcsr_rm>` to set rounding mode. When the target also
+        has the D extension, randomly use a double-precision sequence
+        (li/slli/li/or/fmv.d.x) for that register instead.
+        """
+        from rvgen.isa.enums import RiscvInstrGroup as _G
+
+        gpr0 = self.cfg.gpr[0].abi
+        gpr1 = self.cfg.gpr[1].abi
+        supported = set(self.cfg.target.supported_isa)
+        has_d = bool({_G.RV32D, _G.RV64D, _G.RV32DC} & supported)
+        num_fp = self.cfg.target.num_float_gpr
+
+        for i in range(num_fp):
+            if has_d and self.rng.random() < 0.5:
+                imm = _rand_dpf_value(self.rng)
+                hi = (imm >> 32) & 0xFFFFFFFF
+                lo = imm & 0xFFFFFFFF
+                self.instr_stream.append(_line(f"li {gpr0}, 0x{hi:x}"))
+                self.instr_stream.append(_line(f"slli {gpr0}, {gpr0}, 16"))
+                self.instr_stream.append(_line(f"slli {gpr0}, {gpr0}, 16"))
+                self.instr_stream.append(_line(f"li {gpr1}, 0x{lo:x}"))
+                self.instr_stream.append(_line(f"or {gpr1}, {gpr1}, {gpr0}"))
+                self.instr_stream.append(_line(f"fmv.d.x f{i}, {gpr1}"))
+            else:
+                imm = _rand_spf_value(self.rng)
+                self.instr_stream.append(_line(f"li {gpr0}, 0x{imm:x}"))
+                self.instr_stream.append(_line(f"fmv.w.x f{i}, {gpr0}"))
+        self.instr_stream.append(_line(f"fsrmi {int(self.cfg.fcsr_rm)}"))
 
     def _gen_vector_init(self, hart: int) -> None:
         """Emit the vector engine init section.
@@ -411,11 +501,15 @@ class AsmProgramGen:
         self.instr_stream.extend(gen_tohost_fromhost())
         self.instr_stream.append(".section .data")
 
-        # Data pages (skip when cfg.no_data_page=True).
+        # Data pages (skip when cfg.no_data_page=True). Use the
+        # cfg-effective region sizing so the data section honors
+        # ``target.data_section_size_bytes`` (when set) and stays
+        # within the DUT's physical DMEM.
         if not self.cfg.no_data_page:
+            regions = self.cfg.mem_regions()
             for hart in range(self.cfg.num_of_harts):
                 lines = gen_data_page(
-                    DEFAULT_MEM_REGIONS,
+                    regions,
                     self.cfg.data_page_pattern,
                     hart=hart,
                     num_harts=self.cfg.num_of_harts,
