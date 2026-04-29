@@ -114,6 +114,11 @@ CG_VEC_NF = "vec_nfields_cg"               # Zvlsseg NFIELDS bins (1..8)
 CG_VEC_SEG_X_MODE = "vec_seg_addr_mode_cross_cg"  # cross: NF × addr mode
 CG_VEC_WIDE_NARROW = "vec_widening_narrowing_cg"  # widening / narrowing / quad-widening / convert
 CG_VEC_CRYPTO = "vec_crypto_subext_cg"     # zvbb / zvbc / zvkn family
+# vtype transitions across vsetvli emissions — sampled at sequence level
+# when a vsetvli appears mid-stream (riscv_vsetvli_stress_instr_stream).
+CG_VEC_SEW_TRANS = "vec_sew_transition_cg"     # prev_SEW -> new_SEW
+CG_VEC_LMUL_TRANS = "vec_lmul_transition_cg"   # prev_LMUL -> new_LMUL
+CG_VEC_VTYPE_TRANS = "vec_vtype_transition_cg"  # full vtype tuple transition
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -136,6 +141,7 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_VEC_VM, CG_VEC_VM_X_CAT, CG_VEC_AMO_WD,
     CG_VEC_VARIANT, CG_VEC_NF, CG_VEC_SEG_X_MODE,
     CG_VEC_WIDE_NARROW, CG_VEC_CRYPTO,
+    CG_VEC_SEW_TRANS, CG_VEC_LMUL_TRANS, CG_VEC_VTYPE_TRANS,
 )
 
 
@@ -254,6 +260,24 @@ _ZV_FAMILY_BY_PREFIX: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
+def _addr_mode_by_fmt() -> dict:
+    """Return the format → "UNIT_STRIDED"/"STRIDED"/"INDEXED" map.
+
+    Built lazily so the import order doesn't bite us if RiscvInstrFormat
+    happens to be reloaded by tests.
+    """
+    from rvgen.isa.enums import RiscvInstrFormat as _F
+    return {
+        _F.VL_FORMAT: "UNIT_STRIDED",
+        _F.VS_FORMAT: "UNIT_STRIDED",
+        _F.VLS_FORMAT: "STRIDED",
+        _F.VSS_FORMAT: "STRIDED",
+        _F.VLX_FORMAT: "INDEXED",
+        _F.VSX_FORMAT: "INDEXED",
+        _F.VAMO_FORMAT: "INDEXED",
+    }
+
+
 def _vector_family(name: RiscvInstrName) -> str | None:
     n = name.name
     for prefixes, fam in _ZV_FAMILY_BY_PREFIX:
@@ -282,19 +306,9 @@ def _sample_vector(db: CoverageDB, instr: Instr, vector_cfg) -> None:
             _bump(db, CG_VEC_VM_X_CAT, f"{bin_name}__{cat.name}")
 
     # Address mode for vector loads/stores. Inferred from the format.
-    if fmt is not None:
-        from rvgen.isa.enums import RiscvInstrFormat as _F, RiscvInstrCategory as _C
-        addr_mode_by_fmt = {
-            _F.VL_FORMAT: "UNIT_STRIDED",
-            _F.VS_FORMAT: "UNIT_STRIDED",
-            _F.VLS_FORMAT: "STRIDED",
-            _F.VSS_FORMAT: "STRIDED",
-            _F.VLX_FORMAT: "INDEXED",
-            _F.VSX_FORMAT: "INDEXED",
-            _F.VAMO_FORMAT: "INDEXED",
-        }
-        if fmt in addr_mode_by_fmt:
-            _bump(db, CG_VEC_LS_MODE, addr_mode_by_fmt[fmt])
+    addr_mode_by_fmt = _addr_mode_by_fmt() if fmt is not None else {}
+    if fmt is not None and fmt in addr_mode_by_fmt:
+        _bump(db, CG_VEC_LS_MODE, addr_mode_by_fmt[fmt])
 
     # EEW / EMUL — set by the load/store randomizer.
     eew = getattr(instr, "eew", 0)
@@ -330,17 +344,9 @@ def _sample_vector(db: CoverageDB, instr: Instr, vector_cfg) -> None:
     if sub_extension == "zvlsseg" and nfields is not None:
         nf = nfields + 1
         _bump(db, CG_VEC_NF, f"NF{nf}")
-        if fmt is not None:
-            mode = addr_mode_by_fmt.get(fmt) if "addr_mode_by_fmt" in dir() else None
-            # Re-resolve since the dict above is local-scoped:
-            from rvgen.isa.enums import RiscvInstrFormat as _F2
-            seg_mode = {
-                _F2.VL_FORMAT: "UNIT_STRIDED", _F2.VS_FORMAT: "UNIT_STRIDED",
-                _F2.VLS_FORMAT: "STRIDED", _F2.VSS_FORMAT: "STRIDED",
-                _F2.VLX_FORMAT: "INDEXED", _F2.VSX_FORMAT: "INDEXED",
-            }.get(fmt)
-            if seg_mode is not None:
-                _bump(db, CG_VEC_SEG_X_MODE, f"NF{nf}__{seg_mode}")
+        seg_mode = addr_mode_by_fmt.get(fmt) if fmt is not None else None
+        if seg_mode is not None:
+            _bump(db, CG_VEC_SEG_X_MODE, f"NF{nf}__{seg_mode}")
 
     # Widening / narrowing / quad-widening / convert — set by VectorInstr.
     if getattr(instr, "is_quad_widening_instr", False):
@@ -568,9 +574,40 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
     last_reader_at: dict[RiscvReg, int] = {}
     prev_category: str | None = None
     prev_opcode: str | None = None
+    # vtype transition state. The boot-time vsetvli sets the initial vtype;
+    # each subsequent vsetvli observed in the stream becomes a "new vtype"
+    # and we sample the (prev → new) transitions.
+    prev_vtype: tuple[int, int, bool] | None = None
+    if vector_cfg is not None:
+        prev_vtype = (
+            vector_cfg.vtype.vsew,
+            vector_cfg.vtype.vlmul,
+            vector_cfg.vtype.fractional_lmul,
+        )
 
     for idx, instr in enumerate(seq):
         sample_instr(db, instr, vector_cfg=vector_cfg)
+
+        # vsetvli emitted by the vsetvli-stress stream carries the new
+        # SEW/LMUL/fractional/TA/MA as Python attrs (not real instr_name
+        # because it's a pseudo). Match by class name to keep this hook
+        # local to the streams module.
+        if type(instr).__name__ == "_VsetvliPseudo" and vector_cfg is not None:
+            new_sew = getattr(instr, "_sew", None)
+            new_lmul = getattr(instr, "_lmul", None)
+            new_frac = getattr(instr, "_fractional", False)
+            if new_sew and new_lmul:
+                lmul_tag_new = f"MF{new_lmul}" if new_frac and new_lmul > 1 else f"M{new_lmul}"
+                if prev_vtype is not None:
+                    p_sew, p_lmul, p_frac = prev_vtype
+                    p_lmul_tag = f"MF{p_lmul}" if p_frac and p_lmul > 1 else f"M{p_lmul}"
+                    _bump(db, CG_VEC_SEW_TRANS,
+                          f"SEW{p_sew}__SEW{new_sew}")
+                    _bump(db, CG_VEC_LMUL_TRANS,
+                          f"{p_lmul_tag}__{lmul_tag_new}")
+                    _bump(db, CG_VEC_VTYPE_TRANS,
+                          f"SEW{p_sew}_{p_lmul_tag}__SEW{new_sew}_{lmul_tag_new}")
+                prev_vtype = (new_sew, new_lmul, bool(new_frac))
 
         # Category + opcode transitions — valuable for finding sequencing
         # bugs (e.g. LOAD immediately after BRANCH is a stall on some pipes).
