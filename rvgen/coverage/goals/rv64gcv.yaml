@@ -51,3 +51,33 @@ vreg_cg:
   V16: 5
   V24: 5
   V31: 5
+
+# --- vector-focused covergroups (added with the vector LS / AMO streams) ---
+vec_ls_addr_mode_cg:
+  UNIT_STRIDED: 5
+  STRIDED: 5
+  INDEXED: 5
+
+vec_eew_cg:
+  EEW8: 1
+  EEW16: 1
+  EEW32: 5
+
+vec_eew_vs_sew_cg:
+  EEW32_vs_SEW32_eq: 5
+  EEW8_vs_SEW32_narrower: 1
+  EEW16_vs_SEW32_narrower: 1
+
+vec_vm_cg:
+  masked: 50
+  unmasked: 50
+
+vec_va_variant_cg:
+  VV: 50
+  VX: 30
+  VI: 20
+
+vec_widening_narrowing_cg:
+  widening: 5
+  narrowing: 5
+  convert: 5

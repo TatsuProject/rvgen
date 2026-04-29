@@ -182,8 +182,18 @@ def cmd_export(args: argparse.Namespace) -> int:
         _export_csv(db, Path(args.csv))
         print(f"wrote CSV -> {args.csv}")
     if args.html:
+        timeline = None
+        timeline_path = getattr(args, "timeline", None)
+        if timeline_path:
+            try:
+                with open(timeline_path) as f:
+                    timeline = json.load(f)
+            except Exception as exc:  # noqa: BLE001
+                print(f"warning: failed to load --timeline {timeline_path!r}: {exc}",
+                      file=sys.stderr)
         _export_html(db, Path(args.html),
-                      goals=load_goals(args.goals) if args.goals else None)
+                      goals=load_goals(args.goals) if args.goals else None,
+                      timeline=timeline)
         print(f"wrote HTML -> {args.html}")
     if not args.csv and not args.html:
         print("no output format selected (pass --csv <path> and/or --html <path>)",
@@ -339,6 +349,161 @@ def cmd_lint_goals(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_auto_goals(args: argparse.Namespace) -> int:
+    """Print a goals YAML template scoped to ``args.target``'s ISA.
+
+    Reads ``rvgen.targets.get_target(name)``, walks the supported_isa /
+    supported_privileged_mode / vector knobs, and emits goal stubs ONLY for
+    the covergroups that the target can actually populate. Skips covergroups
+    that depend on knobs the target hasn't enabled (e.g., no vec_amo_wd_cg
+    bins for a target without vector_amo_supported).
+
+    Goal targets are heuristic defaults the user can tune. The point is
+    that the new user doesn't have to know which covergroup names exist —
+    they pick a target name and get a starter file.
+    """
+    from rvgen.targets import get_target
+    from rvgen.isa.enums import RiscvInstrGroup as G, PrivilegedMode
+
+    target = get_target(args.target)
+    iso = set(target.supported_isa)
+    has_int_M = G.RV32M in iso or G.RV64M in iso
+    has_C = bool({G.RV32C, G.RV64C, G.RV32FC, G.RV32DC} & iso)
+    has_F = bool({G.RV32F, G.RV64F} & iso)
+    has_D = bool({G.RV32D, G.RV64D} & iso)
+    has_A = bool({G.RV32A, G.RV64A} & iso)
+    has_B = bool(
+        {G.RV32B, G.RV32ZBA, G.RV32ZBB, G.RV32ZBC, G.RV32ZBS,
+         G.RV64B, G.RV64ZBA, G.RV64ZBB, G.RV64ZBC, G.RV64ZBS} & iso
+    )
+    has_K = bool(
+        {G.RV32ZBKB, G.RV32ZBKX, G.RV32ZKNE, G.RV32ZKND, G.RV32ZKNH,
+         G.RV64ZKNE, G.RV64ZKND, G.RV64ZKNH,
+         G.RV32ZKSH, G.RV32ZKSED, G.RV64ZKSH, G.RV64ZKSED} & iso
+    )
+    has_V = G.RVV in iso or bool(
+        {G.ZVE32X, G.ZVE32F, G.ZVE64X, G.ZVE64F, G.ZVE64D} & iso
+    )
+    has_S = PrivilegedMode.SUPERVISOR_MODE in target.supported_privileged_mode
+    has_U = PrivilegedMode.USER_MODE in target.supported_privileged_mode
+
+    out: list[str] = []
+    out.append(f"# Auto-generated goals for target '{target.name}'.")
+    out.append("# Tune the target counts; this is a STARTER, not a final spec.")
+    out.append("# Produced by `python -m rvgen.coverage.tools auto-goals --target <name>`.")
+    out.append("")
+
+    # group_cg — one bin per ISA family advertised.
+    group_lines = ["group_cg:"]
+    for grp in sorted(iso, key=lambda g: g.value):
+        group_lines.append(f"  {grp.name}: 50")
+    group_lines.append("")
+    out.extend(group_lines)
+
+    # Always-on covergroups.
+    out.append("category_cg:")
+    out.append("  ARITHMETIC: 100")
+    out.append("  LOGICAL: 50")
+    out.append("  COMPARE: 30")
+    out.append("  SHIFT: 30")
+    out.append("  BRANCH: 30")
+    out.append("  JUMP: 10")
+    out.append("  LOAD: 30")
+    out.append("  STORE: 30")
+    if has_int_M:
+        out.append("  # M extension present:")
+    if has_F or has_D:
+        out.append("  # FP loads/stores covered via load_store_width_cg")
+    out.append("")
+
+    out.append("rs1_cg: { ZERO: 5, RA: 5, SP: 5, A0: 5, A1: 5, T0: 5, S0: 5 }")
+    out.append("rd_cg:  { RA: 5, SP: 5, A0: 5, T0: 5, S0: 5 }")
+    out.append("imm_sign_cg: { pos: 30, neg: 30, zero: 5 }")
+    out.append("imm_range_cg: { walking_one: 5, walking_zero: 5, all_ones: 5, zero: 5 }")
+    out.append("hazard_cg: { RAW: 30, WAW: 30, WAR: 10, NONE: 30 }")
+    out.append("rs1_eq_rs2_cg: { equal: 5, distinct: 50 }")
+    out.append("rs1_eq_rd_cg: { equal: 5, distinct: 50 }")
+    out.append("")
+
+    # Memory alignment / load-store width — only meaningful with loads/stores.
+    out.append("load_store_width_cg:")
+    out.append("  byte: 10")
+    out.append("  half: 10")
+    out.append("  word: 10")
+    if target.xlen >= 64:
+        out.append("  dword: 10")
+    out.append("")
+    out.append("mem_align_cg:")
+    out.append("  byte_aligned: 10")
+    if target.support_unaligned_load_store:
+        out.append("  unaligned: 5")
+    out.append("")
+
+    if has_F or has_D:
+        out.append("fp_rm_cg:")
+        out.append("  RNE: 5")
+        out.append("  RTZ: 5")
+        out.append("  RDN: 5")
+        out.append("  RUP: 5")
+        out.append("  RMM: 5")
+        out.append("")
+
+    if has_A:
+        out.append("# Atomic / LR/SC-related goals are tracked under opcode_cg.")
+        out.append("")
+
+    if has_S or has_U:
+        out.append("privilege_mode_cg:")
+        out.append("  MACHINE_MODE: 30")
+        if has_S:
+            out.append("  SUPERVISOR_MODE: 5")
+        if has_U:
+            out.append("  USER_MODE: 5")
+        out.append("")
+
+    # Vector covergroups gated by V profile.
+    if has_V:
+        out.append("vec_ls_addr_mode_cg:")
+        out.append("  UNIT_STRIDED: 5")
+        out.append("  STRIDED: 5")
+        out.append("  INDEXED: 5")
+        out.append("")
+        out.append("vec_eew_cg: { EEW8: 1, EEW16: 1, EEW32: 5 }")
+        if target.elen >= 64:
+            out.append("# elen >= 64 — also EEW64:")
+            out.append("# vec_eew_cg: { EEW64: 1 }")
+        out.append("vec_vm_cg: { masked: 30, unmasked: 30 }")
+        out.append("vec_va_variant_cg:")
+        out.append("  VV: 30")
+        out.append("  VX: 20")
+        out.append("  VI: 10")
+        if has_F:
+            out.append("  VF: 5  # vec_fp gate must be on")
+        out.append("vec_widening_narrowing_cg:")
+        out.append("  widening: 5")
+        out.append("  narrowing: 5")
+        out.append("  convert: 3")
+        out.append("")
+
+        if getattr(target, "enable_zvbb", False) or getattr(target, "enable_zvbc", False) \
+                or getattr(target, "enable_zvkn", False):
+            out.append("vec_crypto_subext_cg:")
+            if getattr(target, "enable_zvbb", False):
+                out.append("  zvbb: 50")
+            if getattr(target, "enable_zvbc", False):
+                out.append("  zvbc: 20")
+            if getattr(target, "enable_zvkn", False):
+                out.append("  zvkn: 50")
+            out.append("")
+
+        if getattr(target, "vector_amo_supported", False):
+            out.append("vec_amo_wd_cg: { wd_set: 5, wd_clear: 5 }")
+            out.append("")
+
+    print("\n".join(out))
+    return 0
+
+
 def cmd_suggest_seeds(args: argparse.Namespace) -> int:
     """Given an historical convergence.json + current goals, suggest the
     seeds most likely to close the *currently-missing* bins.
@@ -476,25 +641,91 @@ def _export_csv(db: CoverageDB, path: Path) -> None:
 
 
 _HTML_STYLE = """\
-body { font-family: -apple-system, system-ui, sans-serif; margin: 2em; max-width: 1100px; }
+body { font-family: -apple-system, system-ui, sans-serif; margin: 2em; max-width: 1300px; color: #222; }
 h1 { border-bottom: 2px solid #333; padding-bottom: 0.25em; }
-h2 { background: #eef; padding: 0.25em 0.5em; border-left: 4px solid #55a; }
-table { border-collapse: collapse; margin-bottom: 1.5em; }
-th, td { padding: 4px 10px; border: 1px solid #ccc; text-align: left; }
-th { background: #f5f5f5; }
+.summary { margin: 1em 0; padding: 1em; background: #f8f8f8; border-radius: 4px; }
+.summary b { color: #114; }
+.bar { background: linear-gradient(to right, #4a6 var(--pct), #eee var(--pct)); height: 0.9em; border-radius: 2px; margin-top: 0.4em; }
+.bar.cg { height: 0.5em; flex: 1; min-width: 60px; max-width: 200px; }
+details { margin-bottom: 0.5em; border: 1px solid #ddd; border-radius: 4px; }
+details > summary {
+    cursor: pointer; padding: 0.6em 1em; background: #f0f3fa;
+    list-style: none; display: flex; align-items: center; gap: 1em;
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: '▶'; font-size: 0.7em; color: #66c; transition: transform 0.15s; }
+details[open] > summary::before { transform: rotate(90deg); }
+.cg-name { font-weight: 600; min-width: 250px; }
+.cg-meta { font-size: 0.85em; color: #666; min-width: 200px; }
+.cg-status { font-weight: 600; padding: 0 0.5em; border-radius: 3px; }
+.cg-status.met { background: #cfc; color: #060; }
+.cg-status.partial { background: #fec; color: #960; }
+.cg-status.missed { background: #fcc; color: #900; }
+.cg-status.untracked { background: #eee; color: #555; }
+table { border-collapse: collapse; margin: 0.5em 1em 1em 1em; width: calc(100% - 2em); }
+th, td { padding: 4px 10px; border: 1px solid #ddd; text-align: left; }
+th { background: #f5f5f5; cursor: pointer; user-select: none; }
+th.sorted-asc::after { content: ' ▲'; color: #66c; }
+th.sorted-desc::after { content: ' ▼'; color: #66c; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.missed { background: #fee; color: #900; }
 td.ok { background: #efe; color: #060; }
-.summary { margin: 1em 0; padding: 1em; background: #f8f8f8; border-radius: 4px; }
-.bar { background: linear-gradient(to right, #4a6 var(--pct), #eee var(--pct)); height: 1em; border-radius: 2px; }
+.filter { margin: 0.5em 0; }
+.filter input { padding: 0.4em 0.6em; width: 280px; border: 1px solid #aaa; border-radius: 3px; }
+.toggle { float: right; padding: 0.4em 0.8em; background: #eef; border: 1px solid #aaf; border-radius: 3px; cursor: pointer; }
+.timeline { margin-top: 0.5em; font-family: monospace; font-size: 0.85em; }
+"""
+
+_HTML_SCRIPT = """\
+<script>
+function cgFilter(){
+  const q = document.getElementById('cg-filter').value.toLowerCase();
+  document.querySelectorAll('details.cg').forEach(d => {
+    const name = d.querySelector('.cg-name').textContent.toLowerCase();
+    d.style.display = name.includes(q) ? '' : 'none';
+  });
+}
+function expandAll(open){
+  document.querySelectorAll('details.cg').forEach(d => d.open = open);
+  document.getElementById('toggle-btn').textContent = open ? 'Collapse all' : 'Expand all';
+  document.getElementById('toggle-btn').dataset.open = open ? '1' : '0';
+}
+function toggleAll(){
+  const open = document.getElementById('toggle-btn').dataset.open !== '1';
+  expandAll(open);
+}
+function sortTable(th){
+  const tbl = th.closest('table');
+  const idx = Array.from(th.parentNode.children).indexOf(th);
+  const asc = !th.classList.contains('sorted-asc');
+  tbl.querySelectorAll('th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
+  th.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
+  const rows = Array.from(tbl.querySelectorAll('tbody tr'));
+  rows.sort((a, b) => {
+    const av = a.children[idx].dataset.sort || a.children[idx].textContent;
+    const bv = b.children[idx].dataset.sort || b.children[idx].textContent;
+    const an = parseFloat(av), bn = parseFloat(bv);
+    if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+    return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+  const tb = tbl.querySelector('tbody');
+  rows.forEach(r => tb.appendChild(r));
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('th').forEach(th => th.addEventListener('click', () => sortTable(th)));
+});
+</script>
 """
 
 
-def _export_html(db: CoverageDB, path: Path, *, goals: Goals | None = None) -> None:
+def _export_html(db: CoverageDB, path: Path, *, goals: Goals | None = None,
+                 timeline: list | None = None) -> None:
     lines: list[str] = []
     lines.append("<!DOCTYPE html><html><head><meta charset='utf-8'>")
     lines.append("<title>rvgen coverage</title>")
-    lines.append(f"<style>{_HTML_STYLE}</style></head><body>")
+    lines.append(f"<style>{_HTML_STYLE}</style>")
+    lines.append(_HTML_SCRIPT)
+    lines.append("</head><body>")
     lines.append("<h1>Functional Coverage Report</h1>")
 
     total_bins_hit = sum(len(b) for b in db.values())
@@ -522,21 +753,69 @@ def _export_html(db: CoverageDB, path: Path, *, goals: Goals | None = None) -> N
             "</div>"
         )
 
+    if timeline:
+        # Render an ASCII-ish line per seed showing new-bin counts.
+        lines.append("<div class='summary'>")
+        lines.append("<b>Convergence timeline</b> (new unique bins per seed):")
+        peak = max((t.get("new_bins", 0) for t in timeline), default=1) or 1
+        lines.append("<div class='timeline'>")
+        for t in timeline:
+            new_b = t.get("new_bins", 0)
+            seed = t.get("seed", "?")
+            bar = "█" * max(1, int(new_b / peak * 40)) if new_b else ""
+            lines.append(
+                f"seed {seed:>5}: {new_b:>4} new {bar}<br>"
+            )
+        lines.append("</div></div>")
+
+    lines.append(
+        "<div class='filter'>"
+        "<input id='cg-filter' placeholder='Filter covergroups...' oninput='cgFilter()'/>"
+        "<button id='toggle-btn' class='toggle' data-open='0' onclick='toggleAll()'>"
+        "Expand all</button>"
+        "</div>"
+    )
+
     for cg in sorted(db):
         bins = db[cg]
-        if not bins:
-            continue
         goal_bins = goals.covergroup(cg) if goals else {}
         cg_miss = miss.get(cg, {}) if goals else {}
-        lines.append(f"<h2>{_html.escape(cg)}</h2>")
-        lines.append(
-            f"<div>unique bins: {len(bins)}&nbsp;|&nbsp;total hits: {sum(bins.values())}"
-            + (f"&nbsp;|&nbsp;missing: <b>{len(cg_miss)}</b>" if cg_miss else "")
-            + "</div>"
+        if not bins and not goal_bins:
+            continue
+
+        # Per-cg status badge.
+        if goal_bins:
+            n_req = sum(1 for v in goal_bins.values() if v > 0)
+            n_miss = len(cg_miss)
+            cg_pct = ((n_req - n_miss) / n_req * 100) if n_req else 100.0
+            if n_miss == 0:
+                badge_cls = "met"; badge_txt = f"MET {n_req}/{n_req}"
+            elif n_miss == n_req:
+                badge_cls = "missed"; badge_txt = f"MISS 0/{n_req}"
+            else:
+                badge_cls = "partial"
+                badge_txt = f"PART {n_req - n_miss}/{n_req}"
+        else:
+            cg_pct = 100.0
+            badge_cls = "untracked"; badge_txt = "no goals"
+
+        meta = (
+            f"{len(bins)} bin(s), {sum(bins.values())} hits"
+            + (f" — <b>{len(cg_miss)}</b> missing" if cg_miss else "")
         )
-        lines.append("<table><tr><th>Bin</th><th>Observed</th><th>Required</th></tr>")
+        lines.append("<details class='cg'>")
+        lines.append(
+            "<summary>"
+            f"<span class='cg-name'>{_html.escape(cg)}</span>"
+            f"<span class='cg-meta'>{meta}</span>"
+            f"<span class='bar cg' style='--pct: {cg_pct}%'></span>"
+            f"<span class='cg-status {badge_cls}'>{badge_txt}</span>"
+            "</summary>"
+        )
+        lines.append("<table><thead><tr>"
+                     "<th>Bin</th><th>Observed</th><th>Required</th>"
+                     "</tr></thead><tbody>")
         sorted_bins = sorted(bins.items(), key=lambda kv: -kv[1])
-        # also include goal bins not yet observed
         observed_names = {bn for bn, _ in sorted_bins}
         for bn, req in goal_bins.items():
             if bn not in observed_names and req > 0:
@@ -550,11 +829,14 @@ def _export_html(db: CoverageDB, path: Path, *, goals: Goals | None = None) -> N
                 cls = ""
                 row_req = "-"
             lines.append(
-                f"<tr><td>{_html.escape(bn)}</td>"
-                f"<td class='num {cls}'>{cnt}</td>"
-                f"<td class='num'>{row_req}</td></tr>"
+                "<tr>"
+                f"<td>{_html.escape(bn)}</td>"
+                f"<td class='num {cls}' data-sort='{cnt}'>{cnt}</td>"
+                f"<td class='num' data-sort='{req}'>{row_req}</td>"
+                "</tr>"
             )
-        lines.append("</table>")
+        lines.append("</tbody></table>")
+        lines.append("</details>")
 
     lines.append("</body></html>")
     path.write_text("\n".join(lines))
@@ -594,6 +876,8 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--csv", help="CSV output path.")
     pe.add_argument("--html", help="HTML output path.")
     pe.add_argument("--goals", help="Optional goals YAML for HTML pass/fail coloring.")
+    pe.add_argument("--timeline", help="Optional cov_timeline.json — renders a "
+                     "convergence sparkline at the top of the HTML.")
     pe.set_defaults(func=cmd_export)
 
     pr = sub.add_parser("report", help="Render the text coverage report.")
@@ -626,6 +910,15 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--strict", choices=("warn", "error"), default="warn",
                      help="Exit code behavior (default: warn → exit 0).")
     pl.set_defaults(func=cmd_lint_goals)
+
+    pag = sub.add_parser("auto-goals",
+                          help="Print a starter goals YAML scoped to a "
+                               "target's ISA — covers only the covergroups "
+                               "the target can actually populate.")
+    pag.add_argument("--target", required=True,
+                      help="Target name (e.g., 'rv32imc' or 'rv64gcv_crypto'). "
+                           "Resolved via rvgen.targets.get_target().")
+    pag.set_defaults(func=cmd_auto_goals)
 
     ps = sub.add_parser("suggest-seeds",
                          help="Given historical convergence + current goals, "

@@ -101,6 +101,19 @@ CG_RS_VAL_CORNER = "rs_val_corner_cg"  # runtime: GPR write-value corner class
 CG_BIT_ACTIVITY = "bit_activity_cg"    # runtime: per-bit GPR-write activity (bit_N_toggled)
 CG_RS1_RS2_CROSS = "rs1_rs2_cross_cg"  # explicit rs1 × rs2 cross (for C-extension port-pair coverage)
 CG_RD_RS1_CROSS = "rd_rs1_cross_cg"    # rd × rs1 cross (in-place op pattern)
+# --- vector-focused covergroups (rvgen-first) ---
+CG_VEC_LS_MODE = "vec_ls_addr_mode_cg"     # UNIT_STRIDED / STRIDED / INDEXED for vector LS
+CG_VEC_EEW = "vec_eew_cg"                  # EEW chosen by vector loads/stores (8/16/32/64)
+CG_VEC_EEW_VS_SEW = "vec_eew_vs_sew_cg"    # cross: EEW vs current SEW (eq/wider/narrower)
+CG_VEC_EMUL = "vec_emul_cg"                # vd alignment / EMUL value used
+CG_VEC_VM = "vec_vm_cg"                    # masked vs unmasked vector op
+CG_VEC_VM_X_CAT = "vec_vm_category_cross_cg"  # cross: vm × category
+CG_VEC_AMO_WD = "vec_amo_wd_cg"            # AMO wd flag (write-dst)
+CG_VEC_VARIANT = "vec_va_variant_cg"       # VV/VX/VI/VF/WV/WX/WI/VVM/VXM/VFM
+CG_VEC_NF = "vec_nfields_cg"               # Zvlsseg NFIELDS bins (1..8)
+CG_VEC_SEG_X_MODE = "vec_seg_addr_mode_cross_cg"  # cross: NF × addr mode
+CG_VEC_WIDE_NARROW = "vec_widening_narrowing_cg"  # widening / narrowing / quad-widening / convert
+CG_VEC_CRYPTO = "vec_crypto_subext_cg"     # zvbb / zvbc / zvkn family
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -119,6 +132,10 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_CSR_ACCESS, CG_LS_OFFSET, CG_STREAM, CG_CSR_VAL,
     CG_RS_VAL_CORNER, CG_BIT_ACTIVITY,
     CG_RS1_RS2_CROSS, CG_RD_RS1_CROSS,
+    CG_VEC_LS_MODE, CG_VEC_EEW, CG_VEC_EEW_VS_SEW, CG_VEC_EMUL,
+    CG_VEC_VM, CG_VEC_VM_X_CAT, CG_VEC_AMO_WD,
+    CG_VEC_VARIANT, CG_VEC_NF, CG_VEC_SEG_X_MODE,
+    CG_VEC_WIDE_NARROW, CG_VEC_CRYPTO,
 )
 
 
@@ -220,6 +237,125 @@ def _mem_align_bin(offset: int, name: RiscvInstrName) -> str | None:
     if name in _DWORD_OPS:
         return "dword_aligned" if offset % 8 == 0 else "dword_unaligned"
     return None
+
+
+# ---------------------------------------------------------------------------
+# Vector-specific samplers — only invoked from sample_instr when group==RVV.
+# ---------------------------------------------------------------------------
+
+
+# Mnemonic prefix → ratified Zv* sub-extension family. Used by CG_VEC_CRYPTO
+# so a single bin per family captures whether the test exercises Zvbb/Zvbc/Zvkn.
+_ZV_FAMILY_BY_PREFIX: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("VANDN", "VBREV", "VBREV8", "VREV8", "VCLZ", "VCTZ", "VCPOP",
+      "VROL", "VROR", "VWSLL"), "zvbb"),
+    (("VCLMUL", "VCLMULH"), "zvbc"),
+    (("VAES", "VSHA2"), "zvkn"),
+)
+
+
+def _vector_family(name: RiscvInstrName) -> str | None:
+    n = name.name
+    for prefixes, fam in _ZV_FAMILY_BY_PREFIX:
+        if any(n.startswith(p) for p in prefixes):
+            return fam
+    return None
+
+
+def _sample_vector(db: CoverageDB, instr: Instr, vector_cfg) -> None:
+    """Bump the vector-specific covergroups.
+
+    Only called when ``instr.group == RVV`` and a ``vector_cfg`` is in scope.
+    Each bump is wrapped in a try/except so an ill-formed vector pseudo
+    (``vmv.v.x`` from the LS stream init) doesn't crash the sampler.
+    """
+    name = instr.instr_name
+    cat = getattr(instr, "category", None)
+    fmt = getattr(instr, "format", None)
+
+    # Mask usage — ``vm`` is 1 (unmasked) or 0 (masked).
+    vm = getattr(instr, "vm", None)
+    if vm is not None:
+        bin_name = "unmasked" if vm == 1 else "masked"
+        _bump(db, CG_VEC_VM, bin_name)
+        if cat is not None:
+            _bump(db, CG_VEC_VM_X_CAT, f"{bin_name}__{cat.name}")
+
+    # Address mode for vector loads/stores. Inferred from the format.
+    if fmt is not None:
+        from rvgen.isa.enums import RiscvInstrFormat as _F, RiscvInstrCategory as _C
+        addr_mode_by_fmt = {
+            _F.VL_FORMAT: "UNIT_STRIDED",
+            _F.VS_FORMAT: "UNIT_STRIDED",
+            _F.VLS_FORMAT: "STRIDED",
+            _F.VSS_FORMAT: "STRIDED",
+            _F.VLX_FORMAT: "INDEXED",
+            _F.VSX_FORMAT: "INDEXED",
+            _F.VAMO_FORMAT: "INDEXED",
+        }
+        if fmt in addr_mode_by_fmt:
+            _bump(db, CG_VEC_LS_MODE, addr_mode_by_fmt[fmt])
+
+    # EEW / EMUL — set by the load/store randomizer.
+    eew = getattr(instr, "eew", 0)
+    emul = getattr(instr, "emul", 0)
+    if eew:
+        _bump(db, CG_VEC_EEW, f"EEW{eew}")
+        sew = vector_cfg.vtype.vsew
+        if eew == sew:
+            rel = "eq"
+        elif eew > sew:
+            rel = "wider"
+        else:
+            rel = "narrower"
+        _bump(db, CG_VEC_EEW_VS_SEW, f"EEW{eew}_vs_SEW{sew}_{rel}")
+    if emul:
+        _bump(db, CG_VEC_EMUL, f"EMUL{emul}")
+
+    # AMO write-destination flag.
+    if cat is not None and getattr(cat, "name", "") == "AMO":
+        wd = getattr(instr, "wd", None)
+        if wd is not None:
+            _bump(db, CG_VEC_AMO_WD, "wd_set" if wd else "wd_clear")
+
+    # va_variant — VV / VX / VI / VF / WV / WX / WI / VVM / VXM / VFM ...
+    if getattr(instr, "has_va_variant", False):
+        variant = getattr(instr, "va_variant", None)
+        if variant is not None:
+            _bump(db, CG_VEC_VARIANT, variant.name)
+
+    # Zvlsseg NFIELDS — instr.nfields is (NF - 1) when set.
+    nfields = getattr(instr, "nfields", 0)
+    sub_extension = getattr(instr, "sub_extension", "")
+    if sub_extension == "zvlsseg" and nfields is not None:
+        nf = nfields + 1
+        _bump(db, CG_VEC_NF, f"NF{nf}")
+        if fmt is not None:
+            mode = addr_mode_by_fmt.get(fmt) if "addr_mode_by_fmt" in dir() else None
+            # Re-resolve since the dict above is local-scoped:
+            from rvgen.isa.enums import RiscvInstrFormat as _F2
+            seg_mode = {
+                _F2.VL_FORMAT: "UNIT_STRIDED", _F2.VS_FORMAT: "UNIT_STRIDED",
+                _F2.VLS_FORMAT: "STRIDED", _F2.VSS_FORMAT: "STRIDED",
+                _F2.VLX_FORMAT: "INDEXED", _F2.VSX_FORMAT: "INDEXED",
+            }.get(fmt)
+            if seg_mode is not None:
+                _bump(db, CG_VEC_SEG_X_MODE, f"NF{nf}__{seg_mode}")
+
+    # Widening / narrowing / quad-widening / convert — set by VectorInstr.
+    if getattr(instr, "is_quad_widening_instr", False):
+        _bump(db, CG_VEC_WIDE_NARROW, "quad_widening")
+    elif getattr(instr, "is_widening_instr", False):
+        _bump(db, CG_VEC_WIDE_NARROW, "widening")
+    elif getattr(instr, "is_narrowing_instr", False):
+        _bump(db, CG_VEC_WIDE_NARROW, "narrowing")
+    elif getattr(instr, "is_convert_instr", False):
+        _bump(db, CG_VEC_WIDE_NARROW, "convert")
+
+    # Crypto family — Zvbb / Zvbc / Zvkn.
+    fam = _vector_family(name)
+    if fam is not None:
+        _bump(db, CG_VEC_CRYPTO, fam)
 
 
 def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
@@ -391,6 +527,9 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
                 frac = vector_cfg.vtype.fractional_lmul
                 lmul_tag = f"MF{lmul}" if frac and lmul > 1 else f"M{lmul}"
                 _bump(db, CG_VTYPE_DYN, f"SEW{sew}_{lmul_tag}")
+
+                # Vector-specific covergroups — only meaningful for RVV ops.
+                _sample_vector(db, instr, vector_cfg)
         except AttributeError:
             pass
 

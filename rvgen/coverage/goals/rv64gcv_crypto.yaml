@@ -1,0 +1,50 @@
+# RV64GCV-crypto overlay — Zvbb / Zvbc / Zvkn coverage goals on top of
+# baseline + rv64imc + rv64gcv.
+# Layer as:
+#   --cov_goals baseline.yaml --cov_goals rv64imc.yaml --cov_goals rv64gcv.yaml \
+#   --cov_goals rv64gcv_crypto.yaml
+
+opcode_cg:
+  # Zvbb (basic bitmanip)
+  VANDN_VV: 5
+  VANDN_VX: 5
+  VBREV_V: 3
+  VBREV8_V: 3
+  VREV8_V: 3
+  VCLZ_V: 3
+  VCTZ_V: 3
+  VCPOP_V: 3
+  VROL_VV: 5
+  VROL_VX: 5
+  VROR_VV: 5
+  VROR_VX: 5
+  VROR_VI: 5
+  VWSLL_VV: 3
+  VWSLL_VX: 3
+  VWSLL_VI: 3
+  # Zvbc (carry-less multiply)
+  VCLMUL_VV: 5
+  VCLMUL_VX: 5
+  VCLMULH_VV: 5
+  VCLMULH_VX: 5
+  # Zvkn — AES
+  VAESEF_VV: 3
+  VAESEF_VS: 3
+  VAESEM_VV: 3
+  VAESEM_VS: 3
+  VAESDF_VV: 3
+  VAESDF_VS: 3
+  VAESDM_VV: 3
+  VAESDM_VS: 3
+  VAESKF1_VI: 3
+  VAESKF2_VI: 3
+  VAESZ_VS: 3
+  # Zvkn — SHA-2
+  VSHA2MS_VV: 3
+  VSHA2CL_VV: 3
+  VSHA2CH_VV: 3
+
+vec_crypto_subext_cg:
+  zvbb: 50
+  zvbc: 20
+  zvkn: 50
