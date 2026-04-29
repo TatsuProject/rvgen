@@ -27,6 +27,7 @@ cheap way to track a metric without mandating it.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,26 +49,126 @@ class Goals:
         return tuple(self.data)
 
 
+# ---------------------------------------------------------------------------
+# Abstract bin functions — riscv-isac CGF compatibility
+# ---------------------------------------------------------------------------
+
+
+def _expand_walking_ones(width: int) -> tuple[str, ...]:
+    """Return value-class bin names for the walking-ones set (1, 2, 4, ...).
+
+    Returns the canonical bin name from ``_value_class``: every walking-one
+    pattern collapses to the single ``walking_one`` bin in our schema.
+    SV-style bin-per-value would produce ``width`` bins; we return the
+    single representative so users don't end up with 32 bins requiring 1
+    hit each (typically untestable).
+    """
+    return ("walking_one",)
+
+
+def _expand_walking_zeros(width: int) -> tuple[str, ...]:
+    return ("walking_zero",)
+
+
+def _expand_alternating(width: int) -> tuple[str, ...]:
+    return ("alternating",)
+
+
+def _expand_corners() -> tuple[str, ...]:
+    """The full canonical corner-value set for a value-class covergroup."""
+    return (
+        "zero", "one", "all_ones", "min_signed", "max_signed",
+        "walking_one", "walking_zero", "alternating", "small", "generic",
+    )
+
+
+_ABSTRACT_FN_RE = re.compile(
+    r"^(?P<name>walking_ones|walking_zeros|alternating|corners)\((?P<args>[^)]*)\)$"
+)
+
+
+def _resolve_abstract(spec: str) -> tuple[str, ...] | None:
+    """If ``spec`` looks like ``walking_ones(32)`` etc., return the bin tuple.
+
+    Returns ``None`` when ``spec`` isn't an abstract function call —
+    callers fall back to treating it as a literal bin name.
+    """
+    m = _ABSTRACT_FN_RE.match(spec.strip())
+    if not m:
+        return None
+    name = m.group("name")
+    args_raw = m.group("args").strip()
+    width = int(args_raw) if args_raw else 32
+    if name == "walking_ones":
+        return _expand_walking_ones(width)
+    if name == "walking_zeros":
+        return _expand_walking_zeros(width)
+    if name == "alternating":
+        return _expand_alternating(width)
+    if name == "corners":
+        return _expand_corners()
+    return None
+
+
 def _load_one(path: str | Path) -> dict[str, dict[str, int]]:
-    """Parse a single goals YAML file into a normalised dict-of-dict."""
+    """Parse a single goals YAML file into a normalised dict-of-dict.
+
+    Supports two abstract-function shorthands borrowed from riscv-isac:
+
+    .. code-block:: yaml
+
+        # Per-bin specification (vanilla)
+        rs1_val_class_cg:
+          zero: 5
+          all_ones: 5
+          walking_one: 3
+
+        # Whole-cg shorthand expansion: a string value invokes the
+        # abstract function expander on the whole covergroup.
+        rs1_val_class_cg: "corners()"        # all 10 canonical corner bins
+        rd_val_class_cg:  "walking_ones(32)"
+
+        # Per-bin abstract: a single key maps to a function string.
+        rs1_val_class_cg:
+          "walking_ones(32)": 3   # walking_one bin gets a goal of 3
+          generic: 100
+    """
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"Coverage goals file {path!r} must be a YAML mapping")
     out: dict[str, dict[str, int]] = {}
     for cg, bins in raw.items():
+        # Whole-cg string: expand into all bins with default goal 1.
+        if isinstance(bins, str):
+            expanded = _resolve_abstract(bins)
+            if expanded is None:
+                raise ValueError(
+                    f"Covergroup {cg!r} in {path!r}: string value {bins!r} "
+                    f"is not a known abstract function (corners(), "
+                    f"walking_ones(N), walking_zeros(N), alternating(N))"
+                )
+            out[str(cg)] = {b: 1 for b in expanded}
+            continue
         if not isinstance(bins, dict):
             raise ValueError(
                 f"Covergroup {cg!r} in {path!r} must map to a bin-count dict; got {type(bins).__name__}"
             )
         normalised: dict[str, int] = {}
         for bn, cnt in bins.items():
+            # Per-bin abstract: expand to multiple bins with the same count.
+            expanded = _resolve_abstract(str(bn))
             try:
-                normalised[str(bn)] = int(cnt)
+                count = int(cnt)
             except (TypeError, ValueError) as e:
                 raise ValueError(
                     f"Bin {cg}.{bn} in {path!r} must be an integer; got {cnt!r}"
                 ) from e
+            if expanded is not None:
+                for b in expanded:
+                    normalised[b] = count
+            else:
+                normalised[str(bn)] = count
         out[str(cg)] = normalised
     return out
 

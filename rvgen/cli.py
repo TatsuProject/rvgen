@@ -96,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Path to a cumulative coverage DB (JSON). The 'cov' step "
                         "merges this run's coverage into this file; auto-regress "
                         "carries it across seeds. Defaults to <output>/coverage.json.")
+    p.add_argument("--cov_history", default="",
+                   help="Optional JSONL file. The 'cov' step appends one line "
+                        "per run with timestamp, target, test, seed, and the "
+                        "per-covergroup unique-bin / total-hit totals — perfect "
+                        "for CI trend tracking. Use `tools history <file>` to "
+                        "render an ASCII trend chart.")
     p.add_argument("--auto_regress", action="store_true",
                    help="Loop seeds (start_seed..start_seed+max_seeds-1) until "
                         "coverage goals are met. Requires --cov_goals.")
@@ -429,6 +435,21 @@ def main(argv: list[str] | None = None) -> int:
         report_path.write_text(report + "\n")
         _LOG.info("Coverage report: %s", report_path)
 
+        # Optional CI trend tracking: append one JSONL record per run.
+        if args.cov_history:
+            try:
+                _append_cov_history(
+                    Path(args.cov_history), existing, goals,
+                    target=args.target,
+                    test=args.test,
+                    start_seed=args.start_seed,
+                    iterations=int(args.iterations),
+                )
+                _LOG.info("Coverage history appended: %s", args.cov_history)
+            except Exception as exc:  # noqa: BLE001
+                _LOG.warning("Could not append --cov_history (%s): %s",
+                             args.cov_history, exc)
+
         # CI integration: emit GITHUB_OUTPUT / GITHUB_STEP_SUMMARY when
         # running under GitHub Actions (and similar under --ci_summary).
         _emit_ci_summary(existing, goals, report_path, test_count=len(tests))
@@ -438,6 +459,79 @@ def main(argv: list[str] | None = None) -> int:
             return 3
 
     return 0
+
+
+def _append_cov_history(
+    history_path: Path,
+    db: "CoverageDB",
+    goals,
+    *,
+    target: str,
+    test: str,
+    start_seed: int,
+    iterations: int,
+) -> None:
+    """Append one JSONL record summarising this run's coverage.
+
+    Schema (per line):
+
+    .. code-block:: json
+
+        {
+          "ts": "2026-04-29T12:34:56Z",
+          "target": "rv64gcv",
+          "test":   "riscv_rand_instr_test",
+          "start_seed": 100,
+          "iterations": 1,
+          "grade": 87,
+          "bins_hit": 4321,
+          "total_samples": 56789,
+          "goals_required": 92,
+          "goals_met": 90,
+          "goals_pct": 97.8,
+          "per_cg": {"opcode_cg": [unique_bins, total_hits], ...}
+        }
+
+    Designed for line-oriented append-only CI logging — git-friendly,
+    grep-friendly, and easy to render as a timeline chart.
+    """
+    import datetime as _dt
+    import json as _json
+    from rvgen.coverage.cgf import missing_bins as _missing
+    from rvgen.coverage.report import compute_grade as _grade
+
+    n_required = (
+        sum(1 for b in goals.data.values() for v in b.values() if v > 0)
+        if goals is not None else 0
+    )
+    if goals is not None and n_required > 0:
+        miss = _missing(db, goals)
+        n_missing = sum(len(v) for v in miss.values())
+        n_met = n_required - n_missing
+        pct = round(n_met / n_required * 100, 2)
+    else:
+        n_met, pct = 0, 100.0
+
+    record = {
+        "ts": _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "target": target,
+        "test": test,
+        "start_seed": int(start_seed),
+        "iterations": int(iterations),
+        "grade": _grade(db, goals),
+        "bins_hit": sum(len(b) for b in db.values()),
+        "total_samples": sum(sum(b.values()) for b in db.values()),
+        "goals_required": n_required,
+        "goals_met": n_met,
+        "goals_pct": pct,
+        "per_cg": {
+            cg: [len(b), sum(b.values())]
+            for cg, b in db.items() if b
+        },
+    }
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    with history_path.open("a") as f:
+        f.write(_json.dumps(record, sort_keys=True) + "\n")
 
 
 def _emit_ci_summary(

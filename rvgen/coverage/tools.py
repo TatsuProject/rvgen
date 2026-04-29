@@ -381,6 +381,122 @@ def cmd_lint_goals(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_history(args: argparse.Namespace) -> int:
+    """Render an ASCII trend chart from a JSONL history file.
+
+    The history file is appended one record per run via
+    ``--cov_history`` on the main CLI. We render:
+
+    1. A small header (file stats — first/last timestamps, n records).
+    2. A per-run summary table (newest 20 by default).
+    3. An ASCII trend chart of grade + goals% vs time.
+    4. A *regression detector* that flags any covergroup whose
+       per-run unique-bin count went DOWN compared to the previous
+       record (likely a coverage-collection regression in the code).
+    """
+    history = []
+    try:
+        with open(args.input) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                history.append(json.loads(line))
+    except FileNotFoundError:
+        print(f"History file {args.input!r} not found.", file=sys.stderr)
+        return 1
+    if not history:
+        print("History is empty.")
+        return 1
+
+    print(f"=== Coverage history: {args.input} ===")
+    print(f"  records: {len(history)}")
+    print(f"  first:   {history[0]['ts']}")
+    print(f"  last:    {history[-1]['ts']}")
+    print()
+
+    # Recent records table.
+    n_recent = min(args.recent, len(history))
+    recent = history[-n_recent:]
+    print(f"Recent {n_recent} run(s):")
+    print(f"  {'ts':<20s} {'target':<14s} {'seed':>6s} "
+          f"{'grade':>5s} {'goals%':>6s} {'bins':>6s} {'samples':>9s}")
+    for rec in recent:
+        print(
+            f"  {rec.get('ts', '?'):<20s} "
+            f"{rec.get('target', '?'):<14s} "
+            f"{rec.get('start_seed', '?'):>6} "
+            f"{rec.get('grade', '?'):>5} "
+            f"{rec.get('goals_pct', 0):>6.1f} "
+            f"{rec.get('bins_hit', 0):>6} "
+            f"{rec.get('total_samples', 0):>9}"
+        )
+    print()
+
+    # Trend chart — sparkline of `grade` and `goals_pct`.
+    grades = [r.get("grade", 0) for r in history]
+    goals_pcts = [r.get("goals_pct", 0) for r in history]
+    print("Trend (newest on right)")
+    print(f"  grade   : {_unicode_sparkline(grades)} "
+          f"min={min(grades)}, max={max(grades)}")
+    print(f"  goals % : {_unicode_sparkline(goals_pcts)} "
+          f"min={min(goals_pcts):.1f}, max={max(goals_pcts):.1f}")
+    print()
+
+    # Regression detector — only fires for IDENTICAL (target, test, seed)
+    # replays. Seeds differ → bins differ; we can't tell coverage-tooling
+    # regression from random variation. So we group by the full key
+    # (target, test, start_seed) and only flag drops within a replay.
+    print("Regression check (replays of identical target/test/seed):")
+    regressions: list[str] = []
+    by_replay: dict[tuple, list] = {}
+    for r in history:
+        key = (r.get("target"), r.get("test"), r.get("start_seed"))
+        by_replay.setdefault(key, []).append(r)
+    n_replay_groups = 0
+    for (tgt, tst, seed), runs in by_replay.items():
+        if len(runs) < 2:
+            continue
+        n_replay_groups += 1
+        for prev, cur in zip(runs, runs[1:]):
+            for cg, (uniq_cur, _hits) in cur.get("per_cg", {}).items():
+                uniq_prev, _ = prev.get("per_cg", {}).get(cg, [0, 0])
+                if uniq_cur < uniq_prev:
+                    regressions.append(
+                        f"  {tgt}/{tst}/seed={seed}: {cg} "
+                        f"{uniq_prev} -> {uniq_cur} "
+                        f"({prev.get('ts')} -> {cur.get('ts')})"
+                    )
+    if regressions:
+        for r in regressions[: args.max_regressions]:
+            print(r)
+        if len(regressions) > args.max_regressions:
+            print(f"  ... ({len(regressions) - args.max_regressions} more)")
+        return 1
+    if n_replay_groups == 0:
+        print("  no replays in history (each run used a different seed). "
+              "Re-run with the same --start_seed to enable regression checks.")
+    else:
+        print(f"  no regressions detected across {n_replay_groups} replay group(s).")
+    return 0
+
+
+def _unicode_sparkline(values: list[float]) -> str:
+    """Return a unicode-block sparkline for ``values``."""
+    if not values:
+        return ""
+    blocks = "▁▂▃▄▅▆▇█"
+    lo = min(values)
+    hi = max(values)
+    if hi == lo:
+        return blocks[3] * len(values)
+    out = []
+    for v in values:
+        idx = int((v - lo) / (hi - lo) * (len(blocks) - 1))
+        out.append(blocks[idx])
+    return "".join(out)
+
+
 def cmd_cov_explain(args: argparse.Namespace) -> int:
     """Show which directed perturbations would fire for current coverage.
 
@@ -1117,6 +1233,17 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--strict", choices=("warn", "error"), default="warn",
                      help="Exit code behavior (default: warn → exit 0).")
     pl.set_defaults(func=cmd_lint_goals)
+
+    ph = sub.add_parser("history",
+                         help="Render an ASCII trend chart from a JSONL "
+                              "coverage-history file (written by --cov_history).")
+    ph.add_argument("input", help="Path to JSONL history file.")
+    ph.add_argument("--recent", type=int, default=20,
+                     help="Show the most-recent N records in the table "
+                          "(default 20).")
+    ph.add_argument("--max_regressions", type=int, default=20,
+                     help="Limit how many regressions to print (default 20).")
+    ph.set_defaults(func=cmd_history)
 
     pce = sub.add_parser("cov-explain",
                           help="Preview which --cov_directed perturbations "
