@@ -238,12 +238,21 @@ def create_instr_list(cfg: Config) -> AvailableInstrs:
                     continue
             if not vcfg.enable_zvlsseg and getattr(cls, "sub_extension", "") == "zvlsseg":
                 continue
-            # Zvamo is gated by a separate flag in SV; Phase 1 keeps it on the
-            # same switch as Zvlsseg (rvgen's first RVV milestone
-            # doesn't register Zvamo in a core target).
+            # Zvamo: ratified pre-1.0 only; current spike-vector / GCC reject
+            # ``vamoaddei.v`` etc. since RVV 1.0 ratified removed vector-AMO
+            # entirely. Gate on the per-target ``vector_amo_supported`` flag.
             if getattr(cls, "sub_extension", "") == "zvamo":
-                # Not yet wired into a runnable target; drop from random stream.
-                continue
+                if target is None or not getattr(target, "vector_amo_supported", False):
+                    continue
+            # Zvbb / Zvbc / Zvkn / Zvfh — ratified RVV-1.0 follow-on extensions.
+            # Each is gated by an explicit per-target ``enable_zv*`` knob so
+            # mainline rv64gcv (which doesn't advertise them in its -march by
+            # default) doesn't pull in mnemonics GCC will reject.
+            sub_ext = getattr(cls, "sub_extension", "")
+            if sub_ext in ("zvbb", "zvbc", "zvkn"):
+                target_flag = f"enable_{sub_ext}"
+                if target is None or not getattr(target, target_flag, False):
+                    continue
             # VSETVLI/VSETVL are emitted by the init section, not the random
             # stream (category=CSR, but keep an explicit drop in case a future
             # config ever puts CSR ops into the vector stream).

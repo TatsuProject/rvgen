@@ -165,10 +165,10 @@ def test_vector_load_has_eew_suffix(vcfg):
     instr = get_instr(RiscvInstrName.VLE_V)
     instr.randomize_vector_operands(rng, vcfg)
     asm = instr.convert2asm()
-    # EEW is one of legal_eew, so mnemonic is vl<eew>.v.
+    # EEW is one of legal_eew, so mnemonic is vle<eew>.v.
     head = asm.split()[0]
-    assert head.startswith("vl") and head.endswith(".v")
-    eew = int(head[2:-2])
+    assert head.startswith("vle") and head.endswith(".v")
+    eew = int(head[3:-2])
     assert eew in vcfg.legal_eew
 
 

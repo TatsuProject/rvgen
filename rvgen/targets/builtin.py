@@ -276,6 +276,25 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         vlen=512, elen=32, selen=8, max_lmul=8,
         **_m_only(),
     ),
+    # ---- RV64 with vector + ratified Zv* extensions ----
+    # Same scalar/vector base as rv64gcv but with Zvbb / Zvbc / Zvkn / Zvfh
+    # turned on. Uses ``-march=rv64gcv_zvbb_zvbc_zvkn_zvfh`` at compile time.
+    "rv64gcv_crypto": TargetCfg(
+        name="rv64gcv_crypto", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV64I, _G.RV64M,
+            _G.RV32C, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.RVV,
+        ),
+        vector_extension_enable=True,
+        vlen=512, elen=32, selen=8, max_lmul=8,
+        enable_zvbb=True, enable_zvbc=True, enable_zvkn=True, enable_zvfh=True,
+        isa_string="rv64gcv_zvbb_zvbc_zvkn_zvfh",
+        mabi="lp64d",
+        **_m_only(),
+    ),
     # ---- Embedded vector (Zve*) profiles ----
     "coralnpu": TargetCfg(
         name="coralnpu", xlen=32,

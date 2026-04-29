@@ -39,7 +39,8 @@ def get_stream(name: str) -> Type[DirectedInstrStream]:
 # Import order matters: load_store.py registers the canonical
 # load/store stream names and must run AFTER directed.py, whose
 # historical aliases are superseded below.
-from rvgen.streams import directed      # noqa: F401,E402
-from rvgen.streams import loop          # noqa: F401,E402
-from rvgen.streams import amo_streams   # noqa: F401,E402
-from rvgen.streams import load_store    # noqa: F401,E402
+from rvgen.streams import directed              # noqa: F401,E402
+from rvgen.streams import loop                  # noqa: F401,E402
+from rvgen.streams import amo_streams           # noqa: F401,E402
+from rvgen.streams import load_store            # noqa: F401,E402
+from rvgen.streams import vector_load_store     # noqa: F401,E402

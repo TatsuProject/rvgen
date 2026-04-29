@@ -174,6 +174,18 @@ class RiscvInstrGroup(IntEnum):
     ZVE64X = 47
     ZVE64F = 48
     ZVE64D = 49
+    # --- Vector v1.0 ratified extensions on top of RVV. ---
+    # Zvbb  : Vector basic bitmanip — vandn / vbrev / vbrev8 / vrev8 / vclz /
+    #         vctz / vcpop / vrol / vror / vwsll. Ratified 2022-12.
+    # Zvbc  : Vector carry-less multiply — vclmul / vclmulh.
+    # Zvkb  : Vector bitmanip for cryptography (subset of Zvbb).
+    # Zvkn  : NIST AES + SHA-2 + Zvkb suite — vaesef/vaesem/vaesdf/vaesdm/
+    #         vaeskf1/vaeskf2/vaesz + vsha2ms/vsha2cl/vsha2ch.
+    # Zvfh  : Vector half-precision FP (FP16). Adds vfh* — ratified 2023.
+    ZVBB = 50
+    ZVBC = 51
+    ZVKN = 52
+    ZVFH = 53
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +360,31 @@ _INSTR_NAMES = [
     # Vector AMO (EEW)
     "VAMOSWAPE_V", "VAMOADDE_V", "VAMOXORE_V", "VAMOANDE_V", "VAMOORE_V",
     "VAMOMINE_V", "VAMOMAXE_V", "VAMOMINUE_V", "VAMOMAXUE_V",
+
+    # ---- Zvbb — Vector Basic Bitmanip (ratified 2022) ----
+    # SV reference doesn't have these; rvgen-first.
+    "VANDN_VV", "VANDN_VX",
+    "VBREV_V", "VBREV8_V", "VREV8_V",
+    "VCLZ_V", "VCTZ_V", "VCPOP_V",
+    "VROL_VV", "VROL_VX",
+    "VROR_VV", "VROR_VX", "VROR_VI",
+    "VWSLL_VV", "VWSLL_VX", "VWSLL_VI",
+
+    # ---- Zvbc — Vector Carry-Less Multiply ----
+    "VCLMUL_VV", "VCLMUL_VX",
+    "VCLMULH_VV", "VCLMULH_VX",
+
+    # ---- Zvkn — Vector NIST crypto ----
+    # AES (Zvkned)
+    "VAESEF_VV", "VAESEF_VS", "VAESEM_VV", "VAESEM_VS",
+    "VAESDF_VV", "VAESDF_VS", "VAESDM_VV", "VAESDM_VS",
+    "VAESKF1_VI", "VAESKF2_VI", "VAESZ_VS",
+    # SHA-2 (Zvknha / Zvknhb)
+    "VSHA2MS_VV", "VSHA2CL_VV", "VSHA2CH_VV",
+
+    # Zvfh (Vector half-precision FP) shares mnemonics with the existing
+    # VF*/VFW*/VFN* family — no new enum names needed; once Zvfh is enabled
+    # and SEW=16 the same encoding paths emit FP16 ops.
     # Supervisor / privileged
     "DRET", "MRET", "URET", "SRET", "WFI", "SFENCE_VMA",
 

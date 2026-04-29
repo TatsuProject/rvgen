@@ -276,6 +276,24 @@ class Config:
                 self.init_privileged_mode = _parse_boot_mode(value)
             return
 
+        # Vector-config knobs live on self.vector_cfg, not self. SV's testlists
+        # rely on +vec_fp / +vec_narrowing_widening / +vec_quad_widening /
+        # +enable_zvlsseg / +enable_fault_only_first_load / +allow_illegal_vec_instr
+        # / +vec_reg_hazards. Map them through.
+        _VECTOR_BOOL_KEYS = (
+            "vec_fp", "vec_narrowing_widening", "vec_quad_widening",
+            "allow_illegal_vec_instr", "vec_reg_hazards",
+            "enable_zvlsseg", "enable_fault_only_first_load",
+        )
+        if key in _VECTOR_BOOL_KEYS:
+            if self.vector_cfg is not None:
+                v = _parse_bool(value) if value is not None else True
+                setattr(self.vector_cfg, key, v)
+                # vec_fp toggles SEW=32 requirement; legal_eew may need recomp
+                # but Phase 1 keeps the tuple as-stamped. Rely on the gate
+                # in filtering.py to suppress invalid combinations.
+            return
+
         # Generic attribute lookup by name.
         if hasattr(self, key):
             current = getattr(self, key)

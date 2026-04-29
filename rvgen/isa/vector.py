@@ -389,18 +389,78 @@ class VectorInstr(FloatingPointInstr):
     # ------------------------------------------------------------------
 
     def get_instr_name(self) -> str:
-        """Assembly mnemonic, with EEW suffix for loads/stores."""
+        """Assembly mnemonic, with EEW suffix for loads/stores.
+
+        Two layered concerns vs the SV reference:
+
+        1. SV uses ``string::substr(0, len - N)`` (inclusive both ends), which
+           we translate to Python's ``[:-(N-1)]`` — for trailing ``.V`` (2
+           chars) that's ``[:-2]``; for ``FF.V`` (4 chars) that's ``[:-4]``.
+           Earlier ``[:-3]`` / ``[:-5]`` were off-by-one — only noticed once
+           a stream actually emitted vector loads/stores.
+
+        2. The SV enum names (e.g., ``VLXEI_V``, ``VSXEI_V``) are from the
+           pre-1.0 RVV draft. RVV 1.0 split indexed loads/stores into
+           ordered (``vloxei``, ``vsoxei``) and unordered (``vluxei``,
+           ``vsuxei``) variants, removing the ambiguous ``vlxei`` /
+           ``vsxei`` mnemonics. We map onto the unordered ratified form by
+           default (matches the indexing semantics our randomizer assumes).
+           Vector AMO uses the pre-1.0 ``vamo*ei`` form as ratified.
+        """
+        n = self.instr_name
+        # RVV 1.0 mnemonic root for indexed loads/stores. Inserted in front
+        # of the EEW digits.
+        _RVV1_INDEXED_ROOT = {
+            _N.VLXEI_V: "vluxei",
+            _N.VSXEI_V: "vsuxei",
+            _N.VSUXEI_V: "vsuxei",
+            _N.VLXSEGEI_V: "vluxseg",
+            _N.VSXSEGEI_V: "vsuxseg",
+            _N.VSUXSEGEI_V: "vsuxseg",
+        }
+        if (
+            self.category in (_CAT.LOAD, _CAT.STORE)
+            and self.eew
+            and n in _RVV1_INDEXED_ROOT
+        ):
+            root = _RVV1_INDEXED_ROOT[n]
+            if "seg" in root:
+                # vluxseg<NF>ei<EEW>.v form. nfields holds (N - 1).
+                nf = self.nfields + 1 if self.nfields else 2
+                return f"{root}{nf}ei{self.eew}.v"
+            return f"{root}{self.eew}.v"
+
         name = super().get_instr_name()
         if self.category in (_CAT.LOAD, _CAT.STORE) and self.eew:
-            n = self.instr_name
             if n in (_N.VLEFF_V, _N.VLSEGEFF_V):
-                # strip trailing "FF.V" (len=5, incl the dot) → re-attach with eew.
-                stem = name[:-5]
+                stem = name[:-4]  # strip trailing "FF.V"
+                # Zvlsseg fault-only-first form: vlseg<NF>e<EEW>ff.v
+                if n == _N.VLSEGEFF_V:
+                    nf = self.nfields + 1 if self.nfields else 2
+                    return f"vlseg{nf}e{self.eew}ff.v"
                 return f"{stem}{self.eew}ff.v"
-            stem = name[:-3]  # strip trailing ".V"
+            if n in (_N.VLSEGE_V, _N.VSSEGE_V, _N.VLSSEGE_V, _N.VSSSEGE_V):
+                # Ratified Zvlsseg: vlseg<NF>e<EEW>.v / vsseg<NF>e<EEW>.v
+                # (and vlsseg / vssseg for the strided variants).
+                nf = self.nfields + 1 if self.nfields else 2
+                if n == _N.VLSEGE_V:
+                    return f"vlseg{nf}e{self.eew}.v"
+                if n == _N.VSSEGE_V:
+                    return f"vsseg{nf}e{self.eew}.v"
+                if n == _N.VLSSEGE_V:
+                    return f"vlsseg{nf}e{self.eew}.v"
+                if n == _N.VSSSEGE_V:
+                    return f"vssseg{nf}e{self.eew}.v"
+            stem = name[:-2]  # strip trailing ".V"
             return f"{stem}{self.eew}.v"
         if self.category == _CAT.AMO and self.eew:
             stem = name[:-2]  # strip trailing ".V"
+            # Pre-1.0 vector-AMO ratified form: vamo<op>ei<EEW>.v. The SV
+            # enum drops the trailing ``i`` (so ``VAMOADDE_V`` is "VAMOADDE.V")
+            # — re-insert it before the EEW. Compare case-insensitively
+            # since `super().get_instr_name()` keeps the upper-case name.
+            if stem.lower().endswith("e"):
+                return f"{stem}i{self.eew}.v"
             return f"{stem}{self.eew}.v"
         return name
 

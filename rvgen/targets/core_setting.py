@@ -67,6 +67,17 @@ class TargetCfg:
     selen: int = 8
     max_lmul: int = 8
     vector_extension_enable: bool = False
+    # Vector AMO (Zvamo) was removed in RVV 1.0 ratified — current spike-vector
+    # / GCC binutils reject ``vamoaddei.v`` etc. Default off; flip on for
+    # pre-1.0 RVV draft toolchains or for cores that explicitly support it.
+    vector_amo_supported: bool = False
+    # Ratified RVV 1.0 cryptography / bitmanip extensions. rvgen-first —
+    # riscv-dv has no ports for these. The instr filter drops ops in the
+    # corresponding sub_extension family unless the target opts in here.
+    enable_zvbb: bool = False     # Vector basic bitmanip (vandn/vrol/...)
+    enable_zvbc: bool = False     # Vector carry-less multiply
+    enable_zvkn: bool = False     # NIST AES + SHA-2 vector suite
+    enable_zvfh: bool = False     # Vector FP16 (Zvfh)
     support_pmp: bool = False
     support_epmp: bool = False
     support_debug_mode: bool = False

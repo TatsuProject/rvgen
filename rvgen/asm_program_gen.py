@@ -275,6 +275,8 @@ class AsmProgramGen:
             "riscv_mem_region_stress_test",
             "riscv_load_store_rand_addr_instr_stream",
             "riscv_load_store_shared_mem_stream",
+            "riscv_vector_load_store_instr_stream",
+            "riscv_vector_amo_instr_stream",
         })
         self.main_sequence.directed_instr = []
         stream_counter: dict[str, int] = {}
