@@ -387,8 +387,13 @@ class AsmProgramGen:
         has_d = bool({_G.RV32D, _G.RV64D, _G.RV32DC} & supported)
         num_fp = self.cfg.target.num_float_gpr
 
+        # `fmv.d.x` is RV64D only — on RV32D the GPR is 32-bit so there is no
+        # encoding for moving a full 64-bit double via xreg. Restrict the
+        # double-precision init path to XLEN=64. RV32D uses single-precision
+        # init only; the upper 32 bits get NaN-boxed via fmv.w.x.
+        d_init_legal = has_d and self.cfg.target.xlen >= 64
         for i in range(num_fp):
-            if has_d and self.rng.random() < 0.5:
+            if d_init_legal and self.rng.random() < 0.5:
                 imm = _rand_dpf_value(self.rng)
                 hi = (imm >> 32) & 0xFFFFFFFF
                 lo = imm & 0xFFFFFFFF
