@@ -308,6 +308,38 @@ def cmd_lint_goals(args: argparse.Namespace) -> int:
         "privilege_mode_cg": {"M_entered", "M_return", "S_return", "U_return",
                                 "M_mode", "S_mode", "U_mode"},
         "exception_cg": {"trap_entered"},
+        # Microarchitectural-relevant covergroups.
+        "cache_line_cross_cg": {
+            f"{prefix}_w{w}" for prefix in ("cross", "near_end", "in_line")
+            for w in (2, 4, 8)
+        },
+        "page_cross_cg": (
+            {"in_page"}
+            | {f"cross_w{w}" for w in (2, 4, 8)}
+        ),
+        "branch_distance_cg": {
+            "zero",
+            "fwd_short", "fwd_medium", "fwd_long", "fwd_huge",
+            "bwd_short", "bwd_medium", "bwd_long", "bwd_huge",
+        },
+        "branch_pattern_cg": {
+            "TTT", "TTN", "TNT", "TNN",
+            "NTT", "NTN", "NNT", "NNN",
+        },
+        # Value-class covergroups (riscv-isac val_comb style). Keep the
+        # set the same on rs1/rs2/rd since the classifier is the same.
+        # Also accept these names as the bins of the cross covergroup
+        # via membership testing in the lint loop (special-cased below).
+    }
+    _val_class_bins = {
+        "zero", "one", "all_ones", "min_signed", "max_signed",
+        "walking_one", "walking_zero", "alternating", "small", "generic",
+    }
+    for _cg in ("rs1_val_class_cg", "rs2_val_class_cg", "rd_val_class_cg"):
+        known_bins[_cg] = set(_val_class_bins)
+    # Cross covergroup: every "<class>__<class>" pair is valid.
+    known_bins["rs_val_class_cross_cg"] = {
+        f"{a}__{b}" for a in _val_class_bins for b in _val_class_bins
     }
 
     goals = load_goals(args.input)

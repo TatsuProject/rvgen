@@ -69,6 +69,26 @@ _CSR_WRITE_IN_COMMIT_RE = re.compile(r"c[0-9a-f]+_(?P<csr>\w+)\s+0x(?P<val>[0-9a
 # dimensionality (only GPR writes matter for the corner-value coverage).
 _GPR_WRITE_IN_COMMIT_RE = re.compile(r"\b(?P<reg>x\d+)\s+0x(?P<val>[0-9a-f]+)")
 
+# ABI register-name → x-register mapping. Used to translate spike's
+# disassembled operand tails (which use ABI names like ``a0``, ``s1``,
+# ``ra``) back to the canonical x-numbers our virtual reg-file tracks.
+_ABI_TO_XREG = {
+    "zero": "x0", "ra": "x1", "sp": "x2", "gp": "x3", "tp": "x4",
+    "t0": "x5", "t1": "x6", "t2": "x7",
+    "s0": "x8", "fp": "x8", "s1": "x9",
+    "a0": "x10", "a1": "x11", "a2": "x12", "a3": "x13",
+    "a4": "x14", "a5": "x15", "a6": "x16", "a7": "x17",
+    "s2": "x18", "s3": "x19", "s4": "x20", "s5": "x21",
+    "s6": "x22", "s7": "x23", "s8": "x24", "s9": "x25",
+    "s10": "x26", "s11": "x27",
+    "t3": "x28", "t4": "x29", "t5": "x30", "t6": "x31",
+}
+# Operand-tail regex: captures up to 3 register/imm tokens (rd, rs1, rs2
+# or rd, rs1, imm — the position-2 token is rs1 in either case).
+_OPERAND_TOKEN_RE = re.compile(
+    r"(?P<tok>-?\b(?:[a-z]\d+|zero|ra|sp|gp|tp|fp|s\d|a\d|t\d|0x[0-9a-f]+|-?\d+)\b)"
+)
+
 
 def _corner_bucket(val: int) -> str:
     """Classify a 64-bit value against the canonical corner set."""
@@ -155,6 +175,13 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
     prev_bin_bytes: int = 0
     prev_mnem: str | None = None
     prev_was_branch: bool = False
+    # T/N branch-history shift register for the 3-gram pattern covergroup.
+    branch_history: list[str] = []
+    # Virtual reg-file tracking last value written to each GPR. Lets us
+    # derive rs1_val_class / rs2_val_class on the *next* instruction from
+    # the value the previous writer left there. Spike's --log-commits
+    # doesn't print rs1/rs2 reads — this mimics the behavior.
+    gpr_state: dict[str, int] = {}
 
     def _bump(cg: str, bn: str) -> None:
         bins = db.setdefault(cg, {})
@@ -192,9 +219,18 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                 # and also bump the bit-activity covergroup for each set bit
                 # (reveals dead bits — if bit_N_set never appears, no
                 # instruction ever computed a value with bit N set).
+                from rvgen.coverage.collectors import _value_class
                 for wm in _GPR_WRITE_IN_COMMIT_RE.finditer(writes):
+                    reg = wm.group("reg")
                     val = int(wm.group("val"), 16)
                     _bump(CG_RS_VAL_CORNER, _corner_bucket(val))
+                    # New: full val_comb-style classifier with walking-one /
+                    # walking-zero / alternating / signed-min etc. — the
+                    # corner_bucket above is coarser (zero/all_ones/normal).
+                    _bump("rd_val_class_cg", _value_class(val, 64))
+                    # Update the virtual reg-file so subsequent rs1/rs2
+                    # reads of this register can be classified.
+                    gpr_state[reg] = val
                     # Cap at 64 bits; bin name = "bit_N_set".
                     v = val & 0xFFFF_FFFF_FFFF_FFFF
                     while v:
@@ -222,6 +258,32 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
             # distinct bins — valuable signal).
             _bump(CG_OPCODE, mnem.upper() + CG_OPCODE_DYN_SUFFIX)
 
+            # rs1/rs2 value-class sampling — parse the operand tail. For
+            # most R/I/S/B-format scalar ops, position 1 is rd and 2/3
+            # are rs1/rs2 (or rs1/imm). For B-format the positions are
+            # rs1/rs2/imm. We classify position-2 + position-3 tokens
+            # against the virtual reg-file when they're recognisable
+            # registers, sample the tracked value, and skip otherwise.
+            tail = m.group("tail") or ""
+            tokens = _OPERAND_TOKEN_RE.findall(tail)
+            if len(tokens) >= 2:
+                from rvgen.coverage.collectors import _value_class
+                cls1: str | None = None
+                cls2: str | None = None
+                tok2 = tokens[1].lower()
+                xreg2 = _ABI_TO_XREG.get(tok2, tok2 if tok2.startswith("x") else None)
+                if xreg2 in gpr_state:
+                    cls1 = _value_class(gpr_state[xreg2], 64)
+                    _bump("rs1_val_class_cg", cls1)
+                if len(tokens) >= 3:
+                    tok3 = tokens[2].lower()
+                    xreg3 = _ABI_TO_XREG.get(tok3, tok3 if tok3.startswith("x") else None)
+                    if xreg3 in gpr_state:
+                        cls2 = _value_class(gpr_state[xreg3], 64)
+                        _bump("rs2_val_class_cg", cls2)
+                if cls1 is not None and cls2 is not None:
+                    _bump("rs_val_class_cross_cg", f"{cls1}__{cls2}")
+
             # Branch direction — the *previous* instruction was the branch;
             # now that we see this PC, we know whether the branch was taken.
             if prev_was_branch and prev_pc is not None and prev_mnem is not None:
@@ -229,10 +291,20 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                 if pc == expected_fall_through:
                     _bump(CG_BRANCH_DIR, "not_taken")
                     _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__NT")
+                    branch_history.append("N")
                 else:
                     _bump(CG_BRANCH_DIR, "taken")
                     _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__T")
+                    branch_history.append("T")
                 branches += 1
+                # 3-gram branch pattern — feeds branch-predictor stress
+                # analysis. Eight bins: TTT/TTN/TNT/TNN/NTT/NTN/NNT/NNN.
+                if len(branch_history) >= 3:
+                    pattern = "".join(branch_history[-3:])
+                    _bump("branch_pattern_cg", pattern)
+                # Cap history length to avoid memory growth on long runs.
+                if len(branch_history) > 64:
+                    branch_history = branch_history[-32:]
 
             prev_pc = pc
             prev_bin_bytes = bin_bytes

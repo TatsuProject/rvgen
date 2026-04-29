@@ -123,6 +123,23 @@ CG_VEC_VTYPE_TRANS = "vec_vtype_transition_cg"  # full vtype tuple transition
 # `csrwi vstart, N` before a vector op.
 CG_VEC_VSTART = "vec_vstart_cg"            # zero / one / small / mid / max
 
+# --- Microarchitectural-relevant covergroups (industry-standard --
+# rvgen-first within open-source RISC-V tooling) ---
+CG_CACHE_LINE_CROSS = "cache_line_cross_cg"   # load/store crossing 64B line
+CG_PAGE_CROSS = "page_cross_cg"               # load/store crossing 4KiB page
+CG_BRANCH_DIST = "branch_distance_cg"         # branch byte-offset bucket (signed)
+CG_BRANCH_PATTERN = "branch_pattern_cg"       # T/N 3-gram (e.g. T_T_N)
+
+# --- Value-class coverage (riscv-isac val_comb-style) ---
+# Sampled when a register holds a value the generator can statically
+# determine (immediates after `li`) OR at runtime from spike trace.
+CG_RS1_VAL_CLASS = "rs1_val_class_cg"
+CG_RS2_VAL_CLASS = "rs2_val_class_cg"
+CG_RD_VAL_CLASS = "rd_val_class_cg"
+# Cross of (rs1 value class, rs2 value class) — lights up when both
+# corner values land on the same instruction.
+CG_RS_VAL_CROSS = "rs_val_class_cross_cg"
+
 
 ALL_COVERGROUPS: tuple[str, ...] = (
     CG_OPCODE, CG_FORMAT, CG_CATEGORY, CG_GROUP,
@@ -146,6 +163,9 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_VEC_WIDE_NARROW, CG_VEC_CRYPTO,
     CG_VEC_SEW_TRANS, CG_VEC_LMUL_TRANS, CG_VEC_VTYPE_TRANS,
     CG_VEC_VSTART,
+    CG_CACHE_LINE_CROSS, CG_PAGE_CROSS,
+    CG_BRANCH_DIST, CG_BRANCH_PATTERN,
+    CG_RS1_VAL_CLASS, CG_RS2_VAL_CLASS, CG_RD_VAL_CLASS, CG_RS_VAL_CROSS,
 )
 
 
@@ -264,6 +284,51 @@ _ZV_FAMILY_BY_PREFIX: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
+_CACHE_LINE_BYTES = 64    # standard for ARM/Intel/most RISC-V cores
+_PAGE_BYTES = 4096
+
+
+def _value_class(val: int, xlen: int) -> str:
+    """Classify a register value into industry-standard corner buckets.
+
+    Mirrors what riscv-isac calls ``val_comb`` corners + the
+    walking_ones / walking_zeros expansions. Returns one bin name.
+    """
+    mask = (1 << xlen) - 1
+    v = val & mask
+    if v == 0:
+        return "zero"
+    if v == mask:
+        return "all_ones"
+    if v == 1:
+        return "one"
+    sign_bit = 1 << (xlen - 1)
+    if v == sign_bit:
+        return "min_signed"
+    if v == sign_bit - 1:
+        return "max_signed"
+    # walking-one: exactly one bit set.
+    if v & (v - 1) == 0:
+        return "walking_one"
+    # walking-zero: exactly one bit cleared.
+    inv = (~v) & mask
+    if inv & (inv - 1) == 0:
+        return "walking_zero"
+    # alternating bit pattern — 0x55..55 or 0xAA..AA at any width.
+    alt_a = sum(1 << i for i in range(0, xlen, 2)) & mask
+    alt_b = sum(1 << i for i in range(1, xlen, 2)) & mask
+    if v == alt_a or v == alt_b:
+        return "alternating"
+    # small absolute value (treat as signed).
+    if v & sign_bit:
+        sval = v - (1 << xlen)
+    else:
+        sval = v
+    if -16 <= sval <= 16:
+        return "small"
+    return "generic"
+
+
 def _addr_mode_by_fmt() -> dict:
     """Return the format → "UNIT_STRIDED"/"STRIDED"/"INDEXED" map.
 
@@ -366,6 +431,58 @@ def _sample_vector(db: CoverageDB, instr: Instr, vector_cfg) -> None:
     fam = _vector_family(name)
     if fam is not None:
         _bump(db, CG_VEC_CRYPTO, fam)
+
+
+_BRANCH_INSTR_NAMES = frozenset({
+    RiscvInstrName.BEQ, RiscvInstrName.BNE,
+    RiscvInstrName.BLT, RiscvInstrName.BGE,
+    RiscvInstrName.BLTU, RiscvInstrName.BGEU,
+    RiscvInstrName.C_BEQZ, RiscvInstrName.C_BNEZ,
+})
+
+
+def _sample_branch_distance(db: CoverageDB, instr: Instr) -> None:
+    """Bin a branch's static target distance (taken delta).
+
+    Only the byte-offset magnitude + sign is statically known; whether
+    the branch is taken at runtime is sampled separately by
+    ``rvgen.coverage.runtime``.
+
+    Distance buckets are picked to align with branch-predictor design
+    rules of thumb:
+
+    - ``zero``  (offset == 0; never seen in well-formed asm)
+    - ``fwd_short`` / ``bwd_short``    : |off| < 16 (within an 8-instr window)
+    - ``fwd_medium`` / ``bwd_medium``  : 16 ≤ |off| < 256 (typical loop body)
+    - ``fwd_long`` / ``bwd_long``      : 256 ≤ |off| < 4096 (function-scope)
+    - ``fwd_huge`` / ``bwd_huge``      : ≥ 4096 (rare; needs ±2KiB fixup)
+    """
+    if instr.instr_name not in _BRANCH_INSTR_NAMES:
+        return
+    # The generator stashes the branch's resolved byte offset in
+    # ``imm``. For unresolved string-label branches it'll be 0; in that
+    # case we can't bin — bail.
+    off = int(getattr(instr, "imm", 0))
+    if off == 0:
+        # Try the imm_str: branches resolved late may carry a number there.
+        try:
+            off = int(instr.imm_str)
+        except (ValueError, AttributeError):
+            return
+    if off == 0:
+        _bump(db, CG_BRANCH_DIST, "zero")
+        return
+    direction = "fwd" if off > 0 else "bwd"
+    mag = abs(off)
+    if mag < 16:
+        bucket = "short"
+    elif mag < 256:
+        bucket = "medium"
+    elif mag < 4096:
+        bucket = "long"
+    else:
+        bucket = "huge"
+    _bump(db, CG_BRANCH_DIST, f"{direction}_{bucket}")
 
 
 def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
@@ -496,6 +613,39 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
             off_bin = "neg_small" if off > -128 else ("neg_medium" if off > -1024 else "neg_large")
         _bump(db, CG_LS_OFFSET, off_bin)
 
+        # Cache-line + page-crossing classifiers. The base address is the
+        # data-page region the stream chose; we approximate by treating the
+        # offset as the in-page address and asking whether ``off + width``
+        # straddles a cache line / page boundary. For LS streams that leave
+        # ``base`` set on the instr we'd have a stronger signal — this
+        # static approximation under-reports but never over-reports.
+        access_w = {"byte": 1, "half": 2, "word": 4, "dword": 8}.get(width_bin, 1)
+        # Attempt to recover the stream's per-region base; fall back to 0.
+        base_addr = int(getattr(instr, "_stream_region_base", 0)) or 0
+        eff = base_addr + off
+        # Cache-line crossing — only meaningful for >1-byte accesses.
+        if access_w > 1:
+            line_start = eff & ~(_CACHE_LINE_BYTES - 1)
+            line_end = (eff + access_w - 1) & ~(_CACHE_LINE_BYTES - 1)
+            if line_start != line_end:
+                _bump(db, CG_CACHE_LINE_CROSS, f"cross_w{access_w}")
+            else:
+                # Track aligned-within-line vs near-end-of-line for finer
+                # branch-predictor / fetch-window classification.
+                pos = eff & (_CACHE_LINE_BYTES - 1)
+                if pos >= _CACHE_LINE_BYTES - access_w:
+                    _bump(db, CG_CACHE_LINE_CROSS, f"near_end_w{access_w}")
+                else:
+                    _bump(db, CG_CACHE_LINE_CROSS, f"in_line_w{access_w}")
+        # Page-boundary crossing.
+        if access_w > 1:
+            page_start = eff & ~(_PAGE_BYTES - 1)
+            page_end = (eff + access_w - 1) & ~(_PAGE_BYTES - 1)
+            if page_start != page_end:
+                _bump(db, CG_PAGE_CROSS, f"cross_w{access_w}")
+            else:
+                _bump(db, CG_PAGE_CROSS, "in_page")
+
     # Directed-stream attribution: the stream's finalize() stamps a
     # "Start <stream_name>" comment on the first instr. We sample it into
     # the directed_stream covergroup so verif teams see which streams
@@ -552,6 +702,9 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
         _bump(db, CG_CAT_X_GRP, f"{instr.category.name}__{instr.group.name}")
     except (AttributeError, Exception):
         pass
+
+    # Microarchitectural — branch-distance bucket (static).
+    _sample_branch_distance(db, instr)
 
 
 # ---------------------------------------------------------------------------
