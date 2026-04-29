@@ -459,7 +459,7 @@ def cmd_auto_goals(args: argparse.Namespace) -> int:
     out.append("rd_cg:  { RA: 5, SP: 5, A0: 5, T0: 5, S0: 5 }")
     out.append("imm_sign_cg: { pos: 30, neg: 30, zero: 5 }")
     out.append("imm_range_cg: { walking_one: 5, walking_zero: 5, all_ones: 5, zero: 5 }")
-    out.append("hazard_cg: { RAW: 30, WAW: 30, WAR: 10, NONE: 30 }")
+    out.append("hazard_cg: { raw: 30, waw: 30, war: 10, none: 30 }")
     out.append("rs1_eq_rs2_cg: { equal: 5, distinct: 50 }")
     out.append("rs1_eq_rd_cg: { equal: 5, distinct: 50 }")
     out.append("")
@@ -474,8 +474,13 @@ def cmd_auto_goals(args: argparse.Namespace) -> int:
     out.append("")
     out.append("mem_align_cg:")
     out.append("  byte_aligned: 10")
+    out.append("  half_aligned: 5")
+    out.append("  word_aligned: 5")
+    if target.xlen >= 64:
+        out.append("  dword_aligned: 5")
     if target.support_unaligned_load_store:
-        out.append("  unaligned: 5")
+        out.append("  half_unaligned: 1")
+        out.append("  word_unaligned: 1")
     out.append("")
 
     if has_F or has_D:
@@ -493,11 +498,15 @@ def cmd_auto_goals(args: argparse.Namespace) -> int:
 
     if has_S or has_U:
         out.append("privilege_mode_cg:")
-        out.append("  MACHINE_MODE: 30")
+        out.append("  M_mode: 30      # populated from --iss_trace mcause walks")
         if has_S:
-            out.append("  SUPERVISOR_MODE: 5")
+            out.append("  S_mode: 5")
+            out.append("  S_return: 1")
         if has_U:
-            out.append("  USER_MODE: 5")
+            out.append("  U_mode: 5")
+            out.append("  U_return: 1")
+        out.append("  M_entered: 1")
+        out.append("  M_return: 1")
         out.append("")
 
     # Vector covergroups gated by V profile.
@@ -539,8 +548,135 @@ def cmd_auto_goals(args: argparse.Namespace) -> int:
             out.append("vec_amo_wd_cg: { wd_set: 5, wd_clear: 5 }")
             out.append("")
 
+        # vtype-transition goals — only realistic when the user adds a
+        # vsetvli-stress directed stream, but include the goal stub so it
+        # shows up in the dashboard.
+        out.append("vec_sew_transition_cg:")
+        out.append("  # Goals appear once `riscv_vsetvli_stress_instr_stream` is added.")
+        out.append("  SEW32__SEW16: 0")
+        out.append("  SEW16__SEW32: 0")
+        out.append("  SEW32__SEW8: 0")
+        out.append("vec_lmul_transition_cg: { M1__M2: 0, M2__M1: 0, M1__MF2: 0 }")
+        out.append("")
+
+    # opcode_cg — representative mnemonic seeds per advertised group.
+    # Users should expand this list once they see real coverage; the goal
+    # is "have at least one bin per major family so a missing extension
+    # is visible at first glance".
+    opcode_seeds = _opcode_seeds_for(iso, has_S, has_U)
+    if opcode_seeds:
+        out.append("opcode_cg:")
+        for line in opcode_seeds:
+            out.append(line)
+        out.append("")
+
+    # privileged-state goals if S/U.
+    if has_S or has_U:
+        out.append("csr_cg:")
+        out.append("  MSCRATCH: 5  # writable scalar-CSR")
+        if has_S:
+            out.append("  SSCRATCH: 5")
+            out.append("  STVEC: 1")
+        out.append("  MTVEC: 1")
+        out.append("  MEPC: 1")
+        out.append("")
+        out.append("exception_cg:  # populated only with --iss_trace + a fault stream")
+        out.append("  trap_entered: 0")
+        out.append("")
+
     print("\n".join(out))
     return 0
+
+
+def _opcode_seeds_for(iso: set, has_S: bool, has_U: bool) -> list[str]:
+    """Return YAML lines for opcode_cg with one rep per advertised group.
+
+    Goal numbers are deliberately small (1-3) — auto-goals exists to
+    *discover* coverage gaps, not to set production thresholds. Users
+    bump the numbers after seeing baseline runs.
+    """
+    from rvgen.isa.enums import RiscvInstrGroup as G
+    lines: list[str] = []
+
+    def emit(mnems: tuple[str, ...], goal: int = 3) -> None:
+        for m in mnems:
+            lines.append(f"  {m}: {goal}")
+
+    # Base I — always present.
+    if {G.RV32I, G.RV64I} & iso:
+        emit(("LUI", "AUIPC", "JAL", "JALR",
+              "BEQ", "BNE", "BLT", "BGE",
+              "LB", "LH", "LW", "SB", "SH", "SW",
+              "ADDI", "ANDI", "ORI", "XORI",
+              "ADD", "SUB", "AND", "OR", "XOR",
+              "SLT", "SLTU", "SLL", "SRL", "SRA"))
+    if G.RV64I in iso:
+        emit(("LD", "SD", "LWU", "ADDIW", "ADDW", "SUBW", "SLLIW", "SRLIW"))
+    if {G.RV32M, G.RV64M} & iso:
+        emit(("MUL", "MULH", "MULHSU", "MULHU", "DIV", "DIVU", "REM", "REMU"))
+    if G.RV64M in iso:
+        emit(("MULW", "DIVW", "DIVUW", "REMW", "REMUW"))
+    if {G.RV32A, G.RV64A} & iso:
+        emit(("LR_W", "SC_W", "AMOSWAP_W", "AMOADD_W", "AMOXOR_W", "AMOAND_W"))
+    if G.RV64A in iso:
+        emit(("LR_D", "SC_D", "AMOSWAP_D", "AMOADD_D"))
+    if {G.RV32C, G.RV64C} & iso:
+        emit(("C_ADDI", "C_LI", "C_LUI", "C_ADD", "C_AND", "C_OR",
+              "C_BEQZ", "C_BNEZ", "C_J", "C_JR", "C_JALR"))
+    if G.RV64C in iso:
+        emit(("C_ADDIW", "C_ADDW", "C_LD", "C_SD"))
+    if {G.RV32F, G.RV64F} & iso:
+        emit(("FLW", "FSW", "FADD_S", "FSUB_S", "FMUL_S", "FDIV_S",
+              "FSQRT_S", "FMV_W_X", "FMV_X_W", "FCVT_S_W", "FEQ_S"))
+    if {G.RV32D, G.RV64D} & iso:
+        emit(("FLD", "FSD", "FADD_D", "FSUB_D", "FMUL_D", "FCVT_D_W"))
+    # Bitmanip
+    if {G.RV32ZBA, G.RV64ZBA} & iso:
+        emit(("SH1ADD", "SH2ADD", "SH3ADD", "SLLI_UW"))
+    if {G.RV32ZBB, G.RV64ZBB} & iso:
+        emit(("ANDN", "ORN", "XNOR", "CLZ", "CTZ", "CPOP",
+              "MAX", "MIN", "ROL", "ROR", "RORI", "ORC_B", "REV8"))
+    if {G.RV32ZBC, G.RV64ZBC} & iso:
+        emit(("CLMUL", "CLMULH", "CLMULR"))
+    if {G.RV32ZBS, G.RV64ZBS} & iso:
+        emit(("BCLR", "BEXT", "BINV", "BSET"))
+    # Crypto K — mnemonics differ by XLEN (AES32* on RV32, AES64* on RV64).
+    if {G.RV32ZBKB, G.RV64ZBKB} & iso:
+        emit(("BREV8", "PACK", "PACKH"))
+    if G.RV64ZKNE in iso:
+        emit(("AES64ES", "AES64ESM", "AES64KS1I", "AES64KS2"))
+    elif G.RV32ZKNE in iso:
+        emit(("AES32ESI", "AES32ESMI"))
+    if G.RV64ZKND in iso:
+        emit(("AES64DS", "AES64DSM", "AES64IM"))
+    elif G.RV32ZKND in iso:
+        emit(("AES32DSI", "AES32DSMI"))
+    if {G.RV32ZKNH, G.RV64ZKNH} & iso:
+        # SHA-256 is XLEN-agnostic.
+        emit(("SHA256SUM0", "SHA256SUM1", "SHA256SIG0", "SHA256SIG1"))
+        if G.RV64ZKNH in iso:
+            emit(("SHA512SUM0", "SHA512SUM1", "SHA512SIG0", "SHA512SIG1"))
+        elif G.RV32ZKNH in iso:
+            # RV32 split-pair encodings.
+            emit(("SHA512SUM0R", "SHA512SUM1R",
+                  "SHA512SIG0L", "SHA512SIG0H",
+                  "SHA512SIG1L", "SHA512SIG1H"))
+    if {G.RV32ZKSH, G.RV64ZKSH} & iso:
+        emit(("SM3P0", "SM3P1"))
+    if {G.RV32ZKSED, G.RV64ZKSED} & iso:
+        emit(("SM4ED", "SM4KS"))
+    # Privileged-mode opcodes (only meaningful with S/U).
+    if has_S or has_U:
+        emit(("ECALL", "MRET"))
+        if has_S:
+            emit(("SRET", "SFENCE_VMA"))
+    # Vector — light seed; the per-target rv64gcv*.yaml files have richer
+    # opcode goals. We only emit a minimal stub here so the user knows
+    # the covergroup exists.
+    if any(g in iso for g in (G.RVV, G.ZVE32X, G.ZVE32F, G.ZVE64X, G.ZVE64F, G.ZVE64D)):
+        emit(("VADD", "VSUB", "VMUL", "VAND", "VOR", "VXOR",
+              "VSLL", "VSRL", "VSRA", "VLE_V", "VSE_V"), goal=2)
+    return lines
 
 
 def cmd_suggest_seeds(args: argparse.Namespace) -> int:

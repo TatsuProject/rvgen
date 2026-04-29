@@ -119,6 +119,9 @@ CG_VEC_CRYPTO = "vec_crypto_subext_cg"     # zvbb / zvbc / zvkn family
 CG_VEC_SEW_TRANS = "vec_sew_transition_cg"     # prev_SEW -> new_SEW
 CG_VEC_LMUL_TRANS = "vec_lmul_transition_cg"   # prev_LMUL -> new_LMUL
 CG_VEC_VTYPE_TRANS = "vec_vtype_transition_cg"  # full vtype tuple transition
+# vstart corner cases — sampled when riscv_vstart_corner_instr_stream emits
+# `csrwi vstart, N` before a vector op.
+CG_VEC_VSTART = "vec_vstart_cg"            # zero / one / small / mid / max
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -142,6 +145,7 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_VEC_VARIANT, CG_VEC_NF, CG_VEC_SEG_X_MODE,
     CG_VEC_WIDE_NARROW, CG_VEC_CRYPTO,
     CG_VEC_SEW_TRANS, CG_VEC_LMUL_TRANS, CG_VEC_VTYPE_TRANS,
+    CG_VEC_VSTART,
 )
 
 
@@ -587,6 +591,21 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
 
     for idx, instr in enumerate(seq):
         sample_instr(db, instr, vector_cfg=vector_cfg)
+
+        # vstart-corner pseudo carries _vstart_value — bin it.
+        if hasattr(instr, "_vstart_value"):
+            v = int(instr._vstart_value)
+            if v == 0:
+                bin_name = "zero"
+            elif v == 1:
+                bin_name = "one"
+            elif v <= 4:
+                bin_name = "small"
+            elif v <= 16:
+                bin_name = "mid"
+            else:
+                bin_name = "high"
+            _bump(db, CG_VEC_VSTART, bin_name)
 
         # vsetvli emitted by the vsetvli-stress stream carries the new
         # SEW/LMUL/fractional/TA/MA as Python attrs (not real instr_name

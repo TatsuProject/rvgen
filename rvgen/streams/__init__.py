@@ -45,3 +45,5 @@ from rvgen.streams import amo_streams           # noqa: F401,E402
 from rvgen.streams import load_store            # noqa: F401,E402
 from rvgen.streams import vector_load_store     # noqa: F401,E402
 from rvgen.streams import vsetvli_stress        # noqa: F401,E402
+from rvgen.streams import vector_hazard         # noqa: F401,E402
+from rvgen.streams import vstart_corner         # noqa: F401,E402
