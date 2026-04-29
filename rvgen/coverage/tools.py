@@ -349,6 +349,45 @@ def cmd_lint_goals(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cov_explain(args: argparse.Namespace) -> int:
+    """Show which directed perturbations would fire for current coverage.
+
+    Reads the observed coverage JSON + the goals YAML, runs the same
+    matcher used by ``--cov_directed`` in :mod:`rvgen.auto_regress`, and
+    prints the would-be perturbations along with the reason strings.
+    Does NOT mutate gen_opts — purely informational.
+    """
+    from rvgen.coverage.directed import directed_gen_opts, _PERTURBATIONS
+    from rvgen.coverage.cgf import missing_bins
+    observed = _read(Path(args.observed))
+    goals = load_goals(args.goals)
+    miss = missing_bins(observed, goals)
+    base = args.gen_opts or ""
+    out, reasons = directed_gen_opts(base, observed, goals,
+                                      max_perturbations=args.max)
+    print(f"=== cov-explain: {sum(len(v) for v in miss.values())} missing bin(s) ===\n")
+    if reasons:
+        print(f"Would apply {len(reasons)} perturbation(s):")
+        for r in reasons:
+            print(f"  - {r}")
+        print(f"\nMutated gen_opts:\n  {out}")
+    else:
+        print("No perturbations match the current missing bins —")
+        print("either all goals met, or none of the matchers fired.")
+    # Print which mappings we know about that aren't in the goal/observed
+    # set, so users can see what's possible.
+    print("\nUnused matchers (no goal asks for these bins):")
+    seen = set()
+    for key, _pert in _PERTURBATIONS:
+        cg, bn = key.split(".", 1)
+        cgs_with_goals = set(goals.data.keys())
+        in_goals = cg in cgs_with_goals and bn in goals.covergroup(cg)
+        if not in_goals and key not in seen:
+            seen.add(key)
+            print(f"  - {key}")
+    return 0
+
+
 def cmd_auto_goals(args: argparse.Namespace) -> int:
     """Print a goals YAML template scoped to ``args.target``'s ISA.
 
@@ -910,6 +949,21 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--strict", choices=("warn", "error"), default="warn",
                      help="Exit code behavior (default: warn → exit 0).")
     pl.set_defaults(func=cmd_lint_goals)
+
+    pce = sub.add_parser("cov-explain",
+                          help="Preview which --cov_directed perturbations "
+                               "would fire for the current observed "
+                               "coverage. Doesn't mutate anything.")
+    pce.add_argument("--observed", required=True,
+                      help="Observed coverage JSON.")
+    pce.add_argument("--goals", required=True,
+                      help="Goals YAML.")
+    pce.add_argument("--gen_opts", default="",
+                      help="Existing gen_opts to perturb on top of "
+                           "(string of +plusargs).")
+    pce.add_argument("--max", type=int, default=6,
+                      help="Maximum perturbations to suggest (default: 6).")
+    pce.set_defaults(func=cmd_cov_explain)
 
     pag = sub.add_parser("auto-goals",
                           help="Print a starter goals YAML scoped to a "

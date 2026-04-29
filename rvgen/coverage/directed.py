@@ -92,6 +92,56 @@ _PERTURBATIONS: tuple[tuple[str, Perturbation], ...] = (
     ("mem_align_cg.word_aligned",
      Perturbation(None, "+directed_instr_15=riscv_multi_page_load_store_instr_stream,3",
                   "word_aligned loads missing → inject multi-page stream")),
+
+    # ---- Vector-aware perturbations (rvgen-first) ----
+    ("vec_ls_addr_mode_cg.UNIT_STRIDED",
+     Perturbation(None, "+directed_instr_20=riscv_vector_load_store_instr_stream,5",
+                  "vector LS addr_mode bins missing → inject vector LS stream")),
+    ("vec_ls_addr_mode_cg.STRIDED",
+     Perturbation(None, "+directed_instr_20=riscv_vector_load_store_instr_stream,5",
+                  "vector LS addr_mode bins missing → inject vector LS stream")),
+    ("vec_ls_addr_mode_cg.INDEXED",
+     Perturbation(None, "+directed_instr_20=riscv_vector_load_store_instr_stream,5",
+                  "vector LS addr_mode bins missing → inject vector LS stream")),
+    # Widening / narrowing — flip the vec_narrowing_widening knob ON.
+    ("vec_widening_narrowing_cg.widening",
+     Perturbation(re.compile(r"\+vec_narrowing_widening=\S+"),
+                  "+vec_narrowing_widening=1",
+                  "widening vector ops missing → enable +vec_narrowing_widening")),
+    ("vec_widening_narrowing_cg.narrowing",
+     Perturbation(re.compile(r"\+vec_narrowing_widening=\S+"),
+                  "+vec_narrowing_widening=1",
+                  "narrowing vector ops missing → enable +vec_narrowing_widening")),
+    ("vec_widening_narrowing_cg.convert",
+     Perturbation(re.compile(r"\+vec_narrowing_widening=\S+"),
+                  "+vec_narrowing_widening=1",
+                  "convert vector ops missing → enable +vec_narrowing_widening")),
+    # FP-vector — flip vec_fp.
+    ("vec_va_variant_cg.VF",
+     Perturbation(re.compile(r"\+vec_fp=\S+"), "+vec_fp=1",
+                  "VF variant missing → enable +vec_fp")),
+    ("vec_va_variant_cg.VFM",
+     Perturbation(re.compile(r"\+vec_fp=\S+"), "+vec_fp=1",
+                  "VFM variant missing → enable +vec_fp")),
+    # Zvlsseg — flip enable_zvlsseg, inject vector LS to populate.
+    ("vec_nfields_cg.NF2",
+     Perturbation(re.compile(r"\+enable_zvlsseg=\S+"), "+enable_zvlsseg=1",
+                  "Zvlsseg NFIELDS bins missing → enable +enable_zvlsseg")),
+    # Vector AMO — inject the vector AMO stream (works only when
+    # target.vector_amo_supported=True; falls back gracefully otherwise).
+    ("vec_amo_wd_cg.wd_set",
+     Perturbation(None,
+                  "+directed_instr_21=riscv_vector_amo_instr_stream,3",
+                  "vector AMO bins missing → inject vector AMO stream")),
+    ("vec_amo_wd_cg.wd_clear",
+     Perturbation(None,
+                  "+directed_instr_21=riscv_vector_amo_instr_stream,3",
+                  "vector AMO bins missing → inject vector AMO stream")),
+    # Fault-only-first vector loads.
+    ("opcode_cg.VLEFF_V",
+     Perturbation(re.compile(r"\+enable_fault_only_first_load=\S+"),
+                  "+enable_fault_only_first_load=1 +directed_instr_22=riscv_vector_load_store_instr_stream,3",
+                  "VLEFF_V missing → enable fault-only-first + inject vector LS")),
 )
 
 
