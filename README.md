@@ -22,6 +22,10 @@
   <a href="docs/examples/coverage-report.html"><b>Sample HTML Report</b></a>
 </p>
 
+<p align="center">
+  <b>Install:</b> <code>pipx install rvgen</code> &nbsp;or&nbsp; <code>pip install rvgen</code> in a venv — see <a href="#install">Install</a> for details.
+</p>
+
 ---
 
 rvgen replaces the [CHIPS Alliance's riscv-dv](https://github.com/chipsalliance/riscv-dv) at the generator layer with a small, single-dependency (PyYAML) Python package. Every riscv-dv testlist YAML runs unchanged. On top of that parity, the project adds a first-class **functional-coverage subsystem** — covergroups, CGF-style goal files, coverage-directed auto-regression, per-test attribution, HTML dashboards, CI integration — that in the SV world you'd normally assemble from a UVM flow, riscv-isac, and a simulator licence.
@@ -135,13 +139,37 @@ See a real rendered example at **[`docs/examples/coverage-report.html`](docs/exa
 
 ## Install
 
-From PyPI:
+`rvgen` is a command-line tool, so the recommended install is **`pipx`** —
+it puts `rvgen` on your `PATH` while keeping its dependencies in an isolated
+venv:
+
+```bash
+# One-time pipx setup (Debian/Ubuntu):
+sudo apt install pipx && pipx ensurepath
+# (open a new terminal so the PATH update takes effect)
+
+pipx install rvgen
+rvgen --help
+```
+
+Plain `pip` works too — on conda, macOS, Windows, or any system without
+[PEP 668](https://peps.python.org/pep-0668/) restrictions:
 
 ```bash
 pip install rvgen
 ```
 
-Or from source (for development):
+On modern Debian/Ubuntu the system `pip` is locked down by PEP 668. If you
+hit `error: externally-managed-environment`, either use `pipx` (above) or
+install into a venv:
+
+```bash
+python3 -m venv ~/rvgen-env
+~/rvgen-env/bin/pip install rvgen
+~/rvgen-env/bin/rvgen --help
+```
+
+For development (clone + editable install with test extras):
 
 ```bash
 git clone https://github.com/LogicX-Tatsu/rvgen.git
