@@ -38,6 +38,9 @@ _FP_TO_INT_NAMES = frozenset({
     _N.FMV_X_W, _N.FMV_X_D,
     _N.FCVT_W_S, _N.FCVT_WU_S, _N.FCVT_L_S, _N.FCVT_LU_S,
     _N.FCVT_W_D, _N.FCVT_WU_D, _N.FCVT_L_D, _N.FCVT_LU_D,
+    # Zfh additions: half-precision FP→int.
+    _N.FMV_X_H,
+    _N.FCVT_W_H, _N.FCVT_WU_H, _N.FCVT_L_H, _N.FCVT_LU_H,
 })
 
 # Names that take an integer rs1 to an fp output (int→FP).
@@ -45,6 +48,9 @@ _INT_TO_FP_NAMES = frozenset({
     _N.FMV_W_X, _N.FMV_D_X,
     _N.FCVT_S_W, _N.FCVT_S_WU, _N.FCVT_S_L, _N.FCVT_S_LU,
     _N.FCVT_D_W, _N.FCVT_D_WU, _N.FCVT_D_L, _N.FCVT_D_LU,
+    # Zfh additions: int→half-precision FP.
+    _N.FMV_H_X,
+    _N.FCVT_H_W, _N.FCVT_H_WU, _N.FCVT_H_L, _N.FCVT_H_LU,
 })
 
 # Names that don't take a rounding-mode suffix (per SV convert2asm guard).
@@ -55,10 +61,19 @@ _NO_RM_NAMES = frozenset({
     _N.FCVT_D_S, _N.FCVT_D_W, _N.FCVT_D_WU,
     _N.FSGNJ_S, _N.FSGNJN_S, _N.FSGNJX_S,
     _N.FSGNJ_D, _N.FSGNJN_D, _N.FSGNJX_D,
+    # Zfh additions: half-precision sign/min/max/class/mv/widen-without-rm
+    # (single→half always rounds; double→half always rounds; half→single
+    # is exact, no rm; half→double is exact, no rm).
+    _N.FMIN_H, _N.FMAX_H,
+    _N.FMV_H_X, _N.FMV_X_H,
+    _N.FCLASS_H,
+    _N.FSGNJ_H, _N.FSGNJN_H, _N.FSGNJX_H,
+    _N.FCVT_S_H,    # half→single is exact (no rounding)
+    _N.FCVT_D_H,    # half→double is exact (no rounding)
 })
 
-# Single-source R-format ops (FCLASS_S / FCLASS_D) — rd, fs1.
-_FCLASS_NAMES = frozenset({_N.FCLASS_S, _N.FCLASS_D})
+# Single-source R-format ops (FCLASS_S / FCLASS_D / FCLASS_H) — rd, fs1.
+_FCLASS_NAMES = frozenset({_N.FCLASS_S, _N.FCLASS_D, _N.FCLASS_H})
 
 
 class FloatingPointInstr(Instr):

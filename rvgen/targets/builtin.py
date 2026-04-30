@@ -199,6 +199,19 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         support_unaligned_load_store=False,
         **_m_only(),
     ),
+    # ---- RV32IMAFDC + Zfh (half-precision scalar FP) ----
+    "rv32imafdc_zfh": TargetCfg(
+        name="rv32imafdc_zfh", xlen=32,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV32C,
+            _G.RV32F, _G.RV32FC, _G.RV32D, _G.RV32DC, _G.RV32A,
+            _G.RV32ZFH,
+        ),
+        isa_string="rv32imafdc_zfh_zicsr_zifencei",
+        mabi="ilp32d",
+        support_unaligned_load_store=False,
+        **_m_only(),
+    ),
     "rv32imcb": TargetCfg(
         name="rv32imcb", xlen=32,
         supported_isa=(
@@ -261,6 +274,21 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         support_sfence=True,
         support_unaligned_load_store=False,
         **_privileged(),
+    ),
+    # ---- RV64IMAFDC + Zfh ----
+    "rv64imafdc_zfh": TargetCfg(
+        name="rv64imafdc_zfh", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV64I, _G.RV64M,
+            _G.RV32C, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.RV32ZFH, _G.RV64ZFH,
+        ),
+        isa_string="rv64imafdc_zfh_zicsr_zifencei",
+        mabi="lp64d",
+        support_unaligned_load_store=False,
+        **_m_only(),
     ),
     # ---- RV64GC + modern checkbox extensions (Zicond/Zicbom/Zicboz/Zicbop/
     # Zihintpause/Zihintntl/Zimop/Zcmop). Same privileged shape as rv64gc;

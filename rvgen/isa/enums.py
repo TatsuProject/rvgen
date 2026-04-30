@@ -205,6 +205,12 @@ class RiscvInstrGroup(IntEnum):
     RV32ZIMOP = 61
     RV64ZIMOP = 62
     RV32ZCMOP = 63
+    # --- Half-precision FP (Zfh + Zvfh). Ratified.
+    # Zfh : scalar half-precision FP — FLH/FSH + FADD.H/FMUL.H/etc.
+    # Zvfh: vector half-precision FP (added under same group as Zfh
+    #       for filtering; vector encoding paths handle SEW=16).
+    RV32ZFH = 64
+    RV64ZFH = 65
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +486,35 @@ _INSTR_NAMES = [
     # Zcmop — 8 reserved compressed may-be-ops (c.mop.1, c.mop.3, ..., c.mop.15).
     "C_MOP_1", "C_MOP_3", "C_MOP_5", "C_MOP_7",
     "C_MOP_9", "C_MOP_11", "C_MOP_13", "C_MOP_15",
+
+    # ---- Zfh — scalar half-precision FP (16-bit, ratified) ----
+    # Loads/stores
+    "FLH", "FSH",
+    # 4-operand FMA (R4 format)
+    "FMADD_H", "FMSUB_H", "FNMSUB_H", "FNMADD_H",
+    # Arithmetic
+    "FADD_H", "FSUB_H", "FMUL_H", "FDIV_H", "FSQRT_H",
+    # Sign manipulation
+    "FSGNJ_H", "FSGNJN_H", "FSGNJX_H",
+    # Min/max
+    "FMIN_H", "FMAX_H",
+    # FP→int (W and WU on RV32; L and LU added on RV64)
+    "FCVT_W_H", "FCVT_WU_H",
+    # Bit moves (FP <-> int register, 16-bit raw)
+    "FMV_X_H",
+    # Compare (FEQ.H / FLT.H / FLE.H)
+    "FEQ_H", "FLT_H", "FLE_H",
+    # Classification
+    "FCLASS_H",
+    # int→FP
+    "FCVT_H_W", "FCVT_H_WU",
+    "FMV_H_X",
+    # FP-precision conversions
+    "FCVT_S_H", "FCVT_H_S",
+    "FCVT_D_H", "FCVT_H_D",
+    # RV64 Zfh additions — 64-bit int <-> half-FP
+    "FCVT_L_H", "FCVT_LU_H",
+    "FCVT_H_L", "FCVT_H_LU",
 
     # Terminator
     "INVALID_INSTR",
