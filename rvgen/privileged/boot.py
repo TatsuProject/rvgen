@@ -36,6 +36,7 @@ from rvgen.privileged.paging import (
     gen_setup_satp,
     is_paging_enabled,
 )
+from rvgen.privileged.pmp import gen_setup_pmp, make_default_cfg as make_default_pmp_cfg
 from rvgen.targets import TargetCfg
 
 
@@ -279,7 +280,16 @@ def gen_pre_enter_privileged_mode(
             f"csrw 0x{PrivilegedReg.MIE.value:x}, {gpr0.abi}"
         ))
 
-    # 7) Page-table linking + SATP setup. Must run while still in M-mode
+    # 7) PMP setup (opt-in). Programmed before paging so M-mode can
+    #    still use unprotected memory while it builds page tables.
+    if cfg.enable_pmp_setup:
+        pmp_cfg = make_default_pmp_cfg(
+            xlen=target.xlen,
+            num_regions=cfg.pmp_num_regions,
+        )
+        lines.extend(gen_setup_pmp(cfg, pmp_cfg, scratch))
+
+    # 8) Page-table linking + SATP setup. Must run while still in M-mode
     #    (link-PTE fix-up writes to the .page_table section) and *before*
     #    MRET drops us into S/U-mode where SATP-translated loads/stores
     #    apply.
@@ -293,6 +303,6 @@ def gen_pre_enter_privileged_mode(
         # Program SATP and flush the TLB.
         lines.extend(gen_setup_satp(cfg, scratch))
 
-    # 8) MRET — transition to init at MPP's privilege.
+    # 9) MRET — transition to init at MPP's privilege.
     lines.append(_line("mret"))
     return lines

@@ -132,6 +132,16 @@ class Config:
     mtvec_mode: MtvecMode = MtvecMode.VECTORED
     tvec_alignment: int = 2
 
+    # ---- PMP ----
+    # Opt-in. When True, the boot CSR sequence emits pmpcfg/pmpaddr
+    # writes for ``pmp_num_regions`` regions in the default permissive
+    # configuration (NAPOT covering all of memory if 1 region, TOR
+    # distributed otherwise). Most existing tests run M-mode-only and
+    # don't need PMP — keeping it off by default preserves regression.
+    enable_pmp_setup: bool = False
+    pmp_num_regions: int = 1
+    pmp_granularity: int = 0
+
     # ---- Extensions ----
     enable_floating_point: bool = False
     enable_vector_extension: bool = False
