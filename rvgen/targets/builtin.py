@@ -295,6 +295,29 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         support_unaligned_load_store=False,
         **_privileged(),
     ),
+    # ---- RV64GC + Hypervisor (H) ----
+    # Adds HS-mode + Virtual-S/U-mode + the H-ext instruction set
+    # (hfence.vvma/gvma, hlv*/hlvx*/hsv*). Two-stage translation lives
+    # on the privileged side and is not yet wired up; for Phase-1 the
+    # target advertises the new ``RV64H`` group enum so the random
+    # stream can emit H-ext mnemonics, and the H-mode CSRs become
+    # reachable from CSR-write streams.
+    "rv64gch": TargetCfg(
+        name="rv64gch", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV64I, _G.RV64M,
+            _G.RV32C, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.RV32X,
+            _G.RV64H,
+        ),
+        satp_mode=SatpMode.SV39,
+        support_sfence=True,
+        isa_string="rv64gch_zicsr_zifencei",
+        mabi="lp64d",
+        **_privileged(),
+    ),
     # ---- RV64IMAFDC + Zfh ----
     "rv64imafdc_zfh": TargetCfg(
         name="rv64imafdc_zfh", xlen=64,

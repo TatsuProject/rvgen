@@ -211,6 +211,12 @@ class RiscvInstrGroup(IntEnum):
     #       for filtering; vector encoding paths handle SEW=16).
     RV32ZFH = 64
     RV64ZFH = 65
+    # --- Hypervisor extension (H, ratified 2021-11). Adds HS-mode +
+    # Virtual-S/U-mode + two-stage translation. Phase-1 port covers
+    # the new instructions (hfence.vvma/gvma, hlv*/hsv*, hlvx*) and
+    # the H-mode CSRs already defined in PrivilegedReg above. Two-
+    # stage translation rides a future release.
+    RV64H = 66
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +521,17 @@ _INSTR_NAMES = [
     # RV64 Zfh additions — 64-bit int <-> half-FP
     "FCVT_L_H", "FCVT_LU_H",
     "FCVT_H_L", "FCVT_H_LU",
+
+    # ---- Hypervisor extension (H) — ratified 2021-11 ----
+    # Hypervisor TLB-flush instructions (R-format, no rd/no operands beyond rs1/rs2).
+    "HFENCE_VVMA", "HFENCE_GVMA",
+    # Hypervisor load instructions — load from VS-mode address as if
+    # in the guest. R-format with rd, rs1.
+    "HLV_B", "HLV_BU", "HLV_H", "HLV_HU", "HLVX_HU",
+    "HLV_W", "HLV_WU", "HLVX_WU",
+    "HLV_D",
+    # Hypervisor store instructions — store to VS-mode address.
+    "HSV_B", "HSV_H", "HSV_W", "HSV_D",
 
     # Terminator
     "INVALID_INSTR",
