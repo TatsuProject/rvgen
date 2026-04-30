@@ -186,6 +186,25 @@ class RiscvInstrGroup(IntEnum):
     ZVBC = 51
     ZVKN = 52
     ZVFH = 53
+    # --- Modern checkbox extensions (ratified 2022-2024) ---
+    # Zicond  : Integer conditional — czero.eqz / czero.nez. Ratified 2023.
+    # Zicbom  : Cache-block management hints — cbo.clean/flush/inval. 2022.
+    # Zicboz  : Cache-block zero — cbo.zero. 2022.
+    # Zicbop  : Prefetch hints — prefetch.i/r/w. 2022.
+    # Zihintpause : pause hint (HINT-encoded fence). Ratified 2021.
+    # Zihintntl   : non-temporal-locality hints (ntl.p1/pall/s1/all). 2022.
+    # Zimop   : may-be-operations — 32 mop.r.N + 8 mop.rr.N reserved. 2024.
+    # Zcmop   : compressed may-be-operations — c.mop.1..15 (odd). 2024.
+    RV32ZICOND = 54
+    RV64ZICOND = 55
+    RV32ZICBOM = 56
+    RV32ZICBOZ = 57
+    RV32ZICBOP = 58
+    RV32ZIHINTPAUSE = 59
+    RV32ZIHINTNTL = 60
+    RV32ZIMOP = 61
+    RV64ZIMOP = 62
+    RV32ZCMOP = 63
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +447,39 @@ _INSTR_NAMES = [
 
     # SM4 — Zksed.
     "SM4ED", "SM4KS",
+
+    # ---- Modern checkbox extensions (ratified 2022-2024) ----
+    # Zicond (integer conditional) — czero.eqz / czero.nez. RV32 + RV64 share
+    # mnemonics (XLEN-wide R-type).
+    "CZERO_EQZ", "CZERO_NEZ",
+
+    # Zicbom — cache-block management (clean / flush / invalidate).
+    "CBO_CLEAN", "CBO_FLUSH", "CBO_INVAL",
+    # Zicboz — cache-block zero.
+    "CBO_ZERO",
+    # Zicbop — software prefetch (instruction / read / write).
+    "PREFETCH_I", "PREFETCH_R", "PREFETCH_W",
+
+    # Zihintpause — pause hint (encodes as fence with pred=W,succ=0,fm=PAUSE).
+    "PAUSE",
+    # Zihintntl — non-temporal-locality hints (HINT-encoded c.add).
+    "NTL_P1", "NTL_PALL", "NTL_S1", "NTL_ALL",
+
+    # Zimop — 32 reserved unary may-be-ops (mop.r.0..31, I-format).
+    "MOP_R_0",  "MOP_R_1",  "MOP_R_2",  "MOP_R_3",
+    "MOP_R_4",  "MOP_R_5",  "MOP_R_6",  "MOP_R_7",
+    "MOP_R_8",  "MOP_R_9",  "MOP_R_10", "MOP_R_11",
+    "MOP_R_12", "MOP_R_13", "MOP_R_14", "MOP_R_15",
+    "MOP_R_16", "MOP_R_17", "MOP_R_18", "MOP_R_19",
+    "MOP_R_20", "MOP_R_21", "MOP_R_22", "MOP_R_23",
+    "MOP_R_24", "MOP_R_25", "MOP_R_26", "MOP_R_27",
+    "MOP_R_28", "MOP_R_29", "MOP_R_30", "MOP_R_31",
+    # Zimop — 8 reserved binary may-be-ops (mop.rr.0..7, R-format).
+    "MOP_RR_0", "MOP_RR_1", "MOP_RR_2", "MOP_RR_3",
+    "MOP_RR_4", "MOP_RR_5", "MOP_RR_6", "MOP_RR_7",
+    # Zcmop — 8 reserved compressed may-be-ops (c.mop.1, c.mop.3, ..., c.mop.15).
+    "C_MOP_1", "C_MOP_3", "C_MOP_5", "C_MOP_7",
+    "C_MOP_9", "C_MOP_11", "C_MOP_13", "C_MOP_15",
 
     # Terminator
     "INVALID_INSTR",

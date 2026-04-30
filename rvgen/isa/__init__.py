@@ -25,6 +25,7 @@ from rvgen.isa import rv32fc  # noqa: F401,E402
 from rvgen.isa import rv32dc  # noqa: F401,E402
 from rvgen.isa import bitmanip  # noqa: F401,E402
 from rvgen.isa import crypto    # noqa: F401,E402
+from rvgen.isa import modern    # noqa: F401,E402
 from rvgen.isa import rv32v          # noqa: F401,E402
 from rvgen.isa import vector_crypto  # noqa: F401,E402
 

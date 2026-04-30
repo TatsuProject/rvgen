@@ -262,6 +262,34 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         support_unaligned_load_store=False,
         **_privileged(),
     ),
+    # ---- RV64GC + modern checkbox extensions (Zicond/Zicbom/Zicboz/Zicbop/
+    # Zihintpause/Zihintntl/Zimop/Zcmop). Same privileged shape as rv64gc;
+    # advertises every ratified-but-recent extension a 2024-era core tends
+    # to implement.
+    "rv64gc_modern": TargetCfg(
+        name="rv64gc_modern", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV64I, _G.RV64M,
+            _G.RV32C, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.RV32X,
+            _G.RV32ZICOND, _G.RV64ZICOND,
+            _G.RV32ZICBOM, _G.RV32ZICBOZ, _G.RV32ZICBOP,
+            _G.RV32ZIHINTPAUSE, _G.RV32ZIHINTNTL,
+            _G.RV32ZIMOP, _G.RV64ZIMOP, _G.RV32ZCMOP,
+        ),
+        satp_mode=SatpMode.SV39,
+        support_sfence=True,
+        # GCC accepts the new extension shorthands once they are ratified;
+        # spell them all out so older toolchains don't silently drop ones
+        # they don't recognise.
+        isa_string="rv64gc_zicond_zicbom_zicboz_zicbop"
+                   "_zihintpause_zihintntl_zimop_zcmop"
+                   "_zicsr_zifencei",
+        mabi="lp64d",
+        **_privileged(),
+    ),
     # ---- RV64 with vector ----
     "rv64gcv": TargetCfg(
         name="rv64gcv", xlen=64,
