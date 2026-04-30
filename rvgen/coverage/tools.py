@@ -730,7 +730,14 @@ def cmd_auto_goals(args: argparse.Namespace) -> int:
         out.append("  trap_entered: 0")
         out.append("")
 
-    print("\n".join(out))
+    text = "\n".join(out)
+    if getattr(args, "output", None):
+        from pathlib import Path
+        Path(args.output).write_text(text + "\n")
+        print(f"Wrote starter goals for '{args.target}' to {args.output}",
+              file=sys.stderr)
+    else:
+        print(text)
     return 0
 
 
@@ -811,6 +818,27 @@ def _opcode_seeds_for(iso: set, has_S: bool, has_U: bool) -> list[str]:
         emit(("SM3P0", "SM3P1"))
     if {G.RV32ZKSED, G.RV64ZKSED} & iso:
         emit(("SM4ED", "SM4KS"))
+    # Modern checkbox extensions (Zicond, Zicbom/Zicboz/Zicbop,
+    # Zihintpause, Zihintntl, Zimop, Zcmop). These are small extensions;
+    # set goal=1 since each opcode has limited semantic variation.
+    if {G.RV32ZICOND, G.RV64ZICOND} & iso:
+        emit(("CZERO_EQZ", "CZERO_NEZ"), goal=2)
+    if G.RV32ZICBOM in iso:
+        emit(("CBO_CLEAN", "CBO_FLUSH", "CBO_INVAL"), goal=1)
+    if G.RV32ZICBOZ in iso:
+        emit(("CBO_ZERO",), goal=1)
+    if G.RV32ZICBOP in iso:
+        emit(("PREFETCH_I", "PREFETCH_R", "PREFETCH_W"), goal=1)
+    if G.RV32ZIHINTPAUSE in iso:
+        emit(("PAUSE",), goal=1)
+    if G.RV32ZIHINTNTL in iso:
+        emit(("NTL_P1", "NTL_PALL", "NTL_S1", "NTL_ALL"), goal=1)
+    if {G.RV32ZIMOP, G.RV64ZIMOP} & iso:
+        # 32 + 8 reserved encodings; sample-bin a few rather than all 40.
+        emit(("MOP_R_0", "MOP_R_15", "MOP_R_31",
+              "MOP_RR_0", "MOP_RR_7"), goal=1)
+    if G.RV32ZCMOP in iso:
+        emit(("C_MOP_1", "C_MOP_15"), goal=1)
     # Privileged-mode opcodes (only meaningful with S/U).
     if has_S or has_U:
         emit(("ECALL", "MRET"))
@@ -1259,12 +1287,14 @@ def build_parser() -> argparse.ArgumentParser:
     pce.set_defaults(func=cmd_cov_explain)
 
     pag = sub.add_parser("auto-goals",
-                          help="Print a starter goals YAML scoped to a "
+                          help="Emit a starter goals YAML scoped to a "
                                "target's ISA — covers only the covergroups "
                                "the target can actually populate.")
     pag.add_argument("--target", required=True,
                       help="Target name (e.g., 'rv32imc' or 'rv64gcv_crypto'). "
                            "Resolved via rvgen.targets.get_target().")
+    pag.add_argument("-o", "--output", default=None,
+                      help="Write to this file instead of stdout.")
     pag.set_defaults(func=cmd_auto_goals)
 
     ps = sub.add_parser("suggest-seeds",
