@@ -391,22 +391,23 @@ def make_config(target: TargetCfg, gen_opts: str = "", **overrides: Any) -> Conf
         # default. Users can flip back off via +vec_fp=0 if their core
         # lacks those subsets.
         fp_vec_default = target_supports_fp_vector(target)
-        # Note on widen/narrow defaults: vec_narrowing_widening requires
-        # SEW < ELEN, while vec_fp (Phase-1 simplification) requires
-        # SEW == 32. With ELEN=32 (rv64gcv default) the two are mutually
-        # exclusive at the default vsew. We default vec_fp on for FP-
-        # vector targets and leave vec_narrowing_widening off; tests
-        # that need widening can pass +vec_fp=0 +vec_narrowing_widening=1
-        # together with a smaller SEW. Targets with ELEN > 32 can flip
-        # both via TargetCfg overrides in a future release.
+        # Default SEW selection. Zvfh-capable targets default to SEW=16
+        # so FP16 vector ops appear in the random stream out of the
+        # box. Otherwise stick with SEW=min(32, ELEN).
+        zvfh_target = bool(getattr(target, "enable_zvfh", False))
+        if zvfh_target and fp_vec_default:
+            default_sew = 16
+        else:
+            default_sew = min(32, target.elen)
         cfg.vector_cfg = VectorConfig(
-            vtype=Vtype(vlmul=1, vsew=min(32, target.elen), vediv=1),
+            vtype=Vtype(vlmul=1, vsew=default_sew, vediv=1),
             vlen=target.vlen,
             elen=target.elen,
             selen=target.selen,
             max_lmul=target.max_lmul,
             num_vec_gpr=target.num_vec_gpr,
             vec_fp=fp_vec_default,
+            enable_zvfh=zvfh_target,
         )
 
     cfg.apply_plusargs(gen_opts)

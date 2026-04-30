@@ -78,6 +78,13 @@ class VectorConfig:
     max_lmul: int = 8
     num_vec_gpr: int = 32
 
+    # -- Optional sub-extensions --
+    # Mirrors TargetCfg.enable_zvfh: when True, half-precision
+    # FP-vector ops are legal and the validator allows vsew=16 to
+    # appear together with vec_fp=True (otherwise Phase-1 vec_fp
+    # forced vsew=32).
+    enable_zvfh: bool = False
+
     # -- Computed: legal EEW set (populated by __post_init__) --
     legal_eew: tuple[int, ...] = ()
 
@@ -103,8 +110,21 @@ class VectorConfig:
             raise ValueError(f"vtype.vsew={self.vtype.vsew} not in {sorted(_VSEW_LEGAL)}")
         if self.vtype.vsew > self.elen:
             raise ValueError(f"vtype.vsew={self.vtype.vsew} > ELEN={self.elen}")
-        if self.vec_fp and self.vtype.vsew != 32:
-            raise ValueError("vec_fp requires vtype.vsew == 32 (Phase 1)")
+        if self.vec_fp:
+            # Phase 1: SEW=32 is the only precision that worked because
+            # Zfh / Zvfh weren't supported. With Zvfh, SEW=16 also works
+            # (FP16 vector ops). With Zfd / RV64D, SEW=64 works (FP64).
+            allowed_sew = {32}
+            if self.enable_zvfh:
+                allowed_sew.add(16)
+            if self.elen >= 64:
+                allowed_sew.add(64)
+            if self.vtype.vsew not in allowed_sew:
+                raise ValueError(
+                    f"vec_fp with vsew={self.vtype.vsew} requires one of "
+                    f"{sorted(allowed_sew)} (enable_zvfh={self.enable_zvfh}, "
+                    f"elen={self.elen})"
+                )
         if self.vec_narrowing_widening and self.vtype.vsew >= self.elen:
             raise ValueError("vec_narrowing_widening requires vtype.vsew < ELEN")
         if self.vec_quad_widening and self.vtype.vsew >= (self.elen >> 1):
