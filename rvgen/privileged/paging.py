@@ -137,6 +137,14 @@ class Pte:
     ppn1: int = 0
     ppn2: int = 0
     ppn3: int = 0
+    # Svnapot — when 1, the leaf PTE represents 8 / 16 / ... contiguous
+    # pages aliased to the same translation. Encoded as PTE bit 63 on
+    # RV64. Default off; set True on selected leaf PTEs to produce
+    # NAPOT-mapped regions.
+    napot: int = 0
+    # Svpbmt — Page-Based Memory Types. PTE bits [62:61] encode the
+    # PMA: 0=PMA, 1=NC, 2=IO. Default 0 (PMA = inherit from PMA tables).
+    pbmt: int = 0
 
     def is_link(self) -> bool:
         """True iff this PTE points to a child page table (xwr == NEXT_LEVEL)."""
@@ -210,12 +218,13 @@ class Pte:
                 | (self.ppn1 & ((1 << geom.ppn1_width) - 1)) << geom.ppn0_width
                 | (self.ppn0 & ((1 << geom.ppn0_width) - 1))
             )
-            return (
+            base = (
                 (self.rsvd & ((1 << geom.rsvd_width) - 1))
                 << (10 + geom.ppn0_width + geom.ppn1_width + geom.ppn2_width)
                 | (ppn << 10)
                 | low10
             )
+            return _apply_napot_pbmt(base, self.napot, self.pbmt)
         if mode == SatpMode.SV48:
             ppn = (
                 (self.ppn3 & ((1 << geom.ppn3_width) - 1))
@@ -225,14 +234,32 @@ class Pte:
                 | (self.ppn1 & ((1 << geom.ppn1_width) - 1)) << geom.ppn0_width
                 | (self.ppn0 & ((1 << geom.ppn0_width) - 1))
             )
-            return (
+            base = (
                 (self.rsvd & ((1 << geom.rsvd_width) - 1))
                 << (10 + geom.ppn0_width + geom.ppn1_width
                     + geom.ppn2_width + geom.ppn3_width)
                 | (ppn << 10)
                 | low10
             )
+            return _apply_napot_pbmt(base, self.napot, self.pbmt)
         raise ValueError(f"Unsupported SatpMode {mode!r}")
+
+
+def _apply_napot_pbmt(base: int, napot: int, pbmt: int) -> int:
+    """OR Svnapot (bit 63) and Svpbmt (bits 62:61) into a packed PTE.
+
+    Both extensions only apply on RV64 modes (SV39 / SV48). On RV64
+    Privileged Spec layout, those bits sit in the rsvd region — when
+    the extension is *not* enabled the bits must remain 0, which is
+    the default. Callers that explicitly set ``napot=1`` / ``pbmt=N``
+    on a leaf PTE produce a correctly-encoded entry the MMU treats as
+    NAPOT / PBMT-tagged.
+    """
+    if napot:
+        base |= (1 << 63)
+    if pbmt:
+        base |= (int(pbmt) & 0b11) << 61
+    return base
 
 
 # Pre-built canonical PTEs.

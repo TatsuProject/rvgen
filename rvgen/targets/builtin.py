@@ -261,6 +261,26 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         support_sfence=True,
         **_privileged(),
     ),
+    # ---- RV64GC + Sv48 paging ----
+    # Same scalar/FP profile as rv64gc but advertises 4-level Sv48
+    # virtual addressing (1+2+4+8 = 15 page tables). Use --priv msu
+    # so the boot mret drops to S/U-mode and SATP-driven translation
+    # actually runs.
+    "rv64gc_sv48": TargetCfg(
+        name="rv64gc_sv48", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV64I, _G.RV64M,
+            _G.RV32C, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.RV32X,
+        ),
+        satp_mode=SatpMode.SV48,
+        support_sfence=True,
+        isa_string="rv64gc_zicsr_zifencei",
+        mabi="lp64d",
+        **_privileged(),
+    ),
     "rv64imafdc": TargetCfg(
         name="rv64imafdc", xlen=64,
         supported_isa=(
