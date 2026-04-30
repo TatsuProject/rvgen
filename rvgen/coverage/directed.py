@@ -142,6 +142,51 @@ _PERTURBATIONS: tuple[tuple[str, Perturbation], ...] = (
      Perturbation(re.compile(r"\+enable_fault_only_first_load=\S+"),
                   "+enable_fault_only_first_load=1 +directed_instr_22=riscv_vector_load_store_instr_stream,3",
                   "VLEFF_V missing → enable fault-only-first + inject vector LS")),
+
+    # ---- New-covergroup matchers (modern_ext / fence / lr_sc / priv_event) ----
+    # LR/SC pattern bins: inject the AMO stream which mixes lr.w/sc.w + ops.
+    ("lr_sc_pattern_cg.paired",
+     Perturbation(None, "+directed_instr_23=riscv_lr_sc_instr_stream,4",
+                  "LR/SC paired bin missing → inject riscv_lr_sc_instr_stream")),
+    ("lr_sc_pattern_cg.lr_with_intervening_op",
+     Perturbation(None, "+directed_instr_23=riscv_lr_sc_instr_stream,4",
+                  "LR-with-intervening-op missing → inject riscv_lr_sc_instr_stream")),
+    # Fence pattern: drop +no_fence so random FENCE ops are emitted.
+    ("fence_cg.rw__rw",
+     Perturbation(re.compile(r"\+no_fence=\S+"), "+no_fence=0",
+                  "fence_cg.rw__rw empty → drop +no_fence so random FENCE emit")),
+    # Priv-event bins (runtime-only). Most of these are unblocked by
+    # using a privileged-mode target with --priv msu — we surface them
+    # as guidance rather than a gen_opts flip since they're shape-of-test
+    # decisions.
+    ("priv_event_cg.satp_write",
+     Perturbation(None, "",
+                  "priv_event_cg.satp_write missing → use a target with "
+                  "satp_mode!=BARE (e.g. rv64gc) + --priv msu")),
+    ("priv_event_cg.sret_taken",
+     Perturbation(None, "",
+                  "sret_taken missing → use --priv msu so the boot sequence "
+                  "drops to S-mode and the test issues SRET")),
+    ("priv_event_cg.pmpcfg_write",
+     Perturbation(re.compile(r"\+enable_pmp_setup=\S+"), "+enable_pmp_setup=1",
+                  "pmpcfg_write empty → enable +enable_pmp_setup")),
+    ("priv_event_cg.dcsr_write",
+     Perturbation(re.compile(r"\+gen_debug_section=\S+"),
+                  "+gen_debug_section=1",
+                  "dcsr_write empty → enable +gen_debug_section")),
+    # Modern-extension cluster bins: only a target-switch fix.
+    ("modern_ext_cg.zicond_czero_eqz",
+     Perturbation(None, "",
+                  "Zicond bins missing → use a target advertising "
+                  "RV32ZICOND/RV64ZICOND (e.g. rv64gc_modern)")),
+    ("modern_ext_cg.zicboz_zero",
+     Perturbation(None, "",
+                  "Zicboz bin missing → use a target advertising "
+                  "RV32ZICBOZ (e.g. rv64gc_modern)")),
+    ("modern_ext_cg.zihintpause_pause",
+     Perturbation(None, "",
+                  "Zihintpause bin missing → use a target advertising "
+                  "RV32ZIHINTPAUSE (e.g. rv64gc_modern)")),
 )
 
 
@@ -162,6 +207,7 @@ def directed_gen_opts(
     miss = missing_bins(db, goals)
     out = base_gen_opts
     reasons: list[str] = []
+    seen_reasons: set[str] = set()
     for key, pert in _PERTURBATIONS:
         if len(reasons) >= max_perturbations:
             break
@@ -175,6 +221,12 @@ def directed_gen_opts(
         if pert.add and pert.add not in out:
             out = (out + " " + pert.add).strip()
             changed = True
-        if changed:
-            reasons.append(pert.reason)
+        # Informational-only perturbations (drop=None, add="") emit a
+        # reason without mutating gen_opts — useful when the fix is a
+        # target-switch / pipeline-shape change rather than a plusarg.
+        is_info_only = pert.drop is None and not pert.add
+        if changed or is_info_only:
+            if pert.reason not in seen_reasons:
+                reasons.append(pert.reason)
+                seen_reasons.add(pert.reason)
     return out, reasons
