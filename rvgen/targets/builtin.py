@@ -17,10 +17,13 @@ from rvgen.isa.enums import (
 )
 from rvgen.targets.core_setting import TargetCfg
 from rvgen.targets.presets import (
+    HAIA_CSRS,
     MMODE_CSRS,
     MMODE_EXCEPTIONS,
     MMODE_INTERRUPTS,
+    SMAIA_CSRS,
     SMODE_CSRS,
+    SSAIA_CSRS,
     UMODE_CSRS,
     USM_EXCEPTIONS,
     USM_INTERRUPTS,
@@ -294,6 +297,55 @@ BUILTIN_TARGETS: dict[str, TargetCfg] = {
         support_sfence=True,
         support_unaligned_load_store=False,
         **_privileged(),
+    ),
+    # ---- RV64GC + Smaia + Ssaia (Advanced Interrupt Architecture) ----
+    # AIA v1.0 (ratified 2023-08) adds register-indirect IMSIC access and
+    # priority-resolution CSRs. No new instructions — the surface lives in
+    # the M/S-mode CSR namespace. Targets advertise the new CSRs to make
+    # them reachable from CSR-write streams; the actual interrupt fabric
+    # (IMSIC + APLIC) is a separate hardware component.
+    "rv64gc_aia": TargetCfg(
+        name="rv64gc_aia", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV64I, _G.RV64M,
+            _G.RV32C, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.RV32X,
+        ),
+        satp_mode=SatpMode.SV39,
+        support_sfence=True,
+        supported_privileged_mode=(_M.USER_MODE, _M.SUPERVISOR_MODE, _M.MACHINE_MODE),
+        implemented_csr=(
+            UMODE_CSRS + SMODE_CSRS + (PrivilegedReg.FCSR,) + MMODE_CSRS
+            + SMAIA_CSRS + SSAIA_CSRS
+        ),
+        implemented_interrupt=USM_INTERRUPTS,
+        implemented_exception=USM_EXCEPTIONS,
+        isa_string="rv64gc_zicsr_zifencei_smaia_ssaia",
+        mabi="lp64d",
+    ),
+    # ---- RV64GC + H + Smaia + Ssaia (everything in one target) ----
+    "rv64gch_aia": TargetCfg(
+        name="rv64gch_aia", xlen=64,
+        supported_isa=(
+            _G.RV32I, _G.RV32M, _G.RV64I, _G.RV64M,
+            _G.RV32C, _G.RV64C,
+            _G.RV32A, _G.RV64A,
+            _G.RV32F, _G.RV64F, _G.RV32D, _G.RV64D,
+            _G.RV32X, _G.RV64H,
+        ),
+        satp_mode=SatpMode.SV39,
+        support_sfence=True,
+        supported_privileged_mode=(_M.USER_MODE, _M.SUPERVISOR_MODE, _M.MACHINE_MODE),
+        implemented_csr=(
+            UMODE_CSRS + SMODE_CSRS + (PrivilegedReg.FCSR,) + MMODE_CSRS
+            + SMAIA_CSRS + SSAIA_CSRS + HAIA_CSRS
+        ),
+        implemented_interrupt=USM_INTERRUPTS,
+        implemented_exception=USM_EXCEPTIONS,
+        isa_string="rv64gch_zicsr_zifencei_smaia_ssaia",
+        mabi="lp64d",
     ),
     # ---- RV64GC + Hypervisor (H) ----
     # Adds HS-mode + Virtual-S/U-mode + the H-ext instruction set

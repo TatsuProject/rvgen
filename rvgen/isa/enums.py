@@ -1299,6 +1299,31 @@ class PrivilegedReg(IntEnum):
     VL = 0xC20
     VTYPE = 0xC21
     VLENB = 0xC22
+    # Advanced Interrupt Architecture (Smaia / Ssaia, ratified 2023-08).
+    # Adds register-indirect IMSIC access (mireg/sireg) plus topi/topei
+    # priority-resolution. RV32 high-halves (mieh/miph/sieh/siph) and the
+    # H-ext-side AIA additions are deliberately scoped to a future release.
+    # ---- Smaia (M-mode) ----
+    MISELECT = 0x350
+    MIREG = 0x351
+    MTOPEI = 0x35C
+    MTOPI = 0xFB0
+    MVIEN = 0x308
+    MVIP = 0x309
+    # ---- Ssaia (S-mode) ----
+    SISELECT = 0x150
+    SIREG = 0x151
+    STOPEI = 0x15C
+    STOPI = 0xDB0
+    # ---- H-ext AIA additions ----
+    HVIEN = 0x608
+    HVICTL = 0x609
+    HVIPRIO1 = 0x646
+    HVIPRIO2 = 0x647
+    VSISELECT = 0x250
+    VSIREG = 0x251
+    VSTOPEI = 0x25C
+    VSTOPI = 0xEB0
 
 
 #: Default writable CSR set (riscv_instr_pkg.sv:1211).

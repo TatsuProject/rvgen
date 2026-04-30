@@ -74,6 +74,39 @@ SMODE_CSRS: tuple[PrivilegedReg, ...] = (
 )
 
 
+#: Smaia (M-mode AIA) CSRs — register-indirect IMSIC + topi/topei.
+SMAIA_CSRS: tuple[PrivilegedReg, ...] = (
+    PrivilegedReg.MISELECT,
+    PrivilegedReg.MIREG,
+    PrivilegedReg.MTOPEI,
+    PrivilegedReg.MTOPI,
+    PrivilegedReg.MVIEN,
+    PrivilegedReg.MVIP,
+)
+
+
+#: Ssaia (S-mode AIA) CSRs.
+SSAIA_CSRS: tuple[PrivilegedReg, ...] = (
+    PrivilegedReg.SISELECT,
+    PrivilegedReg.SIREG,
+    PrivilegedReg.STOPEI,
+    PrivilegedReg.STOPI,
+)
+
+
+#: H-ext AIA additions — only present when the H-ext is also implemented.
+HAIA_CSRS: tuple[PrivilegedReg, ...] = (
+    PrivilegedReg.HVIEN,
+    PrivilegedReg.HVICTL,
+    PrivilegedReg.HVIPRIO1,
+    PrivilegedReg.HVIPRIO2,
+    PrivilegedReg.VSISELECT,
+    PrivilegedReg.VSIREG,
+    PrivilegedReg.VSTOPEI,
+    PrivilegedReg.VSTOPI,
+)
+
+
 # ---------------------------------------------------------------------------
 # Interrupt / exception presets
 # ---------------------------------------------------------------------------
@@ -139,6 +172,9 @@ PRESETS: dict[str, tuple] = {
     "MMODE_CSRS": MMODE_CSRS,
     "UMODE_CSRS": UMODE_CSRS,
     "SMODE_CSRS": SMODE_CSRS,
+    "SMAIA_CSRS": SMAIA_CSRS,
+    "SSAIA_CSRS": SSAIA_CSRS,
+    "HAIA_CSRS": HAIA_CSRS,
     "MMODE_INTERRUPTS": MMODE_INTERRUPTS,
     "MMODE_EXCEPTIONS": MMODE_EXCEPTIONS,
     "USM_INTERRUPTS": USM_INTERRUPTS,
