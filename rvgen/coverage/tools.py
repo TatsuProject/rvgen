@@ -1390,6 +1390,19 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--goals", required=True, help="Coverage goals YAML.")
     ps.set_defaults(func=cmd_suggest_seeds)
 
+    psv = sub.add_parser("export-sv",
+                          help="Export goals as SystemVerilog covergroup "
+                               "source. SV-shop verification teams can "
+                               "compile this into their UCDB-collecting "
+                               "flow without rewriting goals.")
+    psv.add_argument("--goals", required=True, action="append",
+                      help="Coverage goals YAML. Repeat to layer overlays.")
+    psv.add_argument("-o", "--output", required=True,
+                      help="Output .sv file path.")
+    psv.add_argument("--package", default="rvgen_cov_pkg",
+                      help="SV package name (default: rvgen_cov_pkg).")
+    psv.set_defaults(func=cmd_export_sv)
+
     psc = sub.add_parser("scorecard",
                          help="Per-extension / per-subsystem coverage "
                               "rollup. Aggregates bin counts to "
@@ -1530,6 +1543,23 @@ def _subsys_for_bin(cg_name: str, bin_name: str) -> str:
         return _classify_opcode_bin(base)
     # Unrecognised covergroup → bucket as "Misc".
     return "Misc"
+
+
+def cmd_export_sv(args: argparse.Namespace) -> int:
+    """Emit a SystemVerilog covergroup package for the merged goals.
+
+    Useful when the verification team uses VCS / Xcelium / Questa with
+    their own UCDB-collecting flow but wants to reuse rvgen's goals.
+    Output is a single .sv file containing one covergroup class per
+    covergroup in the goals YAML, wrapped in a package.
+    """
+    from rvgen.coverage.sv_export import write_sv_package
+    goals = load_goals_layered(*[Path(g) for g in args.goals])
+    out_path = write_sv_package(goals, args.output, package_name=args.package)
+    n_groups = len([cg for cg, bins in goals.data.items() if bins])
+    print(f"Wrote SV package '{args.package}' with {n_groups} "
+          f"covergroup(s) -> {out_path}", file=sys.stderr)
+    return 0
 
 
 def cmd_scorecard(args: argparse.Namespace) -> int:
