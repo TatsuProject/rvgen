@@ -206,6 +206,13 @@ class Config:
     max_branch_step: int = 20
     max_directed_instr_stream_seq: int = 20
 
+    # ---- CSR write whitelist ----
+    # Names of CSRs that the random stream is allowed to issue csrrw/csrrs/
+    # csrrc against. Defaults to ("MSCRATCH",) — matches SV riscv-dv's
+    # ``include_write_reg`` default. Extend via the +include_write_reg=A,B,C
+    # plusarg or by setting this list directly.
+    include_write_csr: tuple[str, ...] = ("MSCRATCH",)
+
     # ---- Directed instruction streams (collected from gen_opts) ----
     directed_instr: dict[int, tuple[str, int]] = field(default_factory=dict)
 
@@ -284,6 +291,17 @@ class Config:
         if key == "boot_mode":
             if value is not None:
                 self.init_privileged_mode = _parse_boot_mode(value)
+            return
+
+        # +include_write_reg=A,B,C — comma-separated list of CSR names that
+        # the random stream is allowed to issue csrrw/csrrs/csrrc against.
+        # Mirrors SV riscv-dv's ``include_write_reg`` plusarg.
+        if key == "include_write_reg":
+            if value is None or not value.strip():
+                return
+            self.include_write_csr = tuple(
+                n.strip().upper() for n in value.split(",") if n.strip()
+            )
             return
 
         # Vector-config knobs live on self.vector_cfg, not self. SV's testlists

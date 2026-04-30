@@ -224,12 +224,20 @@ class RandInstrStream(InstrStream):
         # WRITE-type CSR ops must stay in a whitelist. Writing random values to
         # e.g. MISA disables the C extension and traps every subsequent
         # compressed instruction. SV riscv-dv's ``include_write_reg`` defaults
-        # to ``{MSCRATCH}`` (riscv_instr_gen_config.sv:~470). We match that —
-        # it's the minimum viable set that keeps the test runnable.
-        writable_csrs: tuple = (PrivilegedReg.MSCRATCH,)
-        if PrivilegedReg.MSCRATCH not in self.cfg.target.implemented_csr:
-            # If the target doesn't implement MSCRATCH, fall back to no-write.
-            writable_csrs = ()
+        # to ``{MSCRATCH}`` (riscv_instr_gen_config.sv:~470). The default in
+        # ``cfg.include_write_csr`` matches that; users can extend via
+        # ``+include_write_reg=A,B,C``. Names that aren't actually implemented
+        # by the target get filtered out so we never write to a CSR that
+        # would trap.
+        writable_csrs: tuple = ()
+        if self.cfg.include_write_csr:
+            impl_set = set(self.cfg.target.implemented_csr) if self.cfg.target else set()
+            resolved = []
+            for nm in self.cfg.include_write_csr:
+                csr = getattr(PrivilegedReg, nm, None)
+                if csr is not None and csr in impl_set:
+                    resolved.append(csr)
+            writable_csrs = tuple(resolved)
         _CSR_WRITE_INSTRS = (_CsrN.CSRRW, _CsrN.CSRRWI)
         _CSR_SETCLR_INSTRS = (_CsrN.CSRRS, _CsrN.CSRRC, _CsrN.CSRRSI, _CsrN.CSRRCI)
 
