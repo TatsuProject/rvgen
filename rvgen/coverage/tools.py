@@ -1390,6 +1390,23 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--goals", required=True, help="Coverage goals YAML.")
     ps.set_defaults(func=cmd_suggest_seeds)
 
+    pdash = sub.add_parser("dashboard",
+                            help="Build an interactive single-file HTML "
+                                 "coverage dashboard with summary tiles, "
+                                 "per-subsystem scorecard, convergence "
+                                 "chart, missing-bins table, and "
+                                 "filterable covergroup details.")
+    pdash.add_argument("--db", required=True,
+                        help="Coverage JSON (typically <output>/coverage.json).")
+    pdash.add_argument("--goals", action="append", default=[],
+                        help="Coverage goals YAML. Repeat to layer overlays.")
+    pdash.add_argument("--timeline",
+                        help="Optional cov_timeline.json for the convergence chart.")
+    pdash.add_argument("-o", "--output", required=True,
+                        help="Output HTML path.")
+    pdash.add_argument("--title", default="rvgen Coverage Dashboard")
+    pdash.set_defaults(func=cmd_dashboard)
+
     pi = sub.add_parser("import-cgf",
                          help="Import a riscv-isac CGF YAML and translate "
                               "it to rvgen Goals format. Maps mnemonics, "
@@ -1563,6 +1580,58 @@ def _subsys_for_bin(cg_name: str, bin_name: str) -> str:
         return _classify_opcode_bin(base)
     # Unrecognised covergroup → bucket as "Misc".
     return "Misc"
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Build the interactive HTML dashboard."""
+    from rvgen.coverage.dashboard import write_dashboard
+    db = _read(Path(args.db))
+    goals = load_goals_layered(*[Path(g) for g in args.goals]) if args.goals else None
+    timeline = None
+    if args.timeline:
+        try:
+            with open(args.timeline) as f:
+                timeline = json.load(f)
+        except Exception as exc:
+            print(f"warning: failed to load --timeline: {exc}", file=sys.stderr)
+
+    # Compute the scorecard rollup using the same bucketing as
+    # cmd_scorecard so the dashboard chart matches the CLI scorecard.
+    scorecard = None
+    if goals:
+        by_subsys: dict[str, dict[str, int]] = {}
+        for cg, bin_goals in goals.data.items():
+            observed = db.get(cg, {})
+            for bn, required in bin_goals.items():
+                if required <= 0:
+                    continue
+                subsys = _subsys_for_bin(cg, bn)
+                slot = by_subsys.setdefault(subsys, {"required": 0, "met": 0,
+                                                      "missing": 0, "extra": 0})
+                slot["required"] += 1
+                if observed.get(bn, 0) >= required:
+                    slot["met"] += 1
+                else:
+                    slot["missing"] += 1
+        scorecard = []
+        for subsys, counts in by_subsys.items():
+            req = counts["required"]
+            met = counts["met"]
+            pct = 100.0 * met / req if req > 0 else 0.0
+            scorecard.append({
+                "subsystem": subsys,
+                "required": req, "met": met,
+                "missing": counts["missing"], "extra": counts["extra"],
+                "percent": pct,
+            })
+
+    out_path = write_dashboard(
+        db, args.output,
+        goals=goals, timeline=timeline,
+        scorecard=scorecard, title=args.title,
+    )
+    print(f"Wrote dashboard -> {out_path}", file=sys.stderr)
+    return 0
 
 
 def cmd_import_cgf(args: argparse.Namespace) -> int:
