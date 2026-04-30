@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-from rvgen.coverage.cgf import Goals, load_goals, missing_bins
+from rvgen.coverage.cgf import Goals, load_goals, load_goals_layered, missing_bins
 from rvgen.coverage.collectors import CoverageDB, merge, new_db
 from rvgen.coverage.report import render_report
 
@@ -730,6 +730,88 @@ def cmd_auto_goals(args: argparse.Namespace) -> int:
         out.append("  trap_entered: 0")
         out.append("")
 
+        # Privileged-event coverage — runtime-sampled from spike trace.
+        # Bins live in priv_event_cg; emit the events the target's boot
+        # sequence will trigger.
+        out.append("priv_event_cg:  # runtime-sampled (--iss_trace required)")
+        out.append("  mret_taken: 1")
+        out.append("  mtvec_write: 1")
+        out.append("  mstatus_write: 1")
+        if has_S:
+            out.append("  sret_taken: 1")
+            out.append("  stvec_write: 1")
+        # SATP / paging-related events appear only when the target advertises a
+        # non-BARE SATP mode. The Python target may not expose satp_mode;
+        # check via the privileged-mode set + presence of S/U as a proxy.
+        if has_S:
+            out.append("  satp_write: 1")
+            out.append("  sfence_vma: 1")
+        out.append("")
+
+    # Modern-extension semantic-cluster goals — populated when the target
+    # advertises any modern checkbox extension (matches the new
+    # modern_ext_cg covergroup).
+    from rvgen.isa.enums import RiscvInstrGroup as G
+    has_zicond = bool({G.RV32ZICOND, G.RV64ZICOND} & iso)
+    has_zicbom = G.RV32ZICBOM in iso
+    has_zicboz = G.RV32ZICBOZ in iso
+    has_zicbop = G.RV32ZICBOP in iso
+    has_zihintpause = G.RV32ZIHINTPAUSE in iso
+    has_zihintntl = G.RV32ZIHINTNTL in iso
+    has_zimop = bool({G.RV32ZIMOP, G.RV64ZIMOP} & iso)
+    has_zcmop = G.RV32ZCMOP in iso
+    if any((has_zicond, has_zicbom, has_zicboz, has_zicbop,
+            has_zihintpause, has_zihintntl, has_zimop, has_zcmop)):
+        out.append("modern_ext_cg:  # semantic clusters of Zicond/Zicbo*/...")
+        if has_zicond:
+            out.append("  zicond_czero_eqz: 1")
+            out.append("  zicond_czero_nez: 1")
+        if has_zicbom:
+            out.append("  zicbom_clean: 1")
+            out.append("  zicbom_flush: 1")
+            out.append("  zicbom_inval: 1")
+        if has_zicboz:
+            out.append("  zicboz_zero: 1")
+        if has_zicbop:
+            out.append("  zicbop_i: 1")
+            out.append("  zicbop_r: 1")
+            out.append("  zicbop_w: 1")
+        if has_zihintpause:
+            out.append("  zihintpause_pause: 1")
+        if has_zihintntl:
+            out.append("  zihintntl_p1: 1")
+            out.append("  zihintntl_pall: 1")
+            out.append("  zihintntl_s1: 1")
+            out.append("  zihintntl_all: 1")
+        if has_zimop:
+            out.append("  zimop_r_q0: 1")
+            out.append("  zimop_r_q1: 1")
+            out.append("  zimop_r_q2: 1")
+            out.append("  zimop_r_q3: 1")
+            out.append("  zimop_rr: 1")
+        if has_zcmop:
+            out.append("  zcmop_any: 1")
+        out.append("")
+
+    # Memory-ordering coverage — fence pred/succ patterns. Goal counts
+    # are achievable by any test that emits at least a few FENCE ops
+    # (the random_instr stream does this freely).
+    if {G.RV32I, G.RV64I} & iso:
+        out.append("fence_cg:  # FENCE pred/succ encoding patterns")
+        out.append("  rw__rw: 5     # GCC-default 'fence' is rw,rw")
+        out.append("  rw__w: 0      # release-style — opt-in via stream")
+        out.append("  r__rw: 0      # acquire-style — opt-in")
+        out.append("")
+
+    # Atomics — LR/SC sequence patterns.
+    if {G.RV32A, G.RV64A} & iso:
+        out.append("lr_sc_pattern_cg:  # LR/SC pairing at sequence level")
+        out.append("  paired: 5")
+        out.append("  lr_with_intervening_op: 3")
+        out.append("  unpaired_sc: 1")
+        out.append("  lr_only: 1")
+        out.append("")
+
     text = "\n".join(out)
     if getattr(args, "output", None):
         from pathlib import Path
@@ -1308,7 +1390,234 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--goals", required=True, help="Coverage goals YAML.")
     ps.set_defaults(func=cmd_suggest_seeds)
 
+    psc = sub.add_parser("scorecard",
+                         help="Per-extension / per-subsystem coverage "
+                              "rollup. Aggregates bin counts to "
+                              "percentage-met against goals so users "
+                              "see at a glance which subsystems have "
+                              "coverage gaps.")
+    psc.add_argument("--db", required=True,
+                      help="Coverage JSON (typically <output>/coverage.json).")
+    psc.add_argument("--goals", required=True, action="append",
+                      help="Coverage goals YAML. Repeat to layer overlays.")
+    psc.add_argument("--json", action="store_true",
+                      help="Emit a machine-readable JSON scorecard "
+                           "instead of the ASCII table.")
+    psc.set_defaults(func=cmd_scorecard)
+
     return p
+
+
+# ---------------------------------------------------------------------------
+# scorecard — per-subsystem rollup of coverage met vs goals
+# ---------------------------------------------------------------------------
+
+
+# Mapping from covergroup → subsystem bucket. Subsystems are coarse
+# user-facing labels: "RV32I+M", "Vector", "Bitmanip", "Crypto",
+# "Privileged", "Memory ordering", "Modern checkbox", etc. A single
+# covergroup can only belong to one subsystem; multi-subsystem groups
+# (like ``opcode_cg`` which spans every extension) get classified
+# bin-by-bin during the rollup.
+_BIN_PREFIX_TO_SUBSYS = (
+    # opcode-name prefix matchers — order matters (most specific first).
+    # Crypto vector first (longest VAES/VSHA/VCLMUL prefixes).
+    ("VAES", "Crypto"), ("VSHA", "Crypto"), ("VCLMUL", "Crypto"),
+    # Modern checkbox extensions — also long prefixes.
+    ("CZERO", "Modern checkbox"),
+    ("CBO_", "Modern checkbox"), ("PREFETCH", "Modern checkbox"),
+    ("PAUSE", "Modern checkbox"), ("NTL_", "Modern checkbox"),
+    ("MOP_", "Modern checkbox"), ("C_MOP_", "Modern checkbox"),
+    # Privileged before SFENCE_VMA gets caught by SFENCE (privileged
+    # also comes before "S" for FP-like SHA/SM3/SM4).
+    ("EBREAK", "Privileged"), ("ECALL", "Privileged"),
+    ("MRET", "Privileged"), ("SRET", "Privileged"),
+    ("SFENCE", "Privileged"), ("WFI", "Privileged"),
+    ("DRET", "Privileged"),
+    # Memory ordering — must precede the bare "F" prefix (else FENCE
+    # is mis-classified as floating-point).
+    ("FENCE", "Memory ordering"),
+    # Atomics — LR_ / SC_ / AMO.
+    ("AMO", "Atomics"), ("LR_", "Atomics"), ("SC_", "Atomics"),
+    # Compressed — C_ prefix; must precede later catches.
+    ("C_", "Compressed"),
+    # Crypto scalar (AES/SHA/SM3/SM4/BREV/XPERM).
+    ("AES", "Crypto"), ("SHA", "Crypto"), ("SM3", "Crypto"), ("SM4", "Crypto"),
+    ("BREV", "Crypto"), ("XPERM", "Crypto"),
+    # Vector — broad "V" catch (after VAES/VSHA/VCLMUL specifics already
+    # routed to Crypto).
+    ("V", "Vector"),
+    # Bitmanip — specific mnemonics first.
+    ("SH1", "Bitmanip"), ("SH2", "Bitmanip"), ("SH3", "Bitmanip"),
+    ("ANDN", "Bitmanip"), ("ORN", "Bitmanip"), ("XNOR", "Bitmanip"),
+    ("CLZ", "Bitmanip"), ("CTZ", "Bitmanip"), ("CPOP", "Bitmanip"),
+    ("MAX", "Bitmanip"), ("MIN", "Bitmanip"),
+    ("ROL", "Bitmanip"), ("ROR", "Bitmanip"),
+    ("ORC", "Bitmanip"), ("REV8", "Bitmanip"),
+    ("BCLR", "Bitmanip"), ("BSET", "Bitmanip"),
+    ("BEXT", "Bitmanip"), ("BINV", "Bitmanip"),
+    ("CLMUL", "Bitmanip"), ("PACK", "Bitmanip"),
+    # Floating point — F prefix last (most catch-all of the F-words
+    # except FENCE which is already routed above).
+    ("FLD", "Floating point"), ("FSD", "Floating point"),
+    ("F", "Floating point"),
+    # M extension last among RV32 (MUL/MULH, DIV, REM).
+    ("MULH", "RV32M+RV64M"), ("MUL", "RV32M+RV64M"),
+    ("DIV", "RV32M+RV64M"), ("REM", "RV32M+RV64M"),
+)
+
+
+_GROUP_TO_SUBSYS: dict[str, str] = {
+    "vec_eew_cg": "Vector", "vec_emul_cg": "Vector",
+    "vec_vm_cg": "Vector", "vec_vm_category_cross_cg": "Vector",
+    "vec_amo_wd_cg": "Vector", "vec_va_variant_cg": "Vector",
+    "vec_nfields_cg": "Vector", "vec_seg_addr_mode_cross_cg": "Vector",
+    "vec_widening_narrowing_cg": "Vector", "vec_crypto_subext_cg": "Crypto",
+    "vec_sew_transition_cg": "Vector", "vec_lmul_transition_cg": "Vector",
+    "vec_vtype_transition_cg": "Vector", "vec_vstart_cg": "Vector",
+    "vec_ls_addr_mode_cg": "Vector", "vec_eew_vs_sew_cg": "Vector",
+    "vtype_cg": "Vector", "vtype_dyn_cg": "Vector", "vreg_cg": "Vector",
+    "fp_rm_cg": "Floating point", "fpr_cg": "Floating point",
+    "csr_cg": "Privileged", "csr_access_cg": "Privileged",
+    "csr_value_cg": "Privileged", "exception_cg": "Privileged",
+    "privilege_mode_cg": "Privileged", "priv_event_cg": "Privileged",
+    "modern_ext_cg": "Modern checkbox",
+    "fence_cg": "Memory ordering",
+    "lr_sc_pattern_cg": "Atomics",
+    "branch_direction_cg": "Control flow",
+    "branch_taken_per_mnem_cg": "Control flow",
+    "branch_pattern_cg": "Control flow",
+    "branch_distance_cg": "Control flow",
+    "load_store_width_cg": "Memory access", "mem_align_cg": "Memory access",
+    "load_store_offset_cg": "Memory access",
+    "cache_line_cross_cg": "Memory access", "page_cross_cg": "Memory access",
+    "hazard_cg": "Pipeline", "category_transition_cg": "Pipeline",
+    "opcode_transition_cg": "Pipeline",
+    "rs1_eq_rs2_cg": "Reg-file", "rs1_eq_rd_cg": "Reg-file",
+    "rs1_rs2_cross_cg": "Reg-file", "rd_rs1_cross_cg": "Reg-file",
+    "rs1_cg": "Reg-file", "rs2_cg": "Reg-file", "rd_cg": "Reg-file",
+    "rs1_val_class_cg": "Value class", "rs2_val_class_cg": "Value class",
+    "rd_val_class_cg": "Value class", "rs_val_class_cross_cg": "Value class",
+    "rs_val_corner_cg": "Value class", "bit_activity_cg": "Value class",
+    "imm_sign_cg": "Immediates", "imm_range_cg": "Immediates",
+    "directed_stream_cg": "Streams",
+    "pc_reach_cg": "Reachability",
+    "format_cg": "Misc", "category_cg": "Misc", "group_cg": "Misc",
+    "fmt_category_cross": "Misc", "category_group_cross": "Misc",
+    "opcode_cg": None,  # multi-subsystem; bin-by-bin classification.
+}
+
+
+def _classify_opcode_bin(bin_name: str) -> str:
+    """Classify an opcode_cg bin name (an instruction mnemonic) into a
+    subsystem bucket using the prefix table."""
+    n = bin_name.upper()
+    for prefix, subsys in _BIN_PREFIX_TO_SUBSYS:
+        if n.startswith(prefix):
+            return subsys
+    # Fallthrough — most plain RV32I/64I opcodes (ADD, LW, BEQ, etc.).
+    return "RV32I+RV64I"
+
+
+def _subsys_for_bin(cg_name: str, bin_name: str) -> str:
+    """Determine the subsystem a (covergroup, bin) pair belongs to."""
+    bucket = _GROUP_TO_SUBSYS.get(cg_name)
+    if bucket is not None:
+        return bucket
+    if cg_name == "opcode_cg":
+        # Strip the "_dyn" suffix runtime-sampler appends.
+        base = bin_name.replace("__dyn", "")
+        return _classify_opcode_bin(base)
+    # Unrecognised covergroup → bucket as "Misc".
+    return "Misc"
+
+
+def cmd_scorecard(args: argparse.Namespace) -> int:
+    """Per-subsystem coverage rollup.
+
+    For each subsystem bucket: sum required bins (from goals), sum bins
+    actually met (from observed db), compute percent. Output is an
+    ASCII table sorted by percent ascending so the worst-covered
+    subsystem appears first.
+    """
+    db = _read(Path(args.db))
+    goals = load_goals_layered(*[Path(g) for g in args.goals])
+
+    # Aggregate per-subsystem.
+    by_subsys: dict[str, dict[str, int]] = {}
+    for cg, bin_goals in goals.data.items():
+        observed = db.get(cg, {})
+        for bn, required in bin_goals.items():
+            if required <= 0:
+                # Optional bin; don't count toward percentage.
+                continue
+            subsys = _subsys_for_bin(cg, bn)
+            slot = by_subsys.setdefault(subsys, {"required": 0, "met": 0,
+                                                  "missing": 0, "extra": 0})
+            slot["required"] += 1
+            if observed.get(bn, 0) >= required:
+                slot["met"] += 1
+            else:
+                slot["missing"] += 1
+
+    # Also tally bins observed but not in goals — useful "bonus coverage" hint.
+    for cg, bins in db.items():
+        cg_goals = goals.data.get(cg, {})
+        for bn in bins:
+            if bn not in cg_goals:
+                subsys = _subsys_for_bin(cg, bn)
+                slot = by_subsys.setdefault(subsys, {"required": 0, "met": 0,
+                                                      "missing": 0, "extra": 0})
+                slot["extra"] += 1
+
+    rows = []
+    for subsys, counts in by_subsys.items():
+        req = counts["required"]
+        met = counts["met"]
+        pct = 100.0 * met / req if req > 0 else 0.0
+        rows.append({
+            "subsystem": subsys,
+            "required": req, "met": met,
+            "missing": counts["missing"], "extra": counts["extra"],
+            "percent": pct,
+        })
+
+    # Sort: subsystems with required bins first by ascending percent (worst
+    # first); subsystems with no required bins (only "extra") last by name.
+    rows.sort(key=lambda r: (r["required"] == 0, r["percent"], r["subsystem"]))
+
+    if args.json:
+        json.dump({"scorecard": rows}, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 0
+
+    # ASCII table.
+    print(f"{'Subsystem':<22} {'Met':>5} / {'Req':>5}  {'%':>6}  "
+          f"{'Missing':>8}  {'Bonus':>6}")
+    print("-" * 70)
+    for r in rows:
+        if r["required"] == 0 and r["extra"] == 0:
+            continue
+        bar_len = int(r["percent"] / 5) if r["required"] > 0 else 0
+        bar = "█" * bar_len + "·" * (20 - bar_len) if r["required"] > 0 else "(no goals)"
+        if r["required"] == 0:
+            print(f"{r['subsystem']:<22} {'-':>5} / {'-':>5}  {'-':>6}  "
+                  f"{'-':>8}  {r['extra']:>6}")
+        else:
+            print(f"{r['subsystem']:<22} {r['met']:>5} / {r['required']:>5}  "
+                  f"{r['percent']:>5.1f}%  {r['missing']:>8}  {r['extra']:>6}  {bar}")
+
+    # Footer summary.
+    total_req = sum(r["required"] for r in rows)
+    total_met = sum(r["met"] for r in rows)
+    overall_pct = 100.0 * total_met / total_req if total_req else 0.0
+    print("-" * 70)
+    print(f"{'OVERALL':<22} {total_met:>5} / {total_req:>5}  "
+          f"{overall_pct:>5.1f}%")
+
+    # Exit non-zero if any subsystem has < 50% — useful for CI gating.
+    bad = [r for r in rows if r["required"] >= 5 and r["percent"] < 50.0]
+    return 1 if bad else 0
 
 
 def main(argv: list[str] | None = None) -> int:

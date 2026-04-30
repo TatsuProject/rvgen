@@ -132,6 +132,26 @@ CG_RS2_VAL_CLASS = "rs2_val_class_cg"
 CG_RD_VAL_CLASS = "rd_val_class_cg"
 CG_RS_VAL_CROSS = "rs_val_class_cross_cg"
 
+# Modern checkbox extensions (Zicond / Zicbo* / Zihint* / Zimop / Zcmop).
+# opcode_cg carries the per-instruction count, but extensions are
+# semantically meaningful in clusters: cbo *operation* type, prefetch
+# *direction*, mop *variant* (R/RR/C). This covergroup makes the
+# sub-extension story visible at a glance.
+CG_MODERN_EXT = "modern_ext_cg"
+# Fence pred/succ encoding patterns. Each FENCE carries a 4+4 bit
+# pred/succ pair (R/W/I/O). Bins are "<pred>__<succ>" canonicalised.
+# Captures the memory-ordering corner-cases hazard_cg can't see.
+CG_FENCE = "fence_cg"
+# LR/SC sequencing pattern — port of riscv-isac's lr_sc_pattern_cov.
+# Bins: lr_only, sc_only, paired, lr_with_intervening_op,
+# nested_lr (back-to-back LR), unpaired_sc.
+CG_LR_SC_PATTERN = "lr_sc_pattern_cg"
+# Privileged events seen at runtime (parsed from spike trace). Bins:
+# satp_write, sfence_vma, mret_taken, sret_taken, ecall_taken,
+# debug_entered, dret_taken. Complements priv_mode_cg by counting
+# *transitions* rather than *modes*.
+CG_PRIV_EVENT = "priv_event_cg"
+
 
 ALL_COVERGROUPS: tuple[str, ...] = (
     CG_OPCODE, CG_FORMAT, CG_CATEGORY, CG_GROUP,
@@ -158,7 +178,94 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_CACHE_LINE_CROSS, CG_PAGE_CROSS,
     CG_BRANCH_DIST, CG_BRANCH_PATTERN,
     CG_RS1_VAL_CLASS, CG_RS2_VAL_CLASS, CG_RD_VAL_CLASS, CG_RS_VAL_CROSS,
+    CG_MODERN_EXT, CG_FENCE, CG_LR_SC_PATTERN, CG_PRIV_EVENT,
 )
+
+
+# ---------------------------------------------------------------------------
+# Modern checkbox-extension classifier (Zicond / Zicbo* / Zihint* / Zimop /
+# Zcmop). One bin per semantic operation cluster — finer-grained than
+# group_cg (which groups by RV32ZICOND / RV64ZICOND etc.) but more
+# digestible than opcode_cg (which has 581 individual bins).
+# ---------------------------------------------------------------------------
+
+
+def _modern_ext_bin(name: RiscvInstrName) -> str | None:
+    """Return a semantic bin name for one of the modern checkbox extensions.
+
+    Returns None when the instruction isn't part of any of these
+    extensions — sample_instr then skips bumping CG_MODERN_EXT.
+    """
+    n = name.name
+    if n in ("CZERO_EQZ", "CZERO_NEZ"):
+        return f"zicond_{n.lower()}"
+    if n in ("CBO_CLEAN", "CBO_FLUSH", "CBO_INVAL"):
+        return f"zicbom_{n[4:].lower()}"
+    if n == "CBO_ZERO":
+        return "zicboz_zero"
+    if n in ("PREFETCH_I", "PREFETCH_R", "PREFETCH_W"):
+        return f"zicbop_{n[-1].lower()}"
+    if n == "PAUSE":
+        return "zihintpause_pause"
+    if n.startswith("NTL_"):
+        return f"zihintntl_{n[4:].lower()}"
+    if n.startswith("MOP_R_"):
+        # Cluster all 32 mop.r.N into one bin per quartile so the bin count
+        # stays manageable and a missing quartile is visible immediately.
+        idx = int(n.rsplit("_", 1)[1])
+        if idx < 8:
+            return "zimop_r_q0"
+        if idx < 16:
+            return "zimop_r_q1"
+        if idx < 24:
+            return "zimop_r_q2"
+        return "zimop_r_q3"
+    if n.startswith("MOP_RR_"):
+        return "zimop_rr"
+    if n.startswith("C_MOP_"):
+        return "zcmop_any"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Fence pred/succ classifier. RV FENCE encodes pred[3:0] || succ[3:0] as
+# the 8 low bits of the I-format imm. Bits map to I/O/R/W (3..0). Useful
+# canonical patterns:
+#   rw_rw   — full barrier (most common, equiv to "fence rw,rw")
+#   rw_w    — release-style (orders preceding ops before the next write)
+#   r_rw    — acquire-style
+#   io_io   — IO-only (mmio fences)
+#   any     — anything we don't have a name for
+# Phase-1 sampler: when the assembler emits a bare "fence" we treat it
+# as rw_rw (the GCC default). When the user constructs a FENCE Instr
+# with imm set explicitly the imm bits drive the classification.
+# ---------------------------------------------------------------------------
+
+
+def _fence_pat_bin(imm: int) -> str:
+    pred = (imm >> 4) & 0xF
+    succ = imm & 0xF
+
+    def _decode(field: int) -> str:
+        if field == 0xF:
+            return "rwio"
+        if field == 0x3:
+            return "rw"
+        if field == 0x1:
+            return "w"
+        if field == 0x2:
+            return "r"
+        if field == 0xC:
+            return "io"
+        if field == 0x8:
+            return "i"
+        if field == 0x4:
+            return "o"
+        if field == 0x0:
+            return "0"
+        return f"raw{field:x}"
+
+    return f"{_decode(pred)}__{_decode(succ)}"
 
 
 def new_db() -> CoverageDB:
@@ -666,6 +773,26 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
     # Microarchitectural — branch-distance bucket (static).
     _sample_branch_distance(db, instr)
 
+    # Modern checkbox extensions — Zicond / Zicbo* / Zihint* / Zimop / Zcmop.
+    # _modern_ext_bin returns None for non-modern ops, so the conditional
+    # gates the bump.
+    me_bin = _modern_ext_bin(instr.instr_name)
+    if me_bin is not None:
+        _bump(db, CG_MODERN_EXT, me_bin)
+
+    # Fence — pred/succ encoding pattern.
+    if instr.instr_name == RiscvInstrName.FENCE:
+        # The convert2asm path emits a bare "fence" (defaulting to rw,rw)
+        # but the underlying Instr may carry an explicit imm — sample it
+        # either way. SV's pred/succ are bits 27..20 of the encoded
+        # instruction, which we expose via the Instr's .imm field for
+        # FENCE-format ops.
+        fimm = int(getattr(instr, "imm", 0xFF))
+        # Default GCC-emitted "fence" is fence rw,rw → 0xFF.
+        if fimm == 0:
+            fimm = 0xFF
+        _bump(db, CG_FENCE, _fence_pat_bin(fimm))
+
 
 # ---------------------------------------------------------------------------
 # Sequence sampler — hazard detection
@@ -691,6 +818,12 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
     last_reader_at: dict[RiscvReg, int] = {}
     prev_category: str | None = None
     prev_opcode: str | None = None
+    # LR/SC pattern tracker. State tracks the last LR seen and how many
+    # non-LR/SC instructions have followed it (the "intervening" count).
+    last_lr_idx: int | None = None
+    intervening_since_lr: int = 0
+    seen_lr: bool = False
+    seen_sc: bool = False
     # vtype transition state. The boot-time vsetvli sets the initial vtype;
     # each subsequent vsetvli observed in the stream becomes a "new vtype"
     # and we sample the (prev → new) transitions.
@@ -704,6 +837,31 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
 
     for idx, instr in enumerate(seq):
         sample_instr(db, instr, vector_cfg=vector_cfg)
+
+        # LR/SC pattern detection. Looks at instr_name to decide; bins
+        # are sampled at LR-then-SC closure or at SC-without-LR.
+        try:
+            iname = instr.instr_name
+        except AttributeError:
+            iname = None
+        if iname in (RiscvInstrName.LR_W, getattr(RiscvInstrName, "LR_D", None)):
+            if last_lr_idx is not None:
+                _bump(db, CG_LR_SC_PATTERN, "nested_lr")
+            last_lr_idx = idx
+            intervening_since_lr = 0
+            seen_lr = True
+        elif iname in (RiscvInstrName.SC_W, getattr(RiscvInstrName, "SC_D", None)):
+            if last_lr_idx is None:
+                _bump(db, CG_LR_SC_PATTERN, "unpaired_sc")
+            elif intervening_since_lr == 0:
+                _bump(db, CG_LR_SC_PATTERN, "paired")
+            else:
+                _bump(db, CG_LR_SC_PATTERN, "lr_with_intervening_op")
+            last_lr_idx = None
+            intervening_since_lr = 0
+            seen_sc = True
+        elif last_lr_idx is not None:
+            intervening_since_lr += 1
 
         # vstart-corner pseudo carries _vstart_value — bin it.
         if hasattr(instr, "_vstart_value"):
@@ -809,6 +967,14 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
             last_reader_at[r] = idx
         for r in writes:
             last_writer_at[r] = idx
+
+    # End-of-sequence LR/SC closure. Sequences that contain an LR but
+    # never paired it with an SC (and never reached `nested_lr`) score
+    # an "lr_only" bin so the user knows the SC arm is missing.
+    if last_lr_idx is not None:
+        _bump(db, CG_LR_SC_PATTERN, "lr_only")
+    # If the sequence had only SCs that never paired (all flagged
+    # `unpaired_sc` already) the bin is preserved by the per-instr loop.
 
 
 HAZARD_WINDOW = 8  # sliding-window size (in instructions) for hazard counting

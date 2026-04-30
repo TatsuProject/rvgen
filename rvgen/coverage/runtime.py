@@ -40,11 +40,54 @@ from rvgen.coverage.collectors import (
     CG_CSR_VAL,
     CG_EXCEPTION,
     CG_OPCODE,
+    CG_PRIV_EVENT,
     CG_PRIV_MODE,
     CG_RS_VAL_CORNER,
     CoverageDB,
     _value_class,
 )
+
+
+# Privileged events we sample as transitions. Each bin reflects a
+# specific privileged-mode event seen at runtime — independent of the
+# privilege *mode* (M/S/U) which CG_PRIV_MODE tracks. A test that
+# only spent time in M but issued sfence.vma + mret bumps both
+# bins here.
+_PRIV_EVENT_MNEMS = {
+    "mret": "mret_taken",
+    "sret": "sret_taken",
+    "uret": "uret_taken",
+    "ecall": "ecall_taken",
+    "ebreak": "ebreak_taken",
+    "wfi": "wfi_taken",
+    "sfence.vma": "sfence_vma",
+    "dret": "dret_taken",
+    # Cache-management hints (Zicbo*) — semantically privileged-adjacent
+    # because they're CSR-controlled by mseccfg / hcounteren / etc.
+    "cbo.clean": "cbo_clean",
+    "cbo.flush": "cbo_flush",
+    "cbo.inval": "cbo_inval",
+    "cbo.zero": "cbo_zero",
+}
+
+# CSR addresses whose *write* bumps a priv_event bin. Keyed by the
+# canonical CSR name uppercase (matches what CSR_WRITE_IN_COMMIT_RE
+# extracts from spike --log-commits).
+_PRIV_EVENT_CSR_WRITES = {
+    "SATP": "satp_write",
+    "MEDELEG": "medeleg_write",
+    "MIDELEG": "mideleg_write",
+    "MSTATUS": "mstatus_write",
+    "STVEC": "stvec_write",
+    "MTVEC": "mtvec_write",
+    "PMPCFG0": "pmpcfg_write",
+    "PMPCFG1": "pmpcfg_write",
+    "PMPCFG2": "pmpcfg_write",
+    "DCSR": "dcsr_write",
+    "DPC": "dpc_write",
+    "DSCRATCH0": "dscratch_write",
+    "DSCRATCH1": "dscratch_write",
+}
 
 
 # Spike trace format (v1.1.x). Capture PC, binary encoding, mnemonic,
@@ -216,6 +259,13 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                     csr = wm.group("csr").upper()
                     val = int(wm.group("val"), 16)
                     _bump(CG_CSR_VAL, f"{csr}__{_value_bucket(val, 64)}")
+                    # Privileged-event sampling: certain CSR writes are
+                    # interesting events in their own right (SATP write
+                    # = paging configured, PMPCFGn write = PMP region
+                    # programmed, DCSR/DPC write = debug entry).
+                    ev = _PRIV_EVENT_CSR_WRITES.get(csr)
+                    if ev:
+                        _bump(CG_PRIV_EVENT, ev)
                 # GPR write-values — classify against the canonical corners,
                 # and also bump the bit-activity covergroup for each set bit
                 # (reveals dead bits — if bit_N_set never appears, no
@@ -303,6 +353,14 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
             # Privilege-mode transition.
             if mnem in _PRIV_MNEMS:
                 _bump(CG_PRIV_MODE, _PRIV_MNEMS[mnem])
+
+            # Privileged-event sampling — count each occurrence of mret /
+            # sret / sfence / cbo.* / etc. independent of the priv mode
+            # transition coverage. Captures "the test exercised feature X"
+            # whether or not the trace actually changed mode.
+            ev = _PRIV_EVENT_MNEMS.get(mnem)
+            if ev:
+                _bump(CG_PRIV_EVENT, ev)
 
     return {
         "lines_parsed": lines_parsed,
