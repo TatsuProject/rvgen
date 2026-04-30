@@ -37,16 +37,11 @@ import random
 from dataclasses import dataclass
 
 from rvgen.isa.base import Instr
-from rvgen.isa.enums import (
-    RiscvInstrCategory,
-    RiscvInstrName,
-    RiscvReg,
-)
-from rvgen.isa.factory import get_instr
-from rvgen.isa.filtering import get_rand_instr, randomize_gpr_operands
+from rvgen.isa.enums import RiscvReg
 from rvgen.streams import register_stream
 from rvgen.streams.base import DirectedInstrStream
 from rvgen.streams.directed import _LiPseudo
+from rvgen.streams.vector_pick import pick_random_vector_op
 
 
 # Legal (sew, lmul, fractional_lmul) tuples for a target with ELEN=32.
@@ -171,64 +166,14 @@ class VsetvliStressInstrStream(DirectedInstrStream):
             # 3..8 random vector ops at the new vtype.
             count = self.rng.randint(3, 8)
             for _i in range(count):
-                instr = self._pick_vector_op(vcfg)
+                instr = pick_random_vector_op(
+                    self.rng, self.avail, self.cfg, vcfg,
+                )
                 if instr is None:
                     break
                 out.append(instr)
 
         self.instr_list = out
-
-    def _pick_vector_op(self, vcfg) -> Instr | None:
-        """Pick a vector arithmetic/logical op compatible with vec_fp gate.
-
-        We avoid LOAD/STORE/AMO categories because their address regs
-        aren't initialized inside this stream, and we avoid CSR/vsetvli
-        ops to keep the body focused on data ops.
-
-        Note: ``get_rand_instr`` combines ``include_category`` and
-        ``include_group`` via UNION (matches SV semantics). To get
-        "vector ops AND only data categories" we filter by group first
-        then post-filter the picked op by category — retrying on miss.
-        """
-        from rvgen.isa.enums import RiscvInstrGroup
-        wanted_cats = (
-            RiscvInstrCategory.ARITHMETIC,
-            RiscvInstrCategory.LOGICAL,
-            RiscvInstrCategory.SHIFT,
-            RiscvInstrCategory.COMPARE,
-        )
-        instr = None
-        for _retry in range(8):
-            try:
-                cand = get_rand_instr(
-                    self.rng,
-                    self.avail,
-                    include_group=[RiscvInstrGroup.RVV],
-                    exclude_instr=[
-                        RiscvInstrName.VSETVLI, RiscvInstrName.VSETVL,
-                    ],
-                )
-            except Exception:  # noqa: BLE001
-                return None
-            if cand.category in wanted_cats:
-                instr = cand
-                break
-        if instr is None:
-            return None
-        # Randomize int + fp + vector operands the same way the main
-        # sequence does.
-        randomize_gpr_operands(instr, self.rng, self.cfg)
-        fp_rand = getattr(instr, "randomize_fpr_operands", None)
-        if fp_rand is not None:
-            fp_rand(self.rng)
-        vec_rand = getattr(instr, "randomize_vector_operands", None)
-        if vec_rand is not None:
-            vec_rand(self.rng, vcfg)
-        if instr.has_imm:
-            instr.randomize_imm(self.rng, xlen=self.cfg.target.xlen)
-        instr.post_randomize()
-        instr.atomic = True
-        return instr
 
 
 register_stream("riscv_vsetvli_stress_instr_stream", VsetvliStressInstrStream)

@@ -52,35 +52,12 @@ class Goals:
 # ---------------------------------------------------------------------------
 # Abstract bin functions — riscv-isac CGF compatibility
 # ---------------------------------------------------------------------------
-
-
-def _expand_walking_ones(width: int) -> tuple[str, ...]:
-    """Return value-class bin names for the walking-ones set (1, 2, 4, ...).
-
-    Returns the canonical bin name from ``_value_class``: every walking-one
-    pattern collapses to the single ``walking_one`` bin in our schema.
-    SV-style bin-per-value would produce ``width`` bins; we return the
-    single representative so users don't end up with 32 bins requiring 1
-    hit each (typically untestable).
-    """
-    return ("walking_one",)
-
-
-def _expand_walking_zeros(width: int) -> tuple[str, ...]:
-    return ("walking_zero",)
-
-
-def _expand_alternating(width: int) -> tuple[str, ...]:
-    return ("alternating",)
-
-
-def _expand_corners() -> tuple[str, ...]:
-    """The full canonical corner-value set for a value-class covergroup."""
-    return (
-        "zero", "one", "all_ones", "min_signed", "max_signed",
-        "walking_one", "walking_zero", "alternating", "small", "generic",
-    )
-
+#
+# Every abstract pattern collapses to a single canonical value-class bin
+# (the ``_value_class`` codomain). SV-style bin-per-bit-position would
+# produce ``width`` bins per pattern, leaving each requiring 1 hit —
+# which is typically untestable. Mapping to the bin a real ISS sample
+# would land in keeps goals achievable.
 
 _ABSTRACT_FN_RE = re.compile(
     r"^(?P<name>walking_ones|walking_zeros|alternating|corners)\((?P<args>[^)]*)\)$"
@@ -93,21 +70,17 @@ def _resolve_abstract(spec: str) -> tuple[str, ...] | None:
     Returns ``None`` when ``spec`` isn't an abstract function call —
     callers fall back to treating it as a literal bin name.
     """
+    from rvgen.coverage.collectors import VALUE_CLASS_BINS
     m = _ABSTRACT_FN_RE.match(spec.strip())
     if not m:
         return None
-    name = m.group("name")
-    args_raw = m.group("args").strip()
-    width = int(args_raw) if args_raw else 32
-    if name == "walking_ones":
-        return _expand_walking_ones(width)
-    if name == "walking_zeros":
-        return _expand_walking_zeros(width)
-    if name == "alternating":
-        return _expand_alternating(width)
-    if name == "corners":
-        return _expand_corners()
-    return None
+    expansion: dict[str, tuple[str, ...]] = {
+        "walking_ones": ("walking_one",),
+        "walking_zeros": ("walking_zero",),
+        "alternating": ("alternating",),
+        "corners": VALUE_CLASS_BINS,
+    }
+    return expansion.get(m.group("name"))
 
 
 def _load_one(path: str | Path) -> dict[str, dict[str, int]]:

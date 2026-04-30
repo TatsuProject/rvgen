@@ -28,13 +28,12 @@ from dataclasses import dataclass
 from rvgen.isa.base import Instr
 from rvgen.isa.enums import (
     RiscvInstrCategory,
-    RiscvInstrGroup,
     RiscvInstrName,
     RiscvVreg,
 )
-from rvgen.isa.filtering import get_rand_instr, randomize_gpr_operands
 from rvgen.streams import register_stream
 from rvgen.streams.base import DirectedInstrStream
+from rvgen.streams.vector_pick import pick_random_vector_op
 
 
 _HAZARD_KINDS = ("RAW", "WAW", "WAR")
@@ -91,69 +90,56 @@ class VectorHazardInstrStream(DirectedInstrStream):
         self.instr_list = out
 
     def _pick_vector_arith(self, vcfg) -> Instr | None:
-        """Pick a vector arithmetic VV-form op + run the standard randomizer.
+        """Pick a VV-form vector arith op then force vd/vs1/vs2 to chain.
 
-        We post-override vd/vs1/vs2 so the operand-group constraint may
-        get violated (e.g. compare ops require vd != vs1). For the
-        small set of ops where that is fatal at runtime we'd need to
-        re-pick — Phase 1 trusts spike-vector to accept all VV-form
-        arithmetic with arbitrary operand picks (it does, modulo
-        constraint warnings that don't fail simulation).
+        Excludes ops with non-overlap / alignment constraints (compares,
+        reductions, slides, gathers, whole-reg moves) since we override
+        operands post-randomize and would violate their semantics.
         """
-        for _retry in range(8):
-            try:
-                cand = get_rand_instr(
-                    self.rng,
-                    self.avail,
-                    include_group=[RiscvInstrGroup.RVV],
-                    exclude_instr=[
-                        RiscvInstrName.VSETVLI, RiscvInstrName.VSETVL,
-                        # Compare ops constrain vd != vs1/vs2 (LMUL>1) — skip.
-                        RiscvInstrName.VMSEQ, RiscvInstrName.VMSNE,
-                        RiscvInstrName.VMSLT, RiscvInstrName.VMSLTU,
-                        RiscvInstrName.VMSLE, RiscvInstrName.VMSLEU,
-                        RiscvInstrName.VMSGT, RiscvInstrName.VMSGTU,
-                        # Reductions read vs1[0] only — hazard chain meaning
-                        # is different; skip for clarity.
-                        RiscvInstrName.VREDSUM_VS,
-                        RiscvInstrName.VREDMAX_VS, RiscvInstrName.VREDMAXU_VS,
-                        RiscvInstrName.VREDMIN_VS, RiscvInstrName.VREDMINU_VS,
-                        RiscvInstrName.VREDAND_VS, RiscvInstrName.VREDOR_VS,
-                        RiscvInstrName.VREDXOR_VS,
-                        # Slide / gather / compress have non-overlap rules.
-                        RiscvInstrName.VSLIDEUP, RiscvInstrName.VSLIDEDOWN,
-                        RiscvInstrName.VSLIDE1UP, RiscvInstrName.VSLIDE1DOWN,
-                        RiscvInstrName.VRGATHER, RiscvInstrName.VCOMPRESS,
-                        # whole-reg moves have alignment constraints we skip.
-                        RiscvInstrName.VMV1R_V, RiscvInstrName.VMV2R_V,
-                        RiscvInstrName.VMV4R_V, RiscvInstrName.VMV8R_V,
-                    ],
-                )
-            except Exception:  # noqa: BLE001
-                return None
-            if cand.category not in (
-                RiscvInstrCategory.ARITHMETIC,
-                RiscvInstrCategory.LOGICAL,
-                RiscvInstrCategory.SHIFT,
-            ):
+        from rvgen.isa.enums import VaVariant
+        for _ in range(8):
+            cand = pick_random_vector_op(
+                self.rng, self.avail, self.cfg, vcfg,
+                allowed_categories=(
+                    RiscvInstrCategory.ARITHMETIC,
+                    RiscvInstrCategory.LOGICAL,
+                    RiscvInstrCategory.SHIFT,
+                ),
+                extra_excludes=_HAZARD_INELIGIBLE,
+                max_retries=1,
+            )
+            if cand is None:
                 continue
-            # Must be the VV form (we override vs1/vs2 with vector regs).
-            from rvgen.isa.enums import VaVariant
             if not getattr(cand, "has_va_variant", False):
                 continue
-            allowed = getattr(cand, "allowed_va_variants", ())
-            if VaVariant.VV not in allowed:
+            if VaVariant.VV not in getattr(cand, "allowed_va_variants", ()):
                 continue
-            # Apply standard randomization, then override va_variant to VV.
-            randomize_gpr_operands(cand, self.rng, self.cfg)
-            vec_rand = getattr(cand, "randomize_vector_operands", None)
-            if vec_rand is not None:
-                vec_rand(self.rng, vcfg)
             cand.va_variant = VaVariant.VV
-            cand.vm = 1  # unmasked — the dependency chain is the focus
-            cand.post_randomize()
+            cand.vm = 1  # unmasked — dependency chain is the focus
             return cand
         return None
+
+
+_HAZARD_INELIGIBLE: tuple[RiscvInstrName, ...] = (
+    # Compare ops constrain vd != vs1/vs2 when LMUL>1.
+    RiscvInstrName.VMSEQ, RiscvInstrName.VMSNE,
+    RiscvInstrName.VMSLT, RiscvInstrName.VMSLTU,
+    RiscvInstrName.VMSLE, RiscvInstrName.VMSLEU,
+    RiscvInstrName.VMSGT, RiscvInstrName.VMSGTU,
+    # Reductions read vs1[0] only — different chain semantics.
+    RiscvInstrName.VREDSUM_VS,
+    RiscvInstrName.VREDMAX_VS, RiscvInstrName.VREDMAXU_VS,
+    RiscvInstrName.VREDMIN_VS, RiscvInstrName.VREDMINU_VS,
+    RiscvInstrName.VREDAND_VS, RiscvInstrName.VREDOR_VS,
+    RiscvInstrName.VREDXOR_VS,
+    # Slide / gather / compress have non-overlap rules.
+    RiscvInstrName.VSLIDEUP, RiscvInstrName.VSLIDEDOWN,
+    RiscvInstrName.VSLIDE1UP, RiscvInstrName.VSLIDE1DOWN,
+    RiscvInstrName.VRGATHER, RiscvInstrName.VCOMPRESS,
+    # Whole-reg moves carry alignment constraints.
+    RiscvInstrName.VMV1R_V, RiscvInstrName.VMV2R_V,
+    RiscvInstrName.VMV4R_V, RiscvInstrName.VMV8R_V,
+)
 
 
 register_stream("riscv_vector_hazard_instr_stream", VectorHazardInstrStream)

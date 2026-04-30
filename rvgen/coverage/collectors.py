@@ -77,7 +77,6 @@ CG_VREG = "vreg_cg"
 CG_FPR = "fpr_cg"
 CG_FMT_X_CAT = "fmt_category_cross"
 CG_CAT_X_GRP = "category_group_cross"
-# --- added in the coverage-improvement wave ---
 CG_MEM_ALIGN = "mem_align_cg"          # per load/store: byte_aligned/half/word/dword/unaligned
 CG_LS_WIDTH = "load_store_width_cg"    # byte/half/word/dword (sign vs zero ext)
 CG_CAT_TRANS = "category_transition_cg"  # prev_category -> current_category
@@ -88,7 +87,6 @@ CG_PRIV_MODE = "privilege_mode_cg"     # runtime: M/S/U mode observed
 CG_REG_VAL_SIGN = "rs_val_sign_cg"     # rs-value sign class (pos/neg/zero) on the fly
 CG_IMM_EXT = "imm_range_cg"            # walking-ones / walking-zeros / corner classes
 CG_PC_REACH = "pc_reach_cg"            # runtime: unique labels entered
-# --- more-covergroups wave ---
 CG_RS1_EQ_RS2 = "rs1_eq_rs2_cg"        # R-format: rs1==rs2 (same-reg path)
 CG_RS1_EQ_RD = "rs1_eq_rd_cg"          # rd==rs1 (in-place op)
 CG_BR_PER_MNEM = "branch_taken_per_mnem_cg"  # cross: branch mnemonic × taken/not_taken (runtime)
@@ -101,7 +99,6 @@ CG_RS_VAL_CORNER = "rs_val_corner_cg"  # runtime: GPR write-value corner class
 CG_BIT_ACTIVITY = "bit_activity_cg"    # runtime: per-bit GPR-write activity (bit_N_toggled)
 CG_RS1_RS2_CROSS = "rs1_rs2_cross_cg"  # explicit rs1 × rs2 cross (for C-extension port-pair coverage)
 CG_RD_RS1_CROSS = "rd_rs1_cross_cg"    # rd × rs1 cross (in-place op pattern)
-# --- vector-focused covergroups (rvgen-first) ---
 CG_VEC_LS_MODE = "vec_ls_addr_mode_cg"     # UNIT_STRIDED / STRIDED / INDEXED for vector LS
 CG_VEC_EEW = "vec_eew_cg"                  # EEW chosen by vector loads/stores (8/16/32/64)
 CG_VEC_EEW_VS_SEW = "vec_eew_vs_sew_cg"    # cross: EEW vs current SEW (eq/wider/narrower)
@@ -123,21 +120,16 @@ CG_VEC_VTYPE_TRANS = "vec_vtype_transition_cg"  # full vtype tuple transition
 # `csrwi vstart, N` before a vector op.
 CG_VEC_VSTART = "vec_vstart_cg"            # zero / one / small / mid / max
 
-# --- Microarchitectural-relevant covergroups (industry-standard --
-# rvgen-first within open-source RISC-V tooling) ---
 CG_CACHE_LINE_CROSS = "cache_line_cross_cg"   # load/store crossing 64B line
 CG_PAGE_CROSS = "page_cross_cg"               # load/store crossing 4KiB page
 CG_BRANCH_DIST = "branch_distance_cg"         # branch byte-offset bucket (signed)
 CG_BRANCH_PATTERN = "branch_pattern_cg"       # T/N 3-gram (e.g. T_T_N)
 
-# --- Value-class coverage (riscv-isac val_comb-style) ---
-# Sampled when a register holds a value the generator can statically
-# determine (immediates after `li`) OR at runtime from spike trace.
+# Value-class coverage (riscv-isac val_comb-style); rs1/rs2 sampled at
+# runtime via a virtual reg-file built from spike GPR-write events.
 CG_RS1_VAL_CLASS = "rs1_val_class_cg"
 CG_RS2_VAL_CLASS = "rs2_val_class_cg"
 CG_RD_VAL_CLASS = "rd_val_class_cg"
-# Cross of (rs1 value class, rs2 value class) — lights up when both
-# corner values land on the same instruction.
 CG_RS_VAL_CROSS = "rs_val_class_cross_cg"
 
 
@@ -198,28 +190,10 @@ def _imm_sign_bin(imm: int, imm_len: int) -> str:
 
 
 def _imm_range_bin(imm: int, imm_len: int) -> str:
-    """Classify the immediate by its bit-pattern: walking ones, walking zeros, extremes."""
+    """Classify the immediate against the canonical value-class bins."""
     if imm_len == 0:
         return "none"
-    mask = (1 << imm_len) - 1
-    v = imm & mask
-    if v == 0:
-        return "zero"
-    if v == mask:
-        return "all_ones"
-    # Walking-one: exactly one bit set.
-    if v & (v - 1) == 0:
-        return "walking_one"
-    # Walking-zero: exactly one bit cleared.
-    if (~v & mask) & ((~v & mask) - 1) == 0:
-        return "walking_zero"
-    # Min-signed / max-signed corners.
-    sign_bit = 1 << (imm_len - 1)
-    if v == sign_bit:
-        return "min_signed"
-    if v == sign_bit - 1:
-        return "max_signed"
-    return "generic"
+    return _value_class(imm, imm_len)
 
 
 _BYTE_OPS = frozenset({
@@ -286,13 +260,33 @@ _ZV_FAMILY_BY_PREFIX: tuple[tuple[tuple[str, ...], str], ...] = (
 
 _CACHE_LINE_BYTES = 64    # standard for ARM/Intel/most RISC-V cores
 _PAGE_BYTES = 4096
+_ACCESS_WIDTH_BY_BIN = {"byte": 1, "half": 2, "word": 4, "dword": 8}
+
+
+# The canonical set of value-class bins the rs1/rs2/rd_val_class_cg covergroups
+# accept. Imported by cgf.py for the ``corners()`` abstract-bin function.
+VALUE_CLASS_BINS: tuple[str, ...] = (
+    "zero", "one", "all_ones", "min_signed", "max_signed",
+    "walking_one", "walking_zero", "alternating", "small", "generic",
+)
+
+# Pre-computed alternating-pattern masks per XLEN — recomputing them per
+# call costs measurably on long traces.
+_ALT_MASKS: dict[int, tuple[int, int]] = {
+    xlen: (
+        sum(1 << i for i in range(0, xlen, 2)),  # 0x55..55
+        sum(1 << i for i in range(1, xlen, 2)),  # 0xAA..AA
+    )
+    for xlen in (8, 16, 32, 64, 128)
+}
 
 
 def _value_class(val: int, xlen: int) -> str:
     """Classify a register value into industry-standard corner buckets.
 
     Mirrors what riscv-isac calls ``val_comb`` corners + the
-    walking_ones / walking_zeros expansions. Returns one bin name.
+    walking_ones / walking_zeros expansions. Returns one bin name from
+    :data:`VALUE_CLASS_BINS`.
     """
     mask = (1 << xlen) - 1
     v = val & mask
@@ -307,44 +301,29 @@ def _value_class(val: int, xlen: int) -> str:
         return "min_signed"
     if v == sign_bit - 1:
         return "max_signed"
-    # walking-one: exactly one bit set.
     if v & (v - 1) == 0:
         return "walking_one"
-    # walking-zero: exactly one bit cleared.
     inv = (~v) & mask
     if inv & (inv - 1) == 0:
         return "walking_zero"
-    # alternating bit pattern — 0x55..55 or 0xAA..AA at any width.
-    alt_a = sum(1 << i for i in range(0, xlen, 2)) & mask
-    alt_b = sum(1 << i for i in range(1, xlen, 2)) & mask
+    alt_a, alt_b = _ALT_MASKS.get(xlen, (0, 0))
     if v == alt_a or v == alt_b:
         return "alternating"
-    # small absolute value (treat as signed).
-    if v & sign_bit:
-        sval = v - (1 << xlen)
-    else:
-        sval = v
+    sval = v - (1 << xlen) if v & sign_bit else v
     if -16 <= sval <= 16:
         return "small"
     return "generic"
 
 
-def _addr_mode_by_fmt() -> dict:
-    """Return the format → "UNIT_STRIDED"/"STRIDED"/"INDEXED" map.
-
-    Built lazily so the import order doesn't bite us if RiscvInstrFormat
-    happens to be reloaded by tests.
-    """
-    from rvgen.isa.enums import RiscvInstrFormat as _F
-    return {
-        _F.VL_FORMAT: "UNIT_STRIDED",
-        _F.VS_FORMAT: "UNIT_STRIDED",
-        _F.VLS_FORMAT: "STRIDED",
-        _F.VSS_FORMAT: "STRIDED",
-        _F.VLX_FORMAT: "INDEXED",
-        _F.VSX_FORMAT: "INDEXED",
-        _F.VAMO_FORMAT: "INDEXED",
-    }
+_ADDR_MODE_BY_FMT: dict = {
+    RiscvInstrFormat.VL_FORMAT: "UNIT_STRIDED",
+    RiscvInstrFormat.VS_FORMAT: "UNIT_STRIDED",
+    RiscvInstrFormat.VLS_FORMAT: "STRIDED",
+    RiscvInstrFormat.VSS_FORMAT: "STRIDED",
+    RiscvInstrFormat.VLX_FORMAT: "INDEXED",
+    RiscvInstrFormat.VSX_FORMAT: "INDEXED",
+    RiscvInstrFormat.VAMO_FORMAT: "INDEXED",
+}
 
 
 def _vector_family(name: RiscvInstrName) -> str | None:
@@ -375,9 +354,8 @@ def _sample_vector(db: CoverageDB, instr: Instr, vector_cfg) -> None:
             _bump(db, CG_VEC_VM_X_CAT, f"{bin_name}__{cat.name}")
 
     # Address mode for vector loads/stores. Inferred from the format.
-    addr_mode_by_fmt = _addr_mode_by_fmt() if fmt is not None else {}
-    if fmt is not None and fmt in addr_mode_by_fmt:
-        _bump(db, CG_VEC_LS_MODE, addr_mode_by_fmt[fmt])
+    if fmt is not None and fmt in _ADDR_MODE_BY_FMT:
+        _bump(db, CG_VEC_LS_MODE, _ADDR_MODE_BY_FMT[fmt])
 
     # EEW / EMUL — set by the load/store randomizer.
     eew = getattr(instr, "eew", 0)
@@ -413,7 +391,7 @@ def _sample_vector(db: CoverageDB, instr: Instr, vector_cfg) -> None:
     if sub_extension == "zvlsseg" and nfields is not None:
         nf = nfields + 1
         _bump(db, CG_VEC_NF, f"NF{nf}")
-        seg_mode = addr_mode_by_fmt.get(fmt) if fmt is not None else None
+        seg_mode = _ADDR_MODE_BY_FMT.get(fmt) if fmt is not None else None
         if seg_mode is not None:
             _bump(db, CG_VEC_SEG_X_MODE, f"NF{nf}__{seg_mode}")
 
@@ -507,15 +485,15 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
 
     try:
         _bump(db, CG_FORMAT, instr.format.name)
-    except (AttributeError, Exception):
+    except AttributeError:
         pass
     try:
         _bump(db, CG_CATEGORY, instr.category.name)
-    except (AttributeError, Exception):
+    except AttributeError:
         pass
     try:
         _bump(db, CG_GROUP, instr.group.name)
-    except (AttributeError, Exception):
+    except AttributeError:
         pass
 
     # Register operand sampling — only the slots the instr actually uses.
@@ -558,15 +536,12 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
     # Load/store width + memory alignment samplers (static — we know the
     # offset the emitter chose, which is what GCC will ultimately feed spike).
     width_bin = _load_store_width_bin(instr.instr_name)
+    off = 0  # exposed below for offset / cache-line / page-cross sampling
     if width_bin is not None:
         _bump(db, CG_LS_WIDTH, width_bin)
-        # Use the signed offset if available (the emitter stashes it in
-        # imm_str as a decimal number for load/stores). Fall back to
-        # instr.imm interpreted per-format.
-        off = 0
         try:
             off = int(instr.imm_str) if instr.imm_str.lstrip('-').isdigit() else int(instr.imm)
-        except Exception:  # noqa: BLE001
+        except (AttributeError, ValueError):
             off = int(getattr(instr, "imm", 0))
         align_bin = _mem_align_bin(off, instr.instr_name)
         if align_bin is not None:
@@ -597,14 +572,9 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
             access = "read"
         _bump(db, CG_CSR_ACCESS, f"{csr_name}__{access}")
 
-    # Load/store offset magnitude — split by sign + magnitude so verif teams
-    # can see whether we've exercised all the offset-field corner cases.
-    if width_bin is not None:  # we already computed this above; reuse
-        off = 0
-        try:
-            off = int(instr.imm_str) if instr.imm_str.lstrip('-').isdigit() else int(getattr(instr, "imm", 0))
-        except Exception:  # noqa: BLE001
-            off = int(getattr(instr, "imm", 0))
+    # Load/store offset magnitude + cache-line + page-cross — all use the
+    # ``off`` already computed above for the alignment classifier.
+    if width_bin is not None:
         if off == 0:
             off_bin = "zero"
         elif off > 0:
@@ -613,32 +583,22 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
             off_bin = "neg_small" if off > -128 else ("neg_medium" if off > -1024 else "neg_large")
         _bump(db, CG_LS_OFFSET, off_bin)
 
-        # Cache-line + page-crossing classifiers. The base address is the
-        # data-page region the stream chose; we approximate by treating the
-        # offset as the in-page address and asking whether ``off + width``
-        # straddles a cache line / page boundary. For LS streams that leave
-        # ``base`` set on the instr we'd have a stronger signal — this
-        # static approximation under-reports but never over-reports.
-        access_w = {"byte": 1, "half": 2, "word": 4, "dword": 8}.get(width_bin, 1)
-        # Attempt to recover the stream's per-region base; fall back to 0.
+        # Cache-line + page-crossing — approximated against the stream's
+        # per-region base when available, else just the offset. Under-reports
+        # without a base hint; never over-reports.
+        access_w = _ACCESS_WIDTH_BY_BIN.get(width_bin, 1)
         base_addr = int(getattr(instr, "_stream_region_base", 0)) or 0
         eff = base_addr + off
-        # Cache-line crossing — only meaningful for >1-byte accesses.
         if access_w > 1:
             line_start = eff & ~(_CACHE_LINE_BYTES - 1)
             line_end = (eff + access_w - 1) & ~(_CACHE_LINE_BYTES - 1)
             if line_start != line_end:
                 _bump(db, CG_CACHE_LINE_CROSS, f"cross_w{access_w}")
+            elif (eff & (_CACHE_LINE_BYTES - 1)) >= _CACHE_LINE_BYTES - access_w:
+                _bump(db, CG_CACHE_LINE_CROSS, f"near_end_w{access_w}")
             else:
-                # Track aligned-within-line vs near-end-of-line for finer
-                # branch-predictor / fetch-window classification.
-                pos = eff & (_CACHE_LINE_BYTES - 1)
-                if pos >= _CACHE_LINE_BYTES - access_w:
-                    _bump(db, CG_CACHE_LINE_CROSS, f"near_end_w{access_w}")
-                else:
-                    _bump(db, CG_CACHE_LINE_CROSS, f"in_line_w{access_w}")
-        # Page-boundary crossing.
-        if access_w > 1:
+                _bump(db, CG_CACHE_LINE_CROSS, f"in_line_w{access_w}")
+
             page_start = eff & ~(_PAGE_BYTES - 1)
             page_end = (eff + access_w - 1) & ~(_PAGE_BYTES - 1)
             if page_start != page_end:
@@ -696,11 +656,11 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
     # Crosses
     try:
         _bump(db, CG_FMT_X_CAT, f"{instr.format.name}__{instr.category.name}")
-    except (AttributeError, Exception):
+    except AttributeError:
         pass
     try:
         _bump(db, CG_CAT_X_GRP, f"{instr.category.name}__{instr.group.name}")
-    except (AttributeError, Exception):
+    except AttributeError:
         pass
 
     # Microarchitectural — branch-distance bucket (static).
@@ -788,14 +748,14 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
             if prev_category is not None:
                 _bump(db, CG_CAT_TRANS, f"{prev_category}__{cur_cat}")
             prev_category = cur_cat
-        except (AttributeError, Exception):
+        except AttributeError:
             prev_category = None
         try:
             cur_op = instr.instr_name.name
             if prev_opcode is not None:
                 _bump(db, CG_OP_TRANS, f"{prev_opcode}__{cur_op}")
             prev_opcode = cur_op
-        except (AttributeError, Exception):
+        except AttributeError:
             prev_opcode = None
 
         # Collect the regs this instr reads/writes.

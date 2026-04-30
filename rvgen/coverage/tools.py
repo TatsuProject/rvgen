@@ -289,8 +289,9 @@ def cmd_lint_goals(args: argparse.Namespace) -> int:
         "rs2_cg": reg_names,
         "rd_cg": reg_names,
         "imm_sign_cg": {"pos", "neg", "zero"},
-        "imm_range_cg": {"zero", "all_ones", "walking_one", "walking_zero",
-                          "min_signed", "max_signed", "generic"},
+        "imm_range_cg": {"none", "zero", "one", "all_ones", "min_signed",
+                          "max_signed", "walking_one", "walking_zero",
+                          "alternating", "small", "generic"},
         "hazard_cg": {"raw", "war", "waw", "none"},
         "csr_cg": csr_names,
         "fp_rm_cg": rm_names,
@@ -331,13 +332,10 @@ def cmd_lint_goals(args: argparse.Namespace) -> int:
         # Also accept these names as the bins of the cross covergroup
         # via membership testing in the lint loop (special-cased below).
     }
-    _val_class_bins = {
-        "zero", "one", "all_ones", "min_signed", "max_signed",
-        "walking_one", "walking_zero", "alternating", "small", "generic",
-    }
+    from rvgen.coverage.collectors import VALUE_CLASS_BINS
+    _val_class_bins = set(VALUE_CLASS_BINS)
     for _cg in ("rs1_val_class_cg", "rs2_val_class_cg", "rd_val_class_cg"):
         known_bins[_cg] = set(_val_class_bins)
-    # Cross covergroup: every "<class>__<class>" pair is valid.
     known_bins["rs_val_class_cross_cg"] = {
         f"{a}__{b}" for a in _val_class_bins for b in _val_class_bins
     }

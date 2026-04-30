@@ -30,6 +30,7 @@ the static ones.
 from __future__ import annotations
 
 import re
+from collections import deque
 from pathlib import Path
 
 from rvgen.coverage.collectors import (
@@ -42,6 +43,7 @@ from rvgen.coverage.collectors import (
     CG_PRIV_MODE,
     CG_RS_VAL_CORNER,
     CoverageDB,
+    _value_class,
 )
 
 
@@ -175,8 +177,7 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
     prev_bin_bytes: int = 0
     prev_mnem: str | None = None
     prev_was_branch: bool = False
-    # T/N branch-history shift register for the 3-gram pattern covergroup.
-    branch_history: list[str] = []
+    branch_history: deque[str] = deque(maxlen=64)
     # Virtual reg-file tracking last value written to each GPR. Lets us
     # derive rs1_val_class / rs2_val_class on the *next* instruction from
     # the value the previous writer left there. Spike's --log-commits
@@ -219,17 +220,11 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                 # and also bump the bit-activity covergroup for each set bit
                 # (reveals dead bits — if bit_N_set never appears, no
                 # instruction ever computed a value with bit N set).
-                from rvgen.coverage.collectors import _value_class
                 for wm in _GPR_WRITE_IN_COMMIT_RE.finditer(writes):
                     reg = wm.group("reg")
                     val = int(wm.group("val"), 16)
                     _bump(CG_RS_VAL_CORNER, _corner_bucket(val))
-                    # New: full val_comb-style classifier with walking-one /
-                    # walking-zero / alternating / signed-min etc. — the
-                    # corner_bucket above is coarser (zero/all_ones/normal).
                     _bump("rd_val_class_cg", _value_class(val, 64))
-                    # Update the virtual reg-file so subsequent rs1/rs2
-                    # reads of this register can be classified.
                     gpr_state[reg] = val
                     # Cap at 64 bits; bin name = "bit_N_set".
                     v = val & 0xFFFF_FFFF_FFFF_FFFF
@@ -267,7 +262,6 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
             tail = m.group("tail") or ""
             tokens = _OPERAND_TOKEN_RE.findall(tail)
             if len(tokens) >= 2:
-                from rvgen.coverage.collectors import _value_class
                 cls1: str | None = None
                 cls2: str | None = None
                 tok2 = tokens[1].lower()
@@ -297,14 +291,9 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                     _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__T")
                     branch_history.append("T")
                 branches += 1
-                # 3-gram branch pattern — feeds branch-predictor stress
-                # analysis. Eight bins: TTT/TTN/TNT/TNN/NTT/NTN/NNT/NNN.
                 if len(branch_history) >= 3:
-                    pattern = "".join(branch_history[-3:])
+                    pattern = "".join(list(branch_history)[-3:])
                     _bump("branch_pattern_cg", pattern)
-                # Cap history length to avoid memory growth on long runs.
-                if len(branch_history) > 64:
-                    branch_history = branch_history[-32:]
 
             prev_pc = pc
             prev_bin_bytes = bin_bytes
