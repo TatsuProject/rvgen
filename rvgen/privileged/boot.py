@@ -28,8 +28,14 @@ from rvgen.isa.enums import (
     PrivilegedReg,
     RiscvInstrGroup,
     RiscvReg,
+    SatpMode,
 )
 from rvgen.isa.utils import hart_prefix
+from rvgen.privileged.paging import (
+    build_default_page_tables,
+    gen_setup_satp,
+    is_paging_enabled,
+)
 from rvgen.targets import TargetCfg
 
 
@@ -273,6 +279,20 @@ def gen_pre_enter_privileged_mode(
             f"csrw 0x{PrivilegedReg.MIE.value:x}, {gpr0.abi}"
         ))
 
-    # 7) MRET — transition to init at MPP's privilege.
+    # 7) Page-table linking + SATP setup. Must run while still in M-mode
+    #    (link-PTE fix-up writes to the .page_table section) and *before*
+    #    MRET drops us into S/U-mode where SATP-translated loads/stores
+    #    apply.
+    if is_paging_enabled(cfg):
+        page_table_list = build_default_page_tables(
+            mode=target.satp_mode,
+            privileged_mode=cfg.init_privileged_mode,
+        )
+        # Fix up link PTEs to point at their child tables' runtime addresses.
+        lines.extend(page_table_list.gen_process_page_table(cfg))
+        # Program SATP and flush the TLB.
+        lines.extend(gen_setup_satp(cfg, scratch))
+
+    # 8) MRET — transition to init at MPP's privilege.
     lines.append(_line("mret"))
     return lines

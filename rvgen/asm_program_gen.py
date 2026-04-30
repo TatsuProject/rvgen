@@ -561,3 +561,23 @@ class AsmProgramGen:
                         kernel=True,
                     )
                 )
+
+        # Page-table section — only emitted when the target requests
+        # SATP != BARE. Tables live in their own writable .h<N>_page_table
+        # section so the boot link-PTE fix-up can store into them.
+        from rvgen.privileged.paging import (
+            build_default_page_tables,
+            is_paging_enabled,
+        )
+        if is_paging_enabled(self.cfg):
+            for hart in range(self.cfg.num_of_harts):
+                page_table_list = build_default_page_tables(
+                    mode=self.cfg.target.satp_mode,
+                    privileged_mode=self.cfg.init_privileged_mode,
+                )
+                self.instr_stream.extend(
+                    page_table_list.gen_data_section(
+                        hart=hart,
+                        num_harts=self.cfg.num_of_harts,
+                    )
+                )
