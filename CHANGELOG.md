@@ -5,7 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — staging area for v0.2.0
+
+This is the staging area for the upcoming v0.2.0 release. The release
+will close the largest credibility gap with riscv-dv (paging, PMP,
+debug ROM) and add every modern checkbox extension (Zicond, Zicbo*,
+Zihint*, Zimop, Zcmop). Tag + PyPI publish ride a future commit.
+
+### Added — privileged subsystem
+
+- **SV32 + SV39 paging** (`rvgen/privileged/paging.py`): PTE bit-packing,
+  page-table topology generator (1+2 tables for SV32, 1+2+4 for SV39),
+  identity-mapped happy-path leaves, link-PTE boot-time fix-up that
+  resolves child-table runtime addresses, SATP programming with
+  mode|PPN + sfence.vma. Page-table data section (`.h<N>_page_table`)
+  is automatically emitted when `target.satp_mode != BARE`.
+- **PMP** (`rvgen/privileged/pmp.py`): `cfg_byte()` packing
+  (`L | 00 | A[1:0] | X | W | R`), `pack_addr` per RV32 / RV64 widths,
+  NAPOT + TOR helpers, opt-in boot CSR sequence. Configurable via
+  `cfg.enable_pmp_setup` + `cfg.pmp_num_regions`.
+- **Debug ROM** (`rvgen/privileged/debug_rom.py`): per-hart
+  `debug_rom:` / `debug_end:` / `debug_exception:` sections, optional
+  DCSR.ebreak{m,s,u} programming, single-step logic via
+  DSCRATCH0 counter, DPC bump when cause==ebreak. Opt-in via
+  `cfg.gen_debug_section`.
+
+### Added — modern checkbox extensions
+
+- **Zicond** (`czero.eqz` / `czero.nez`).
+- **Zicbom** (`cbo.clean` / `cbo.flush` / `cbo.inval`).
+- **Zicboz** (`cbo.zero`).
+- **Zicbop** (`prefetch.i` / `prefetch.r` / `prefetch.w`).
+- **Zihintpause** (`pause`).
+- **Zihintntl** (`ntl.p1` / `ntl.pall` / `ntl.s1` / `ntl.all`).
+- **Zimop** (32 `mop.r.N` + 8 `mop.rr.N` reserved encodings).
+- **Zcmop** (8 `c.mop.{1,3,...,15}` compressed reserved encodings).
+- New target `rv64gc_modern` showcases all of the above on top of
+  the rv64gc privileged base. Verified end-to-end on Spike.
+
+### Added — vector + multi-hart
+
+- **vec_fp default-on** for FP-vector-capable targets (full RVV,
+  Zve32f, Zve64f, Zve64d). The canonical `rv64gcv` regression now
+  emits ~74 FP-vector ops per run (was 0). Plusarg-overridable.
+- **Multi-hart shared-memory race region**: `MemRegion.shared` flag
+  + new `DEFAULT_SHARED_REGIONS` / `shared_region_0` section emitted
+  once for all harts. `riscv_load_store_shared_mem_stream` now
+  references the shared label so harts genuinely race on the same
+  addresses.
+
+### Added — coverage tooling
+
+- **`auto-goals -o PATH`** writes a starter goals YAML to a file.
+  Modern-extension opcodes (CZERO_*, CBO_*, PREFETCH_*, PAUSE, NTL_*,
+  MOP_*, C_MOP_*) appear in the seed list so generated goals cover
+  them out of the box.
+
+### Verified
+
+- 490 / 490 unit tests pass.
+- Canonical regression sweep: 51 / 51 PASS.
+- rv64gcv vector sweep: 18 / 18 PASS.
+- New targets: rv64gc_modern + multi_harts shared-mem stream — all
+  pass `gen + gcc_compile + iss_sim` on Spike.
 
 ## [0.1.0] — 2026-04-29 — initial open-source release
 
