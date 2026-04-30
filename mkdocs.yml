@@ -1,0 +1,77 @@
+site_name: rvgen
+site_description: Pure-Python RISC-V random instruction generator with built-in functional coverage and CI-ready dashboards.
+site_author: chipforge contributors
+site_url: https://logicx-tatsu.github.io/rvgen/
+repo_url: https://github.com/LogicX-Tatsu/rvgen
+repo_name: LogicX-Tatsu/rvgen
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+    - toc.integrate
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Coverage:
+      - Workflow: coverage.md
+      - Verification guide: verification-guide.md
+  - Targets:
+      - Built-in + user area: user-area.md
+      - Testlists: testlist.md
+  - Releasing: releasing.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/LogicX-Tatsu/rvgen
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/rvgen/
+
+copyright: Apache-2.0 — Copyright &copy; chipforge contributors
