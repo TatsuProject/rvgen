@@ -288,6 +288,9 @@ def gen_pre_enter_privileged_mode(
             num_regions=cfg.pmp_num_regions,
         )
         lines.extend(gen_setup_pmp(cfg, pmp_cfg, scratch))
+        # Stash the regions on cfg so the coverage sampler (called
+        # later from cli.py) can bump pmp_cfg_cg bins for each region.
+        cfg._emitted_pmp_regions = list(pmp_cfg.regions)
 
     # 8) Page-table linking + SATP setup. Must run while still in M-mode
     #    (link-PTE fix-up writes to the .page_table section) and *before*

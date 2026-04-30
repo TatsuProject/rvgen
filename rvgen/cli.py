@@ -326,6 +326,13 @@ def main(argv: list[str] | None = None) -> int:
                         gen.main_sequence.instr_stream.instr_list,
                         vector_cfg=cfg.vector_cfg,
                     )
+                    # Sample any PMP regions the boot path emitted —
+                    # pmp_cfg_cg bins capture the (A × L × XWR) shape.
+                    pmp_regions = getattr(cfg, "_emitted_pmp_regions", None)
+                    if pmp_regions:
+                        from rvgen.coverage.collectors import sample_pmp_region
+                        for region in pmp_regions:
+                            sample_pmp_region(per_test, region)
                     per_test_cov[test_id] = per_test
                     cov_merge(run_cov, per_test)
 

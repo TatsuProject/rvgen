@@ -151,6 +151,21 @@ CG_LR_SC_PATTERN = "lr_sc_pattern_cg"
 # debug_entered, dret_taken. Complements priv_mode_cg by counting
 # *transitions* rather than *modes*.
 CG_PRIV_EVENT = "priv_event_cg"
+# PMP cfg-byte composition. Sampled when boot.py emits a PMP setup
+# block. Bins capture (A field × L bit × XWR combo) so we can confirm
+# every meaningful cfg byte shape was exercised across a regression.
+# Bin name format: "<addr_mode>_<l>_<xwr>" — e.g. "NAPOT_unlocked_RWX",
+# "TOR_locked_R--", "OFF_unlocked_---" (bare/disabled region).
+CG_PMP_CFG = "pmp_cfg_cg"
+# Multi-hart race coverage. Sampled at sequence-level when the
+# generator emits a ``LoadStoreSharedMemStream`` (or similar) on
+# multiple harts; bins capture how many distinct harts referenced
+# the shared region. Cross-trace correlation (same address hit by
+# different harts within N cycles) is left to a coverage-v2 pass —
+# this structural version still flags "test never raced" at a
+# glance.
+# Bins: only_one_hart, two_harts, three_to_seven_harts, all_harts.
+CG_MULTI_HART_RACE = "multi_hart_race_cg"
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -179,7 +194,60 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_BRANCH_DIST, CG_BRANCH_PATTERN,
     CG_RS1_VAL_CLASS, CG_RS2_VAL_CLASS, CG_RD_VAL_CLASS, CG_RS_VAL_CROSS,
     CG_MODERN_EXT, CG_FENCE, CG_LR_SC_PATTERN, CG_PRIV_EVENT,
+    CG_PMP_CFG, CG_MULTI_HART_RACE,
 )
+
+
+def sample_multi_hart_race(db: CoverageDB, harts_with_shared_access: set[int]) -> None:
+    """Sample CG_MULTI_HART_RACE based on how many harts hit the shared region.
+
+    Caller passes the set of hart indices that emitted at least one
+    instruction in the shared-memory stream. Bin: ``only_one_hart``
+    when only one hart accessed; ``two_harts`` when two; etc.
+    """
+    n = len(harts_with_shared_access)
+    if n == 0:
+        return
+    if n == 1:
+        bin_name = "only_one_hart"
+    elif n == 2:
+        bin_name = "two_harts"
+    elif n <= 7:
+        bin_name = "three_to_seven_harts"
+    else:
+        bin_name = "all_harts"
+    _bump(db, CG_MULTI_HART_RACE, bin_name)
+
+
+# ---------------------------------------------------------------------------
+# PMP cfg-byte sampler. Called once per boot-time PMP region — the
+# generator hooks this from boot.gen_pre_enter_privileged_mode when
+# enable_pmp_setup is on.
+# ---------------------------------------------------------------------------
+
+
+def sample_pmp_region(db: CoverageDB, region) -> None:
+    """Sample one PMP region into ``CG_PMP_CFG``.
+
+    ``region`` is an :class:`rvgen.privileged.pmp.PmpRegion` instance.
+    Bin label format::
+
+        "<addr_mode>_<lock>_<XWR>"
+
+    where ``addr_mode`` ∈ {OFF, TOR, NA4, NAPOT}, ``lock`` ∈
+    {locked, unlocked}, and ``XWR`` is a 3-character string
+    formed from the X/W/R bits with '-' for cleared.
+    """
+    a_name = region.a.name
+    lock = "locked" if region.l else "unlocked"
+    xwr = ""
+    xwr += "X" if region.x else "-"
+    xwr += "W" if region.w else "-"
+    xwr += "R" if region.r else "-"
+    if xwr == "---":
+        # Compress any-disabled-permission into a single bin.
+        xwr = "none"
+    _bump(db, CG_PMP_CFG, f"{a_name}_{lock}_{xwr}")
 
 
 # ---------------------------------------------------------------------------
