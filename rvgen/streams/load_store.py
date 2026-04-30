@@ -592,23 +592,28 @@ class LoadStoreRandAddrInstrStream(LoadStoreBaseInstrStream):
 
 @dataclass
 class LoadStoreSharedMemStream(LoadStoreStressInstrStream):
-    """Shared-memory load/store (SV:243) — forces region_0 for all harts.
+    """Shared-memory load/store stream (SV:243).
 
-    Same behavior as :class:`LoadStoreStressInstrStream` in a single-hart
-    context; the differentiating hazard (multi-hart races) needs a
-    multi-hart generator (deferred).
+    Targets the un-prefixed ``shared_region_0`` section that every hart
+    can see. In multi-hart mode this gives genuinely racy load/store
+    sequences across harts; in single-hart mode it behaves identically
+    to :class:`LoadStoreStressInstrStream` (with a different region
+    label).
+
+    Phase-2 work could add explicit fence-pair / LR-SC rendezvous
+    primitives, but the shared region itself is enough for spike to
+    exercise memory-ordering paths once the generator emits per-hart
+    streams that race on the same address.
     """
 
     def _pick_region(self) -> tuple[int, str, int]:
-        # Always use the first region (shared name).
-        regions = (
-            self.cfg.mem_regions()
-            if self.cfg is not None and hasattr(self.cfg, "mem_regions")
-            else DEFAULT_MEM_REGIONS
-        )
+        from rvgen.sections.data_page import DEFAULT_SHARED_REGIONS
+        region = DEFAULT_SHARED_REGIONS[0]
+        # Multi-hart: shared region carries no hart prefix, so the same
+        # label resolves across all harts.
         self.data_page_id = 0
-        self.region_name = regions[0].name
-        return 0, regions[0].name, regions[0].size_in_bytes
+        self.region_name = region.name
+        return 0, region.name, region.size_in_bytes
 
 
 # ---------------------------------------------------------------------------

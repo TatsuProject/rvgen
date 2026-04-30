@@ -560,6 +560,20 @@ class AsmProgramGen:
             )
         )
 
+        # Shared multi-hart region — single section all harts can reach by
+        # the un-prefixed name ``shared_region_0``. Always-on so the
+        # LoadStoreSharedMemStream can assume the symbol resolves; spike
+        # / linker just ignore an unreferenced section.
+        from rvgen.sections.data_page import DEFAULT_SHARED_REGIONS
+        self.instr_stream.extend(
+            gen_data_page(
+                DEFAULT_SHARED_REGIONS,
+                self.cfg.data_page_pattern,
+                rng=self.rng,
+                use_push_data_section=self.cfg.use_push_data_section,
+            )
+        )
+
         # User stack.
         for hart in range(self.cfg.num_of_harts):
             self.instr_stream.extend(

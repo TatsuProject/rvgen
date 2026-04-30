@@ -22,6 +22,10 @@ class MemRegion:
     name: str
     size_in_bytes: int
     xwr: int = 0b111  # X/W/R permission bits — informational for tests
+    #: When True the region is emitted once (no per-hart prefix) and
+    #: every hart references it by the same name. Used by multi-hart
+    #: shared-memory race tests + AMO regions.
+    shared: bool = False
 
 
 #: Default user-mode memory regions (matches SV ``cfg.mem_region`` defaults).
@@ -31,7 +35,15 @@ DEFAULT_MEM_REGIONS: tuple[MemRegion, ...] = (
 )
 
 #: AMO region for atomic operation tests.
-DEFAULT_AMO_REGION: tuple[MemRegion, ...] = (MemRegion("amo_0", 128),)
+DEFAULT_AMO_REGION: tuple[MemRegion, ...] = (MemRegion("amo_0", 128, shared=True),)
+
+#: Multi-hart shared-memory race region. Single un-prefixed section that
+#: every hart hits; ideal for LR/SC rendezvous, fence-pair stress, and
+#: testing memory ordering. Size matches DEFAULT_MEM_REGIONS so existing
+#: load/store offset distributions still apply.
+DEFAULT_SHARED_REGIONS: tuple[MemRegion, ...] = (
+    MemRegion("shared_region_0", 3000, shared=True),
+)
 
 #: Supervisor/kernel data regions.
 DEFAULT_S_MEM_REGIONS: tuple[MemRegion, ...] = (
@@ -77,7 +89,11 @@ def gen_data_page(
     lines: list[str] = []
 
     for region in regions:
-        label = region.name if amo else hart_prefix(hart, num_harts) + region.name
+        # Shared (and AMO) regions skip the per-hart prefix so all harts
+        # reference the same single section. Per-hart prefix only applies
+        # to private regions.
+        use_prefix = not (amo or region.shared)
+        label = (hart_prefix(hart, num_harts) + region.name) if use_prefix else region.name
         section_name = f".{label}"
         if use_push_data_section:
             lines.append(f".pushsection {section_name},\"aw\",@progbits;")
