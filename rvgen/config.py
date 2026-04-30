@@ -385,8 +385,20 @@ def make_config(target: TargetCfg, gen_opts: str = "", **overrides: Any) -> Conf
     )
     if target.vector_extension_enable or target_has_any_vector(target):
         cfg.enable_vector_extension = True
-        # For embedded Zve32x-style profiles the target may not set
-        # vector_extension_enable=True; honor the ISA advertisement either way.
+        # FP-vector default on for any target that advertises an
+        # FP-vector-capable profile (full RVV, Zve32f, Zve64f, Zve64d).
+        # Embedded Zve* profiles without F stay at the conservative
+        # default. Users can flip back off via +vec_fp=0 if their core
+        # lacks those subsets.
+        fp_vec_default = target_supports_fp_vector(target)
+        # Note on widen/narrow defaults: vec_narrowing_widening requires
+        # SEW < ELEN, while vec_fp (Phase-1 simplification) requires
+        # SEW == 32. With ELEN=32 (rv64gcv default) the two are mutually
+        # exclusive at the default vsew. We default vec_fp on for FP-
+        # vector targets and leave vec_narrowing_widening off; tests
+        # that need widening can pass +vec_fp=0 +vec_narrowing_widening=1
+        # together with a smaller SEW. Targets with ELEN > 32 can flip
+        # both via TargetCfg overrides in a future release.
         cfg.vector_cfg = VectorConfig(
             vtype=Vtype(vlmul=1, vsew=min(32, target.elen), vediv=1),
             vlen=target.vlen,
@@ -394,9 +406,7 @@ def make_config(target: TargetCfg, gen_opts: str = "", **overrides: Any) -> Conf
             selen=target.selen,
             max_lmul=target.max_lmul,
             num_vec_gpr=target.num_vec_gpr,
-            # vec_fp defaults False; a target with an FP-vector profile can
-            # opt in via a testlist plusarg (+vec_fp=1).
-            vec_fp=False,
+            vec_fp=fp_vec_default,
         )
 
     cfg.apply_plusargs(gen_opts)

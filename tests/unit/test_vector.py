@@ -236,11 +236,22 @@ def test_vector_filter_drops_widening_when_flag_off():
 
 
 def test_vector_filter_drops_fp_when_vec_fp_off():
+    # rv64gcv now defaults vec_fp=True (FP-vector-capable target);
+    # explicitly turn it off for this test.
     cfg = make_config(get_target("rv64gcv"))
-    assert not cfg.vector_cfg.vec_fp
+    cfg.vector_cfg.vec_fp = False
     avail = create_instr_list(cfg)
     assert RiscvInstrName.VFADD not in avail.names
     assert RiscvInstrName.VMFEQ not in avail.names
+
+
+def test_vector_fp_is_default_on_for_fp_capable_target():
+    # rv64gcv has full RVV which includes FP-vector → default vec_fp=True.
+    cfg = make_config(get_target("rv64gcv"))
+    assert cfg.vector_cfg.vec_fp is True
+    avail = create_instr_list(cfg)
+    # FP vector ops should now be in the catalog.
+    assert RiscvInstrName.VFADD in avail.names
 
 
 def test_vector_filter_keeps_basic_arith():
