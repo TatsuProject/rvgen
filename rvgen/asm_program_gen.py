@@ -171,6 +171,7 @@ class AsmProgramGen:
             self._gen_hart_section(hart)
         self._gen_test_done()
         self._gen_trap_handler_section()
+        self._gen_debug_rom_section()
         self._gen_program_end()
         self._gen_data_section()
         return self.instr_stream
@@ -470,6 +471,27 @@ class AsmProgramGen:
             self.instr_stream.append(_line("j write_tohost"))
         else:
             self.instr_stream.append(_line("ecall"))
+
+    def _gen_debug_rom_section(self) -> None:
+        """Emit the per-hart debug ROM section.
+
+        Opt-in: ``cfg.gen_debug_section=True`` is required. The section
+        is .align 12 so DTM jump targets land on a page-aligned boundary
+        (debuggers commonly reset to a fixed debug-rom address).
+        """
+        if not self.cfg.gen_debug_section:
+            return
+        from rvgen.privileged.debug_rom import (
+            gen_debug_exception_handler,
+            gen_debug_rom_section,
+        )
+        for hart in range(self.cfg.num_of_harts):
+            self.instr_stream.append("")
+            self.instr_stream.append(".align 12")
+            self.instr_stream.extend(gen_debug_rom_section(self.cfg, hart=hart))
+            self.instr_stream.extend(
+                gen_debug_exception_handler(self.cfg, hart=hart)
+            )
 
     def _gen_trap_handler_section(self) -> None:
         """Emit the trap handler(s). Phase 1: M-mode DIRECT only.
