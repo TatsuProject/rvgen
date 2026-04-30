@@ -1390,6 +1390,26 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--goals", required=True, help="Coverage goals YAML.")
     ps.set_defaults(func=cmd_suggest_seeds)
 
+    pi = sub.add_parser("import-cgf",
+                         help="Import a riscv-isac CGF YAML and translate "
+                              "it to rvgen Goals format. Maps mnemonics, "
+                              "rs1/rs2/rd, op_comb, val_comb, csr_comb, "
+                              "cross_comb fields onto our covergroups.")
+    pi.add_argument("--input", required=True,
+                     help="riscv-isac CGF YAML to import.")
+    pi.add_argument("-o", "--output", required=True,
+                     help="Output rvgen goals YAML path.")
+    pi.set_defaults(func=cmd_import_cgf)
+
+    pe2 = sub.add_parser("export-cgf",
+                          help="Export rvgen Goals as a riscv-isac CGF "
+                               "YAML the upstream isac toolchain consumes.")
+    pe2.add_argument("--goals", required=True, action="append",
+                      help="Coverage goals YAML. Repeat to layer overlays.")
+    pe2.add_argument("-o", "--output", required=True,
+                      help="Output isac-format CGF YAML path.")
+    pe2.set_defaults(func=cmd_export_cgf)
+
     psv = sub.add_parser("export-sv",
                           help="Export goals as SystemVerilog covergroup "
                                "source. SV-shop verification teams can "
@@ -1543,6 +1563,31 @@ def _subsys_for_bin(cg_name: str, bin_name: str) -> str:
         return _classify_opcode_bin(base)
     # Unrecognised covergroup → bucket as "Misc".
     return "Misc"
+
+
+def cmd_import_cgf(args: argparse.Namespace) -> int:
+    """Import a riscv-isac CGF YAML and write rvgen-format goals."""
+    from rvgen.coverage.cgf_isac import import_cgf
+    import yaml as _yaml
+    goals = import_cgf(args.input)
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.output).write_text(_yaml.safe_dump(goals.data, sort_keys=True))
+    n_cg = len(goals.data)
+    n_bins = sum(len(b) for b in goals.data.values())
+    print(f"Imported {n_cg} covergroup(s) with {n_bins} bin(s) "
+          f"-> {args.output}", file=sys.stderr)
+    return 0
+
+
+def cmd_export_cgf(args: argparse.Namespace) -> int:
+    """Export rvgen-format goals as a riscv-isac CGF YAML."""
+    from rvgen.coverage.cgf_isac import export_cgf
+    goals = load_goals_layered(*[Path(g) for g in args.goals])
+    out_path = export_cgf(goals, args.output)
+    n_entries = len([k for k, v in goals.data.items() if v])
+    print(f"Exported {n_entries} CGF entry/entries -> {out_path}",
+          file=sys.stderr)
+    return 0
 
 
 def cmd_export_sv(args: argparse.Namespace) -> int:
