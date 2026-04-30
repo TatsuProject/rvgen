@@ -521,9 +521,22 @@ def gen_setup_satp(cfg: Config, scratch: RiscvReg) -> list[str]:
 
 
 def is_paging_enabled(cfg: Config) -> bool:
-    """True iff the target requests SATP != BARE and bare-program mode is off."""
+    """True iff the test is actually going to use SATP-driven translation.
+
+    Three conditions must all hold:
+
+    1. The target advertises SATP != BARE (e.g. SV32 / SV39 / SV48).
+    2. ``cfg.bare_program_mode`` is off (otherwise no boot CSR setup
+       runs at all).
+    3. ``cfg.init_privileged_mode`` drops to S- or U-mode after
+       ``mret``. M-mode bypasses translation regardless of SATP, so
+       emitting page-tables + SATP setup for an M-mode-only test is
+       wasted work — and worse, on some Spike builds the SATP write
+       confuses HTIF and the test never terminates.
+    """
     return (
         cfg.target is not None
         and cfg.target.satp_mode != SatpMode.BARE
         and not cfg.bare_program_mode
+        and cfg.init_privileged_mode != PrivilegedMode.MACHINE_MODE
     )

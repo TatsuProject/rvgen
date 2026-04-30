@@ -213,9 +213,21 @@ def test_setup_satp_returns_empty_for_bare():
 # ---------- Integration ----------
 
 
-def test_is_paging_enabled_true_for_sv39():
+def test_is_paging_enabled_true_for_sv39_with_supervisor_boot():
+    # rv64gc supports M+S+U; default init mode is M, which means the test
+    # would never reach SATP-translated execution. Paging stays off in
+    # that case so we don't pay for page-tables we never use. Flipping
+    # init_privileged_mode to S enables paging.
     cfg = Config(target=BUILTIN_TARGETS["rv64gc"])
+    cfg.init_privileged_mode = PrivilegedMode.SUPERVISOR_MODE
     assert is_paging_enabled(cfg) is True
+
+
+def test_is_paging_enabled_false_for_sv39_with_machine_boot():
+    # M-mode boot bypasses translation regardless of SATP value.
+    cfg = Config(target=BUILTIN_TARGETS["rv64gc"])
+    assert cfg.init_privileged_mode == PrivilegedMode.MACHINE_MODE
+    assert is_paging_enabled(cfg) is False
 
 
 def test_is_paging_enabled_false_for_bare():
