@@ -171,3 +171,67 @@ category_group_cross:
   ARITHMETIC__RV32I: 50
   LOGICAL__RV32I: 30
   BRANCH__RV32I: 20
+
+# Sprint-1 coverage-gap closures — see collectors.py CG_FP_FFLAGS et al.
+# Most are runtime-only on the M/S CSR write side; baseline targets a
+# couple of hits each so the dashboard surfaces them as expected bins.
+fp_fflags_cg:
+  no_flags: 0
+  nx_set: 0
+  uf_set: 0
+  of_set: 0
+  dz_set: 0
+  nv_set: 0
+  multiple_flags: 0
+
+trap_cause_cg:
+  exception_02_illegal_instruction: 0
+  exception_03_breakpoint: 0
+  exception_08_ecall_u: 0
+  exception_09_ecall_s: 0
+  exception_11_ecall_m: 0
+  exception_12_instr_page_fault: 0
+  exception_13_load_page_fault: 0
+  exception_15_store_amo_page_fault: 0
+  interrupt_07_m_timer: 0
+  interrupt_11_m_external: 0
+  interrupt_03_m_software: 0
+
+op_comb_cg:
+  rd_eq_rs1_eq_rs2: 0
+  rs1_is_sp: 0
+  rs1_is_ra: 0
+  rd_is_sp: 0
+  rd_is_ra: 0
+  rd_is_zero: 0
+
+ea_align_cg:
+  align_1: 0
+  align_2: 0
+  align_4: 0
+  align_8: 0
+  align_16: 0
+  align_32: 0
+  align_64: 0
+
+csr_read_cg:
+  MSCRATCH: 0
+  MSTATUS: 0
+  MTVEC: 0
+  MEPC: 0
+  MCAUSE: 0
+
+fp_dataset_cg:
+  pos_zero: 0
+  neg_zero: 0
+  pos_inf: 0
+  neg_inf: 0
+  qnan: 0
+  snan: 0
+  pos_subnormal: 0
+  neg_subnormal: 0
+  pos_normal_min: 0
+  pos_normal_max: 0
+  pos_one: 0
+  neg_one: 0
+  generic: 0

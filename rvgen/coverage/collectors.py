@@ -167,6 +167,45 @@ CG_PMP_CFG = "pmp_cfg_cg"
 # Bins: only_one_hart, two_harts, three_to_seven_harts, all_harts.
 CG_MULTI_HART_RACE = "multi_hart_race_cg"
 
+# ---------------------------------------------------------------------------
+# Sprint-1 additions — coverage-gap closure vs riscv-isac / riscvISACOV.
+# ---------------------------------------------------------------------------
+#
+# CG_FP_FFLAGS — accrued FP exception flags (NV/DZ/OF/UF/NX) decoded from
+# fcsr / fflags writes. Bin-per-flag plus aggregate "no_flags" /
+# "multiple_flags". Critical for FP-corner verification (riscv-isac and
+# Imperas' coverage tracks each fflag distinctly; we previously only
+# tracked the FCSR write event itself via csr_value_cg).
+CG_FP_FFLAGS = "fp_fflags_cg"
+# Per-cause trap decode. Sampled when xCAUSE writes show up in the
+# spike commit log. Bin name format:
+#   "exception_<n>_<NAME>"   for sync causes (mcause MSB=0)
+#   "interrupt_<n>_<NAME>"   for async causes (mcause MSB=1)
+# Replaces the coarse "trap_entered" label-match in CG_EXCEPTION.
+CG_TRAP_CAUSE = "trap_cause_cg"
+# Operand-register relationships beyond the trivial rs1==rs2 / rd==rs1
+# crosses. Bins capture special-register patterns (sp/ra/gp/zero usage
+# as src or dst) and triple-equality (rd==rs1==rs2). Static, sampled
+# from each emitted instruction.
+CG_OP_COMB = "op_comb_cg"
+# Effective-address alignment from the runtime trace (versus the static
+# alignment we already track in CG_MEM_ALIGN, which uses just the
+# immediate offset). Bins: align_1 / align_2 / align_4 / align_8 /
+# align_16 / align_32 / align_64 — the largest power-of-two aligning
+# the address.
+CG_EA_ALIGN = "ea_align_cg"
+# CSR-read coverage. Tracks `csrr` (csrrs rd, csr, x0) and any csrrs/csrrc
+# with a writable destination. Currently csr_value_cg only sees writes;
+# many CSRs are read-only or read-mostly and never trigger our existing
+# CSR coverage.
+CG_CSR_READ = "csr_read_cg"
+# FP corner-value dataset. riscv-isac calls these sp_dataset / dp_dataset.
+# Bins: pos_zero, neg_zero, pos_inf, neg_inf, qnan, snan,
+#   pos_subnormal, neg_subnormal, pos_normal_min, neg_normal_min,
+#   pos_normal_max, neg_normal_max, pos_one, neg_one, generic.
+# Sampled from FP register writes parsed out of the spike commit log.
+CG_FP_DATASET = "fp_dataset_cg"
+
 
 ALL_COVERGROUPS: tuple[str, ...] = (
     CG_OPCODE, CG_FORMAT, CG_CATEGORY, CG_GROUP,
@@ -195,6 +234,8 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_RS1_VAL_CLASS, CG_RS2_VAL_CLASS, CG_RD_VAL_CLASS, CG_RS_VAL_CROSS,
     CG_MODERN_EXT, CG_FENCE, CG_LR_SC_PATTERN, CG_PRIV_EVENT,
     CG_PMP_CFG, CG_MULTI_HART_RACE,
+    CG_FP_FFLAGS, CG_TRAP_CAUSE, CG_OP_COMB, CG_EA_ALIGN,
+    CG_CSR_READ, CG_FP_DATASET,
 )
 
 
@@ -308,6 +349,231 @@ def _modern_ext_bin(name: RiscvInstrName) -> str | None:
 # as rw_rw (the GCC default). When the user constructs a FENCE Instr
 # with imm set explicitly the imm bits drive the classification.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Sprint-1 helpers: FP fflags, trap cause, op-combination, EA alignment,
+# FP corner-value dataset.
+# ---------------------------------------------------------------------------
+
+
+# RISC-V fcsr exception flag bit positions (priv-arch §11.2).
+_FFLAG_BITS = (
+    (0, "nx_set"),  # inexact
+    (1, "uf_set"),  # underflow
+    (2, "of_set"),  # overflow
+    (3, "dz_set"),  # divide-by-zero
+    (4, "nv_set"),  # invalid operation
+)
+
+
+def _fp_fflags_bins(value: int) -> tuple[str, ...]:
+    """Return the bin names for an FFLAGS / FCSR write value.
+
+    fflags lives in fcsr[4:0]; this function tolerates either fflags
+    (5-bit) or fcsr (8-bit, frm in [7:5]) writes.
+
+    Returns the tuple of distinct bin names — a single bit set yields a
+    single-element tuple ("nv_set",); zero yields ("no_flags",); two or
+    more bits set yields the per-flag bins **plus** "multiple_flags" so a
+    goals file can demand both individual and aggregate coverage.
+    """
+    flags_bits = value & 0x1F
+    if flags_bits == 0:
+        return ("no_flags",)
+    bins: list[str] = []
+    for bit, name in _FFLAG_BITS:
+        if flags_bits & (1 << bit):
+            bins.append(name)
+    if len(bins) > 1:
+        bins.append("multiple_flags")
+    return tuple(bins)
+
+
+# Synchronous / asynchronous trap cause codes (priv-arch v1.13 §3.1.15).
+_EXCEPTION_NAMES: dict[int, str] = {
+    0: "instr_addr_misaligned",
+    1: "instr_access_fault",
+    2: "illegal_instruction",
+    3: "breakpoint",
+    4: "load_addr_misaligned",
+    5: "load_access_fault",
+    6: "store_amo_addr_misaligned",
+    7: "store_amo_access_fault",
+    8: "ecall_u",
+    9: "ecall_s",
+    10: "reserved_10",
+    11: "ecall_m",
+    12: "instr_page_fault",
+    13: "load_page_fault",
+    14: "reserved_14",
+    15: "store_amo_page_fault",
+    20: "instr_guest_page_fault",
+    21: "load_guest_page_fault",
+    22: "virtual_instruction",
+    23: "store_amo_guest_page_fault",
+}
+
+_INTERRUPT_NAMES: dict[int, str] = {
+    0: "u_software",
+    1: "s_software",
+    3: "m_software",
+    4: "u_timer",
+    5: "s_timer",
+    7: "m_timer",
+    8: "u_external",
+    9: "s_external",
+    11: "m_external",
+    12: "counter_overflow",  # Sscofpmf
+}
+
+
+def _trap_cause_bin(cause: int, xlen: int = 64) -> str:
+    """Decode a raw mcause/scause value into a covergroup bin name.
+
+    mcause MSB == 1 → asynchronous interrupt; MSB == 0 → synchronous
+    exception. Unknown codes get a generic "unknown_<n>" bin so we
+    don't hide them.
+    """
+    sign_bit = 1 << (xlen - 1)
+    if cause & sign_bit:
+        code = cause & (sign_bit - 1)
+        name = _INTERRUPT_NAMES.get(code, f"unknown_{code}")
+        return f"interrupt_{code:02d}_{name}"
+    code = cause
+    name = _EXCEPTION_NAMES.get(code, f"unknown_{code}")
+    return f"exception_{code:02d}_{name}"
+
+
+# Static op-combination sampler — bins capture special-register usage and
+# triple-equality patterns the simpler rs1_eq_rs2 / rs1_eq_rd crosses miss.
+_SPECIAL_REGS = {
+    RiscvReg.ZERO: "zero",
+    RiscvReg.RA: "ra",
+    RiscvReg.SP: "sp",
+    RiscvReg.GP: "gp",
+    RiscvReg.TP: "tp",
+}
+
+
+def _op_comb_bins(instr: Instr) -> tuple[str, ...]:
+    """Return op-combination bins for a single instruction.
+
+    Each instruction may contribute multiple bins (e.g. an instruction
+    with rs1=sp and rd=ra contributes both ``rs1_is_sp`` and
+    ``rd_is_ra``). The triple-equality bin is rare but very informative
+    (``add x5, x5, x5`` style).
+    """
+    bins: list[str] = []
+    if instr.has_rd and instr.has_rs1 and instr.has_rs2:
+        if instr.rd == instr.rs1 == instr.rs2 and instr.rd != RiscvReg.ZERO:
+            bins.append("rd_eq_rs1_eq_rs2")
+    if instr.has_rs1:
+        sp = _SPECIAL_REGS.get(instr.rs1)
+        if sp is not None:
+            bins.append(f"rs1_is_{sp}")
+    if instr.has_rs2:
+        sp = _SPECIAL_REGS.get(instr.rs2)
+        if sp is not None:
+            bins.append(f"rs2_is_{sp}")
+    if instr.has_rd:
+        sp = _SPECIAL_REGS.get(instr.rd)
+        if sp is not None:
+            bins.append(f"rd_is_{sp}")
+    return tuple(bins)
+
+
+def _ea_align_bin(addr: int) -> str:
+    """Return the largest power-of-two aligning ``addr`` (capped at 64).
+
+    Returns one of: align_1, align_2, align_4, align_8, align_16,
+    align_32, align_64. Unaligned (addr % 2 != 0) maps to align_1.
+    """
+    if addr == 0:
+        return "align_64"  # zero address considered max-aligned for coverage
+    a = addr & 0xFFFF_FFFF_FFFF_FFFF
+    # Find lowest set bit position.
+    low = (a & -a).bit_length() - 1
+    if low >= 6:
+        return "align_64"
+    return f"align_{1 << low}"
+
+
+# IEEE-754 single + double FP corner classification. The bin set is
+# riscv-isac sp_dataset / dp_dataset compatible.
+_FP_DATASET_BINS = (
+    "pos_zero", "neg_zero", "pos_inf", "neg_inf",
+    "qnan", "snan",
+    "pos_subnormal", "neg_subnormal",
+    "pos_normal_min", "neg_normal_min",
+    "pos_normal_max", "neg_normal_max",
+    "pos_one", "neg_one",
+    "generic",
+)
+
+
+def _fp_dataset_bin(value: int, width: int) -> str:
+    """Classify an IEEE-754 bit-pattern of ``width`` bits (32 or 64).
+
+    Returns one of :data:`_FP_DATASET_BINS`. width=16 (Zfh) is also
+    accepted; subnormal / normal-min / normal-max thresholds are derived
+    from the format.
+    """
+    if width == 16:
+        sign_bit = 1 << 15
+        exp_mask = 0x1F
+        exp_shift = 10
+        mant_mask = (1 << 10) - 1
+        normal_max_exp = 0x1E
+        normal_max_mant = (1 << 10) - 1
+        one_pattern = 0x3C00
+    elif width == 32:
+        sign_bit = 1 << 31
+        exp_mask = 0xFF
+        exp_shift = 23
+        mant_mask = (1 << 23) - 1
+        normal_max_exp = 0xFE
+        normal_max_mant = (1 << 23) - 1
+        one_pattern = 0x3F800000
+    elif width == 64:
+        sign_bit = 1 << 63
+        exp_mask = 0x7FF
+        exp_shift = 52
+        mant_mask = (1 << 52) - 1
+        normal_max_exp = 0x7FE
+        normal_max_mant = (1 << 52) - 1
+        one_pattern = 0x3FF0000000000000
+    else:
+        return "generic"
+
+    v = value & ((1 << width) - 1)
+    sign = bool(v & sign_bit)
+    exp = (v >> exp_shift) & exp_mask
+    mant = v & mant_mask
+
+    # ±0
+    if exp == 0 and mant == 0:
+        return "neg_zero" if sign else "pos_zero"
+    # ±inf / NaN (exp = all-ones)
+    if exp == exp_mask:
+        if mant == 0:
+            return "neg_inf" if sign else "pos_inf"
+        # NaN — quiet bit is the MSB of mantissa.
+        quiet_bit = 1 << (exp_shift - 1)
+        return "qnan" if (mant & quiet_bit) else "snan"
+    # Subnormal (exp == 0, mant != 0).
+    if exp == 0:
+        return "neg_subnormal" if sign else "pos_subnormal"
+    # Normal min (exp == 1, mant == 0).
+    if exp == 1 and mant == 0:
+        return "neg_normal_min" if sign else "pos_normal_min"
+    # Normal max.
+    if exp == normal_max_exp and mant == normal_max_mant:
+        return "neg_normal_max" if sign else "pos_normal_max"
+    # ±1.
+    if (v & ~sign_bit) == one_pattern:
+        return "neg_one" if sign else "pos_one"
+    return "generic"
 
 
 def _fence_pat_bin(imm: int) -> str:
@@ -699,6 +965,10 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
         _bump(db, CG_RS1_EQ_RD, "equal" if rs1_val == rd_val else "distinct")
         _bump(db, CG_RD_RS1_CROSS, f"{rd_val.name}__{rs1_val.name}")
 
+    # op_comb — special-register usage (sp/ra/gp/zero) and triple-equality.
+    for bn in _op_comb_bins(instr):
+        _bump(db, CG_OP_COMB, bn)
+
     # Immediate sign (only if the instr actually has one and it was
     # randomized — branches resolved to label refs skip here since they
     # don't carry a meaningful signed immediate).
@@ -746,6 +1016,12 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
         else:
             access = "read"
         _bump(db, CG_CSR_ACCESS, f"{csr_name}__{access}")
+        # Read-only covergroup — useful when csr_value_cg / csr_access_cg
+        # are filtered to writes-only (e.g. when the user runs with
+        # +include_write_reg restricted) but we still want to know which
+        # CSRs the test actually read.
+        if access == "read":
+            _bump(db, CG_CSR_READ, csr_name)
 
     # Load/store offset magnitude + cache-line + page-cross — all use the
     # ``off`` already computed above for the alignment classifier.

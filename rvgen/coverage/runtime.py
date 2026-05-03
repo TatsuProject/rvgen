@@ -38,12 +38,20 @@ from rvgen.coverage.collectors import (
     CG_BR_PER_MNEM,
     CG_BRANCH_DIR,
     CG_CSR_VAL,
+    CG_EA_ALIGN,
     CG_EXCEPTION,
+    CG_FP_DATASET,
+    CG_FP_FFLAGS,
     CG_OPCODE,
     CG_PRIV_EVENT,
     CG_PRIV_MODE,
     CG_RS_VAL_CORNER,
+    CG_TRAP_CAUSE,
     CoverageDB,
+    _ea_align_bin,
+    _fp_dataset_bin,
+    _fp_fflags_bins,
+    _trap_cause_bin,
     _value_class,
 )
 
@@ -113,6 +121,16 @@ _CSR_WRITE_IN_COMMIT_RE = re.compile(r"c[0-9a-f]+_(?P<csr>\w+)\s+0x(?P<val>[0-9a
 # any-width hex value. Using the register name as a hint for covergroup
 # dimensionality (only GPR writes matter for the corner-value coverage).
 _GPR_WRITE_IN_COMMIT_RE = re.compile(r"\b(?P<reg>x\d+)\s+0x(?P<val>[0-9a-f]+)")
+# Floating-point register writes — same shape as GPR but f0..f31. The
+# value width tells us the FP precision: 4 hex chars = half (Zfh),
+# 8 = single, 16 = double. NaN-boxing means a 64-bit single sits in the
+# high bits as 0xFFFFFFFF — we strip that for the dataset classifier.
+_FPR_WRITE_IN_COMMIT_RE = re.compile(r"\b(?P<reg>f\d+)\s+0x(?P<val>[0-9a-f]+)")
+# Memory-access events (load/store) — spike --log-commits emits "mem" tokens
+# with the effective address. Format examples:
+#   "x12 0xdeadbeef mem 0x80001000"           (load — read EA)
+#   "mem 0x80001008 0xdeadbeef"               (store — written address + data)
+_MEM_EA_RE = re.compile(r"\bmem\s+0x(?P<addr>[0-9a-f]+)")
 
 # ABI register-name → x-register mapping. Used to translate spike's
 # disassembled operand tails (which use ABI names like ``a0``, ``s1``,
@@ -266,6 +284,15 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                     ev = _PRIV_EVENT_CSR_WRITES.get(csr)
                     if ev:
                         _bump(CG_PRIV_EVENT, ev)
+                    # Sprint-1: FP fflags decode. fflags lives in fcsr[4:0];
+                    # FFLAGS, FCSR, and FRM all alias the same 5 bits.
+                    if csr in ("FFLAGS", "FCSR"):
+                        for bn in _fp_fflags_bins(val):
+                            _bump(CG_FP_FFLAGS, bn)
+                    # Sprint-1: trap-cause decode. mcause/scause MSB toggles
+                    # exception-vs-interrupt; the rest is a 4..6 bit cause code.
+                    if csr in ("MCAUSE", "SCAUSE", "VSCAUSE"):
+                        _bump(CG_TRAP_CAUSE, _trap_cause_bin(val, 64))
                 # GPR write-values — classify against the canonical corners,
                 # and also bump the bit-activity covergroup for each set bit
                 # (reveals dead bits — if bit_N_set never appears, no
@@ -282,6 +309,22 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                         bit = (v & -v).bit_length() - 1  # lowest set bit
                         _bump(CG_BIT_ACTIVITY, f"bit_{bit:02d}_set")
                         v &= v - 1
+                # Sprint-1: FPR writes feed the FP-corner-value dataset.
+                # The hex width tells us precision; NaN-boxed singles in
+                # 64-bit FPRs ride as 0xFFFFFFFF<32-bit-single>.
+                for fm in _FPR_WRITE_IN_COMMIT_RE.finditer(writes):
+                    raw = fm.group("val")
+                    val = int(raw, 16)
+                    width = 16 if len(raw) <= 4 else (32 if len(raw) <= 8 else 64)
+                    if width == 64 and (val >> 32) == 0xFFFFFFFF:
+                        _bump(CG_FP_DATASET,
+                              _fp_dataset_bin(val & 0xFFFFFFFF, 32))
+                    else:
+                        _bump(CG_FP_DATASET, _fp_dataset_bin(val, width))
+                # Sprint-1: effective-address alignment from "mem 0x..." tokens.
+                for em in _MEM_EA_RE.finditer(writes):
+                    addr = int(em.group("addr"), 16)
+                    _bump(CG_EA_ALIGN, _ea_align_bin(addr))
                 # Sample the priv level observed on retirement.
                 pri_bin = _PRI_LEVEL_BIN.get(cm.group("pri"))
                 if pri_bin:
