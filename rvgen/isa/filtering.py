@@ -345,10 +345,16 @@ def get_rand_instr(
     exclude_category: Sequence[RiscvInstrCategory] = (),
     include_group: Sequence[RiscvInstrGroup] = (),
     exclude_group: Sequence[RiscvInstrGroup] = (),
+    steerer=None,
 ) -> Instr:
     """Pick a random instruction subject to the filter, and return a fresh instance.
 
     Port of SV ``riscv_instr::get_rand_instr`` (riscv_instr.sv:182).
+
+    When ``steerer`` is provided, the per-pick choice is biased by the
+    steerer's per-mnemonic weight map (see
+    :mod:`rvgen.coverage.steering`). Falls back to uniform choice when
+    None — keeping the no-steering path a single ``rng.choice`` call.
     """
     candidates = _resolve_candidate_set(
         avail,
@@ -366,7 +372,11 @@ def get_rand_instr(
             f"include_group={include_group}, exclude_instr={exclude_instr}, "
             f"exclude_category={exclude_category}, exclude_group={exclude_group}"
         )
-    name = rng.choice(candidates)
+    if steerer is None:
+        name = rng.choice(candidates)
+    else:
+        from rvgen.coverage.steering import steer_choice
+        name = steer_choice(rng, candidates, steerer)
     return copy_instr_from_registry(name)
 
 

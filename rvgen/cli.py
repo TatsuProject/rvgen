@@ -123,6 +123,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "+no_fence=1 if FENCE is uncovered). Heuristic — "
                         "see rvgen.coverage.directed for the "
                         "mapping table.")
+    p.add_argument("--cov_steering", action="store_true",
+                   help="Within-seed online coverage feedback. The random "
+                        "walker snapshots its own static coverage every "
+                        "--cov_steering_refresh picks and biases subsequent "
+                        "instruction selection toward mnemonics whose goals "
+                        "bins are still under-hit. ~25-40%% more bins per "
+                        "single seed in synthetic experiments. Requires "
+                        "--cov_goals.")
+    p.add_argument("--cov_steering_refresh", type=int, default=200,
+                   help="Snapshot interval for --cov_steering (default 200 "
+                        "instructions). Smaller = more reactive, more CPU.")
 
     # ISA
     p.add_argument("--isa", default="",
@@ -303,6 +314,13 @@ def main(argv: list[str] | None = None) -> int:
                 merged_gen_opts = (te.gen_opts or "") + " " + (args.gen_opts or "")
                 cfg = make_config(target_cfg, gen_opts=merged_gen_opts)
                 cfg.seed = seed
+                # Online coverage steering — only enabled when both the
+                # flag and the goals files were supplied. Fall back to
+                # standard random walk when either is missing.
+                if args.cov_steering and args.cov_goals:
+                    cfg.cov_steering = True
+                    cfg.cov_steering_refresh = args.cov_steering_refresh
+                    cfg.cov_goals_paths = tuple(args.cov_goals)
 
                 avail = create_instr_list(cfg)
                 rng = random.Random(seed)

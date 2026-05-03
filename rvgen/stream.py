@@ -153,6 +153,32 @@ class RandInstrStream(InstrStream):
     kernel_mode: bool = False
     allowed_instr: tuple[RiscvInstrName, ...] = ()
 
+    def _make_cov_steerer(self):
+        """Construct an :class:`OnlineCoverageSteer` from cfg, or None.
+
+        Returns None when ``cfg.cov_steering`` is False (the default), so
+        the steering machinery is dead code on the no-steering path.
+        """
+        if self.cfg is None or not self.cfg.cov_steering:
+            return None
+        from rvgen.coverage.cgf import load_goals_layered
+        from rvgen.coverage.steering import OnlineCoverageSteer
+        if not self.cfg.cov_goals_paths:
+            return None
+        goals = load_goals_layered(*self.cfg.cov_goals_paths)
+        # Candidate pool = whatever the random walker is currently
+        # allowed to pick. Use allowed_instr if it's been computed,
+        # else the full availset.
+        pool = (
+            tuple(self.allowed_instr) if self.allowed_instr
+            else tuple(self.avail.names) if self.avail else ()
+        )
+        return OnlineCoverageSteer(
+            goals=goals,
+            candidate_pool=pool,
+            refresh_every=self.cfg.cov_steering_refresh,
+        )
+
     def initialize_instr_list(self, instr_cnt: int) -> None:
         """Allocate ``instr_cnt`` placeholder slots (filled by gen_instr)."""
         self.instr_cnt = instr_cnt
@@ -241,13 +267,22 @@ class RandInstrStream(InstrStream):
         _CSR_WRITE_INSTRS = (_CsrN.CSRRW, _CsrN.CSRRWI)
         _CSR_SETCLR_INSTRS = (_CsrN.CSRRS, _CsrN.CSRRC, _CsrN.CSRRSI, _CsrN.CSRRCI)
 
+        # Online coverage steering — bias the per-pick choice toward
+        # mnemonics whose goals bins are still under-hit. Refreshes every
+        # cfg.cov_steering_refresh picks. None when the user opts out
+        # (default) so the no-steering path stays a pure rng.choice.
+        steerer = self._make_cov_steerer()
+
         self.instr_list = []
-        for _ in range(self.instr_cnt):
+        for step in range(self.instr_cnt):
+            if steerer is not None and step > 0 and step % steerer.refresh_every == 0:
+                steerer.refresh(self.instr_list)
             instr = get_rand_instr(
                 rng,
                 self.avail,
                 include_instr=allowed,
                 exclude_instr=exclude,
+                steerer=steerer,
             )
             randomize_gpr_operands(
                 instr,
