@@ -446,17 +446,22 @@ details.cg .body table thead th { background: var(--bg-card); }
 /* ---------- Sunburst hero ---------- */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 520px) minmax(280px, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 360px);
   gap: 18px;
   align-items: stretch;
   margin-bottom: 18px;
+}
+@media (max-width: 1080px) {
+  .hero { grid-template-columns: 1fr; }
 }
 .hero .sunburst-card {
   background: var(--bg-card);
   border: 1px solid var(--grid);
   border-radius: 10px;
-  padding: 14px 14px 8px;
+  padding: 18px 18px 12px;
   position: relative;
+  min-height: 600px;
+  display: flex; flex-direction: column;
 }
 .hero .sunburst-card .header {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -478,8 +483,10 @@ details.cg .body table thead th { background: var(--bg-card); }
   display: inline-block; width: 9px; height: 9px; border-radius: 2px;
 }
 svg.sunburst {
-  width: 100%; height: auto; display: block; max-width: 480px;
+  width: 100%; height: auto; display: block;
+  max-width: 760px;
   margin: 0 auto;
+  flex: 1;
 }
 svg.sunburst .sb-arc {
   cursor: pointer;
@@ -490,24 +497,25 @@ svg.sunburst .sb-arc:hover { opacity: 0.78; }
 svg.sunburst .sb-arc.dimmed { opacity: 0.18; }
 svg.sunburst .sb-arc.highlighted { opacity: 1; filter: brightness(1.1); }
 svg.sunburst .sb-label {
-  font-size: 10px; font-weight: 600; fill: #fff;
-  text-shadow: 0 0 2px rgba(0,0,0,0.6);
+  font-size: 13px; font-weight: 600; fill: #fff;
+  text-shadow: 0 0 3px rgba(0,0,0,0.7);
   pointer-events: none;
+  letter-spacing: 0.2px;
 }
 [data-theme="light"] svg.sunburst .sb-label {
   fill: #fff;
   text-shadow: 0 0 2px rgba(0,0,0,0.5);
 }
 svg.sunburst .sb-center-num {
-  font-size: 36px; font-weight: 700; fill: var(--fg);
-  font-variant-numeric: tabular-nums;
+  font-size: 56px; font-weight: 700; fill: var(--fg);
+  font-variant-numeric: tabular-nums; letter-spacing: -1px;
 }
 svg.sunburst .sb-center-sub {
-  font-size: 11px; fill: var(--fg-mute);
-  text-transform: uppercase; letter-spacing: 0.7px;
+  font-size: 13px; fill: var(--fg-mute);
+  text-transform: uppercase; letter-spacing: 0.9px; font-weight: 600;
 }
 svg.sunburst .sb-center-tiny {
-  font-size: 11px; fill: var(--fg-faint);
+  font-size: 13px; fill: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
@@ -965,7 +973,7 @@ def _sunburst_svg(
     goals: Goals | None,
     cg_summaries: dict[str, dict],
     *,
-    size: int = 480,
+    size: int = 760,
 ) -> str:
     """Two-level sunburst: subsystems (inner ring) → covergroups (outer ring).
 
@@ -1035,8 +1043,9 @@ def _sunburst_svg(
             f'fill="{color}" stroke="var(--bg-card)" stroke-width="2" '
             f'd="{path}"><title>{_html.escape(title)}</title></path>'
         )
-        # Subsystem label — only when the slice is wide enough.
-        if sweep > math.radians(15):
+        # Subsystem label — show whenever there's even a thin wedge,
+        # rotated to follow the arc. Larger chart = more room for labels.
+        if sweep > math.radians(8):
             mid = (a0 + a1) / 2
             r_label = (r_inner_hole + r_inner_ring) / 2
             tx, ty = _polar(cx, cy, r_label, mid)
@@ -1084,17 +1093,17 @@ def _sunburst_svg(
         f'fill="var(--bg-card)" stroke="var(--grid)" stroke-width="1" />'
     )
     out.append(
-        f'<text class="sb-center-num" x="{cx}" y="{cy - 4}" '
+        f'<text class="sb-center-num" x="{cx}" y="{cy - 6}" '
         f'text-anchor="middle">{overall_pct:.0f}%</text>'
     )
     out.append(
-        f'<text class="sb-center-sub" x="{cx}" y="{cy + 16}" '
-        f'text-anchor="middle">overall</text>'
+        f'<text class="sb-center-sub" x="{cx}" y="{cy + 22}" '
+        f'text-anchor="middle">overall closed</text>'
     )
     if total_req:
         out.append(
-            f'<text class="sb-center-tiny" x="{cx}" y="{cy + 32}" '
-            f'text-anchor="middle">{total_met:,}/{total_req:,}</text>'
+            f'<text class="sb-center-tiny" x="{cx}" y="{cy + 44}" '
+            f'text-anchor="middle">{total_met:,} / {total_req:,} bins</text>'
         )
     out.append('</svg>')
     return "\n".join(out)
