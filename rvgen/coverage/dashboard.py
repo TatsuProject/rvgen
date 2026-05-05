@@ -180,15 +180,28 @@ section > h2 {
 .tile {
   background: var(--bg-card);
   border: 1px solid var(--grid);
-  border-radius: 8px;
-  padding: 14px 16px;
+  border-radius: 10px;
+  padding: 14px 16px 16px;
   position: relative;
   overflow: hidden;
+  transition: border-color 0.15s, transform 0.15s;
 }
-.tile .label { color: var(--fg-mute); font-size: 11px;
-               text-transform: uppercase; letter-spacing: 0.6px; }
-.tile .value { font-size: 22px; font-weight: 600;
-               margin-top: 2px; line-height: 1.2; }
+.tile::before {
+  content: ''; position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent);
+  opacity: 0.7;
+}
+.tile.good::before { background: var(--good); }
+.tile.warn::before { background: var(--warn); }
+.tile.bad::before  { background: var(--bad); }
+.tile:hover { border-color: var(--accent); }
+.tile .label { color: var(--fg-mute); font-size: 10px;
+               text-transform: uppercase; letter-spacing: 0.7px;
+               font-weight: 600; }
+.tile .value { font-size: 26px; font-weight: 700;
+               margin-top: 4px; line-height: 1.1;
+               font-variant-numeric: tabular-nums; letter-spacing: -0.2px; }
 .tile .sub { color: var(--fg-mute); font-size: 11px; margin-top: 4px; }
 .tile.good .value { color: var(--good); }
 .tile.warn .value { color: var(--warn); }
@@ -430,6 +443,124 @@ details.cg .body table thead th { background: var(--bg-card); }
   text-transform: uppercase; letter-spacing: 0.4px;
 }
 
+/* ---------- Sunburst hero ---------- */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 520px) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 18px;
+}
+.hero .sunburst-card {
+  background: var(--bg-card);
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  padding: 14px 14px 8px;
+  position: relative;
+}
+.hero .sunburst-card .header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 6px;
+}
+.hero .sunburst-card h3 {
+  margin: 0; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--fg-mute); font-weight: 600;
+}
+.hero .sunburst-card .legend {
+  display: flex; gap: 12px; font-size: 10px;
+  color: var(--fg-mute);
+}
+.hero .sunburst-card .legend .row {
+  display: flex; align-items: center; gap: 4px;
+}
+.hero .sunburst-card .legend .swatch {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+}
+svg.sunburst {
+  width: 100%; height: auto; display: block; max-width: 480px;
+  margin: 0 auto;
+}
+svg.sunburst .sb-arc {
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+  transform-origin: center;
+}
+svg.sunburst .sb-arc:hover { opacity: 0.78; }
+svg.sunburst .sb-arc.dimmed { opacity: 0.18; }
+svg.sunburst .sb-arc.highlighted { opacity: 1; filter: brightness(1.1); }
+svg.sunburst .sb-label {
+  font-size: 10px; font-weight: 600; fill: #fff;
+  text-shadow: 0 0 2px rgba(0,0,0,0.6);
+  pointer-events: none;
+}
+[data-theme="light"] svg.sunburst .sb-label {
+  fill: #fff;
+  text-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
+svg.sunburst .sb-center-num {
+  font-size: 36px; font-weight: 700; fill: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+svg.sunburst .sb-center-sub {
+  font-size: 11px; fill: var(--fg-mute);
+  text-transform: uppercase; letter-spacing: 0.7px;
+}
+svg.sunburst .sb-center-tiny {
+  font-size: 11px; fill: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Detail panel (sunburst select) ---------- */
+.detail-card {
+  background: var(--bg-card);
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex; flex-direction: column;
+  min-height: 360px;
+}
+.detail-card .lead { color: var(--fg-mute); font-size: 11px;
+                     text-transform: uppercase; letter-spacing: 0.6px; }
+.detail-card h3.target {
+  margin: 4px 0 0;
+  font-size: 22px; font-weight: 600; color: var(--fg);
+  word-break: break-all; line-height: 1.2;
+}
+.detail-card .nums {
+  display: flex; gap: 24px; margin-top: 14px;
+  padding: 12px 0; border-top: 1px solid var(--grid-soft);
+  border-bottom: 1px solid var(--grid-soft);
+}
+.detail-card .nums .num {
+  font-size: 22px; font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.detail-card .nums .num-label {
+  font-size: 10px; color: var(--fg-mute);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px;
+}
+.detail-card ul.misses {
+  list-style: none; padding: 0; margin: 14px 0 0;
+  font-family: 'SF Mono', Monaco, Menlo, ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 200px; overflow-y: auto;
+}
+.detail-card ul.misses li {
+  display: flex; justify-content: space-between;
+  padding: 4px 6px; border-radius: 4px;
+}
+.detail-card ul.misses li:hover { background: var(--bg-hover); }
+.detail-card ul.misses li .req {
+  color: var(--fg-faint); font-variant-numeric: tabular-nums;
+}
+.detail-card .hint {
+  margin-top: auto; padding-top: 12px;
+  color: var(--fg-faint); font-size: 11px;
+  border-top: 1px solid var(--grid-soft);
+}
+
 /* ---------- SVG charts ---------- */
 svg.scorecard-svg, svg.timeline-svg, svg.pie-svg {
   width: 100%; height: auto; display: block;
@@ -570,6 +701,74 @@ _JS = r"""
     });
   });
 
+  // ---------- Sunburst interaction ----------
+  const arcs = document.querySelectorAll('svg.sunburst .sb-arc');
+  const detailLead   = document.getElementById('detail-lead');
+  const detailTitle  = document.getElementById('detail-title');
+  const detailNums   = document.getElementById('detail-nums');
+  const detailMisses = document.getElementById('detail-misses');
+
+  function setDetail(data) {
+    if (!detailTitle) return;
+    detailLead.textContent  = data.lead || 'Coverage focus';
+    detailTitle.textContent = data.title || '—';
+    detailNums.innerHTML = (data.metrics || []).map(m => (
+      `<div><div class="num" style="color:${m.color || 'var(--fg)'}">${m.value}</div>
+       <div class="num-label">${m.label}</div></div>`
+    )).join('');
+    detailMisses.innerHTML = (data.misses && data.misses.length)
+      ? data.misses.map(m => (
+          `<li><span>${m.bin}</span><span class="req">req ${m.req}</span></li>`
+        )).join('')
+      : '<li style="color:var(--fg-faint)">All bins met (or no goals)</li>';
+  }
+
+  arcs.forEach(arc => {
+    arc.addEventListener('mouseenter', () => {
+      arcs.forEach(a => a.classList.add('dimmed'));
+      arc.classList.remove('dimmed');
+      arc.classList.add('highlighted');
+      // Also highlight sibling cgs under the same subsystem.
+      const sub = arc.dataset.sub;
+      const cgName = arc.dataset.cg;
+      if (sub) {
+        // hovering an inner-ring subsystem: keep all CG arcs in that
+        // subsystem visible.
+        document.querySelectorAll('svg.sunburst .sb-cg').forEach(a => {
+          if (window._sbCgToSub && window._sbCgToSub[a.dataset.cg] === sub) {
+            a.classList.remove('dimmed');
+          }
+        });
+      } else if (cgName && window._sbCgToSub) {
+        const parent = window._sbCgToSub[cgName];
+        document.querySelector(`svg.sunburst .sb-sub[data-sub="${parent}"]`)?.classList.remove('dimmed');
+      }
+    });
+    arc.addEventListener('mouseleave', () => {
+      arcs.forEach(a => a.classList.remove('dimmed', 'highlighted'));
+    });
+    arc.addEventListener('click', () => {
+      const data = window._sbDetail || {};
+      const sub = arc.dataset.sub;
+      const cgName = arc.dataset.cg;
+      if (sub && data.subsys && data.subsys[sub]) {
+        setDetail(data.subsys[sub]);
+      } else if (cgName && data.cgs && data.cgs[cgName]) {
+        setDetail(data.cgs[cgName]);
+        // Also offer a "View bins" jump.
+        document.getElementById('detail-jump').onclick = () => {
+          document.querySelector('.tab[data-tab="covergroups"]').click();
+          const target = document.getElementById('cg-' + cgName);
+          if (target) {
+            target.open = true;
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        };
+        document.getElementById('detail-jump').style.display = 'inline-block';
+      }
+    });
+  });
+
   // ---------- Keyboard: '/' focuses search ----------
   document.addEventListener('keydown', (e) => {
     if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
@@ -674,6 +873,231 @@ def _is_cross(cg_name: str) -> bool:
 # ---------------------------------------------------------------------------
 # SVG charts.
 # ---------------------------------------------------------------------------
+
+
+def _classify_cg_to_subsys(cg_name: str) -> str:
+    """Coarse-classify a covergroup into a subsystem bucket.
+
+    Mirrors the table in :mod:`rvgen.coverage.tools` but scoped down to
+    avoid the import cycle (and to keep the dashboard module standalone
+    if reused elsewhere). When in doubt, returns ``"Misc"``.
+    """
+    n = cg_name.lower()
+    if n.startswith("vec_") or n in ("vtype_cg", "vtype_dyn_cg", "vreg_cg"):
+        return "Vector"
+    if n.startswith("fp_") or n in ("fp_rm_cg", "fpr_cg", "fp_dataset_cg",
+                                     "fp_fflags_cg"):
+        return "Floating point"
+    if n.startswith("csr_") or n in ("priv_event_cg", "privilege_mode_cg",
+                                      "exception_cg", "trap_cause_cg",
+                                      "pmp_cfg_cg"):
+        return "Privileged"
+    if n in ("modern_ext_cg",):
+        return "Modern checkbox"
+    if n == "fence_cg":
+        return "Memory ordering"
+    if n == "lr_sc_pattern_cg":
+        return "Atomics"
+    if n.startswith("branch_") or n == "branch_direction_cg":
+        return "Control flow"
+    if n in ("load_store_width_cg", "load_store_offset_cg",
+             "mem_align_cg", "ea_align_cg",
+             "cache_line_cross_cg", "page_cross_cg"):
+        return "Memory access"
+    if n in ("hazard_cg", "category_transition_cg",
+             "opcode_transition_cg"):
+        return "Pipeline"
+    if n in ("rs1_cg", "rs2_cg", "rd_cg", "rs1_eq_rs2_cg", "rs1_eq_rd_cg",
+             "rs1_rs2_cross_cg", "rd_rs1_cross_cg", "op_comb_cg"):
+        return "Reg-file"
+    if n in ("rs1_val_class_cg", "rs2_val_class_cg", "rd_val_class_cg",
+             "rs_val_class_cross_cg", "rs_val_corner_cg",
+             "bit_activity_cg"):
+        return "Value class"
+    if n in ("imm_sign_cg", "imm_range_cg"):
+        return "Immediates"
+    if n == "directed_stream_cg":
+        return "Streams"
+    if n == "pc_reach_cg":
+        return "Reachability"
+    if n == "multi_hart_race_cg":
+        return "Multi-hart"
+    if n == "csr_read_cg":
+        return "Privileged"
+    if n in ("opcode_cg", "format_cg", "category_cg", "group_cg",
+             "fmt_category_cross", "category_group_cross"):
+        return "Instruction mix"
+    return "Misc"
+
+
+def _heat_color(pct: float) -> str:
+    """Coverage-percent → CSS variable. Red < 60, yellow < 85, green ≥ 85."""
+    if pct >= 85:
+        return "var(--good)"
+    if pct >= 60:
+        return "var(--warn)"
+    return "var(--bad)"
+
+
+def _polar(cx: float, cy: float, r: float, angle_rad: float) -> tuple[float, float]:
+    return cx + r * math.cos(angle_rad), cy + r * math.sin(angle_rad)
+
+
+def _arc_path(cx: float, cy: float, r_inner: float, r_outer: float,
+              a0: float, a1: float) -> str:
+    """Build an SVG path for a ring-segment (annular arc)."""
+    large = 1 if (a1 - a0) > math.pi else 0
+    x0o, y0o = _polar(cx, cy, r_outer, a0)
+    x1o, y1o = _polar(cx, cy, r_outer, a1)
+    x0i, y0i = _polar(cx, cy, r_inner, a0)
+    x1i, y1i = _polar(cx, cy, r_inner, a1)
+    return (
+        f"M{x0o:.2f},{y0o:.2f} "
+        f"A{r_outer:.2f},{r_outer:.2f} 0 {large} 1 {x1o:.2f},{y1o:.2f} "
+        f"L{x1i:.2f},{y1i:.2f} "
+        f"A{r_inner:.2f},{r_inner:.2f} 0 {large} 0 {x0i:.2f},{y0i:.2f} "
+        f"Z"
+    )
+
+
+def _sunburst_svg(
+    db: CoverageDB,
+    goals: Goals | None,
+    cg_summaries: dict[str, dict],
+    *,
+    size: int = 480,
+) -> str:
+    """Two-level sunburst: subsystems (inner ring) → covergroups (outer ring).
+
+    Segment size scales with required bin count (falls back to bin
+    count when no goals). Color is the red/yellow/green coverage heat.
+    Click → drills into that covergroup on the Hierarchy tab via the
+    embedded JS handler.
+
+    Returns the SVG string. Empty SVG when the DB is empty.
+    """
+    # Build per-subsystem aggregates.
+    subsys: dict[str, dict] = {}
+    for cg, s in cg_summaries.items():
+        if s["n_hit"] == 0 and s["required"] == 0:
+            continue
+        bucket = _classify_cg_to_subsys(cg)
+        b = subsys.setdefault(bucket, {
+            "weight": 0, "met": 0, "required": 0,
+            "cgs": [],
+        })
+        # Use required count as the segment weight when available, else
+        # fall back to unique-bins-hit. Guarantees no zero-weight slices.
+        w = max(s["required"], s["n_hit"], 1)
+        b["weight"] += w
+        b["met"] += s["met"]
+        b["required"] += s["required"]
+        b["cgs"].append((cg, s, w))
+
+    if not subsys:
+        return ('<div class="empty" style="height:480px;'
+                'display:flex;align-items:center;justify-content:center;">'
+                'No coverage data to plot.</div>')
+
+    cx = cy = size / 2
+    r_inner_hole = size * 0.18      # white center
+    r_inner_ring = size * 0.34      # subsystem ring outer edge
+    r_outer_ring = size * 0.48      # covergroup ring outer edge
+
+    total_weight = sum(b["weight"] for b in subsys.values())
+    if total_weight == 0:
+        total_weight = 1
+
+    # Order subsystems by weight desc for stable, readable layout.
+    ordered = sorted(subsys.items(), key=lambda kv: -kv[1]["weight"])
+
+    out: list[str] = [
+        f'<svg class="sunburst" viewBox="0 0 {size} {size}" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'role="img" aria-label="Coverage sunburst">'
+    ]
+
+    angle = -math.pi / 2  # start at 12 o'clock
+    for sub_name, b in ordered:
+        sweep = b["weight"] / total_weight * 2 * math.pi
+        a0, a1 = angle, angle + sweep
+        pct = (b["met"] / b["required"] * 100.0) if b["required"] else (
+            100.0 if any(s["n_hit"] > 0 for _, s, _ in b["cgs"]) else 0.0
+        )
+        color = _heat_color(pct)
+        path = _arc_path(cx, cy, r_inner_hole, r_inner_ring, a0, a1)
+        title = (f"{sub_name}: {b['met']}/{b['required']} bins "
+                 f"({pct:.1f}%)") if b["required"] else (
+            f"{sub_name}: untracked ({sum(s['n_hit'] for _, s, _ in b['cgs'])} bins hit)"
+        )
+        out.append(
+            f'<path class="sb-arc sb-sub" data-sub="{_html.escape(sub_name)}" '
+            f'fill="{color}" stroke="var(--bg-card)" stroke-width="2" '
+            f'd="{path}"><title>{_html.escape(title)}</title></path>'
+        )
+        # Subsystem label — only when the slice is wide enough.
+        if sweep > math.radians(15):
+            mid = (a0 + a1) / 2
+            r_label = (r_inner_hole + r_inner_ring) / 2
+            tx, ty = _polar(cx, cy, r_label, mid)
+            # Rotate text so it follows the arc (legible).
+            deg = math.degrees(mid) + 90
+            if 90 < deg < 270:
+                deg -= 180
+            out.append(
+                f'<text class="sb-label" x="{tx:.1f}" y="{ty:.1f}" '
+                f'text-anchor="middle" dominant-baseline="middle" '
+                f'transform="rotate({deg:.1f} {tx:.1f} {ty:.1f})" '
+                f'pointer-events="none">'
+                f'{_html.escape(sub_name)}</text>'
+            )
+
+        # Outer ring: per-covergroup arcs inside this subsystem's wedge.
+        cg_total = sum(w for _, _, w in b["cgs"]) or 1
+        ang2 = a0
+        for cg, s, w in sorted(b["cgs"], key=lambda x: -x[2]):
+            cg_sweep = w / cg_total * sweep
+            ca0, ca1 = ang2, ang2 + cg_sweep
+            cg_pct = s["pct"]
+            cg_color = _heat_color(cg_pct)
+            cg_path = _arc_path(cx, cy, r_inner_ring, r_outer_ring, ca0, ca1)
+            cg_title = (f"{cg}: {s['met']}/{s['required']} bins "
+                        f"({cg_pct:.1f}%)") if s["required"] else (
+                f"{cg}: {s['n_hit']} bins observed (no goals)"
+            )
+            out.append(
+                f'<path class="sb-arc sb-cg" data-cg="{_html.escape(cg)}" '
+                f'data-pct="{cg_pct:.1f}" '
+                f'fill="{cg_color}" stroke="var(--bg-card)" stroke-width="1" '
+                f'd="{cg_path}"><title>{_html.escape(cg_title)}</title></path>'
+            )
+            ang2 = ca1
+        angle = a1
+
+    # Center: total %.
+    total_met = sum(s["met"] for s in cg_summaries.values())
+    total_req = sum(s["required"] for s in cg_summaries.values())
+    overall_pct = (total_met / total_req * 100.0) if total_req else 0.0
+
+    out.append(
+        f'<circle cx="{cx}" cy="{cy}" r="{r_inner_hole - 2}" '
+        f'fill="var(--bg-card)" stroke="var(--grid)" stroke-width="1" />'
+    )
+    out.append(
+        f'<text class="sb-center-num" x="{cx}" y="{cy - 4}" '
+        f'text-anchor="middle">{overall_pct:.0f}%</text>'
+    )
+    out.append(
+        f'<text class="sb-center-sub" x="{cx}" y="{cy + 16}" '
+        f'text-anchor="middle">overall</text>'
+    )
+    if total_req:
+        out.append(
+            f'<text class="sb-center-tiny" x="{cx}" y="{cy + 32}" '
+            f'text-anchor="middle">{total_met:,}/{total_req:,}</text>'
+        )
+    out.append('</svg>')
+    return "\n".join(out)
 
 
 def _pie_svg(hit: int, partial: int, missed: int, untracked: int) -> str:
@@ -905,6 +1329,97 @@ def _heatmap_html(name: str, bins: dict[str, int],
 # ---------------------------------------------------------------------------
 
 
+def n_active_or(n: int) -> str:
+    """Format the active-covergroups number for compact display."""
+    return f"{n}"
+
+
+def _build_sunburst_detail_payload(
+    db: CoverageDB, goals: Goals | None,
+    cg_summaries: dict[str, dict],
+) -> dict:
+    """Pre-compute the per-segment detail payload for the click handler.
+
+    Returns ``{subsys: {sub_name: detail}, cgs: {cg_name: detail}}``.
+    Each detail has: lead, title, metrics list, misses list (top 5).
+    """
+    sub_to_cgs: dict[str, list[tuple[str, dict]]] = {}
+    cg_to_sub: dict[str, str] = {}
+    for cg, s in cg_summaries.items():
+        if s["n_hit"] == 0 and s["required"] == 0:
+            continue
+        sub = _classify_cg_to_subsys(cg)
+        sub_to_cgs.setdefault(sub, []).append((cg, s))
+        cg_to_sub[cg] = sub
+
+    out: dict = {"subsys": {}, "cgs": {}, "cg_to_sub": cg_to_sub}
+
+    for sub, cgs in sub_to_cgs.items():
+        s_met = sum(s["met"] for _, s in cgs)
+        s_req = sum(s["required"] for _, s in cgs)
+        s_hit = sum(s["n_hit"] for _, s in cgs)
+        s_pct = (s_met / s_req * 100.0) if s_req else (
+            100.0 if s_hit > 0 else 0.0)
+        # Find top missing bins inside this subsystem.
+        top_miss = []
+        if goals:
+            for cg, _s in cgs:
+                gb = goals.covergroup(cg)
+                bins = db.get(cg, {})
+                for bn, req in gb.items():
+                    if req <= 0:
+                        continue
+                    obs = bins.get(bn, 0)
+                    if obs < req:
+                        top_miss.append((cg, bn, req, obs))
+        top_miss.sort(key=lambda r: -r[2])
+        misses = [{"bin": f"{cg}.{bn}", "req": req}
+                  for cg, bn, req, _obs in top_miss[:5]]
+        out["subsys"][sub] = {
+            "lead": "Subsystem",
+            "title": sub,
+            "metrics": [
+                {"value": f"{len(cgs)}", "label": "covergroups"},
+                {"value": f"{s_hit:,}", "label": "bins hit"},
+                {"value": f"{s_pct:.1f}%", "label": "closed",
+                 "color": _heat_color(s_pct)},
+            ] + ([{"value": f"{s_req - s_met}",
+                   "label": "missing required"}]
+                 if goals and s_req else []),
+            "misses": misses,
+        }
+
+    for cg, s in cg_summaries.items():
+        if s["n_hit"] == 0 and s["required"] == 0:
+            continue
+        bins = db.get(cg, {})
+        gb = goals.covergroup(cg) if goals else {}
+        top_miss = []
+        for bn, req in gb.items():
+            if req <= 0:
+                continue
+            obs = bins.get(bn, 0)
+            if obs < req:
+                top_miss.append((bn, req, obs))
+        top_miss.sort(key=lambda r: -r[1])
+        misses = [{"bin": bn, "req": req}
+                  for bn, req, _obs in top_miss[:8]]
+        out["cgs"][cg] = {
+            "lead": f"Covergroup · {cg_to_sub.get(cg, 'Misc')}",
+            "title": cg,
+            "metrics": [
+                {"value": f"{s['n_hit']:,}", "label": "bins hit"},
+                {"value": f"{s['total_hits']:,}", "label": "samples"},
+                {"value": f"{s['pct']:.1f}%", "label": "closed",
+                 "color": _heat_color(s["pct"])},
+            ] + ([{"value": f"{s['missing']}", "label": "missing"}]
+                 if s["required"] else []),
+            "misses": misses,
+        }
+
+    return out
+
+
 def _summary_panel(
     db: CoverageDB,
     goals: Goals | None,
@@ -946,7 +1461,8 @@ def _summary_panel(
 
     out: list[str] = []
 
-    out.append('<section><h2>Key metrics</h2><div class="tiles">')
+    # KPI strip — Z-pattern (Grafana best practice).
+    out.append('<section><h2>At a glance</h2><div class="tiles">')
     out.append(_tile("Active covergroups", str(total_cgs)))
     out.append(_tile("Unique bins hit", str(n_hit_bins),
                      sub=f"{n_total_hits:,} total samples"))
@@ -958,7 +1474,6 @@ def _summary_panel(
         out.append(_tile("Missing required", str(total_missing),
                          sub="bins below quota",
                          klass="warn" if total_missing else "good"))
-        # Composite grade
         grade = pct
         klass = "good" if grade >= 85 else ("warn" if grade >= 60 else "bad")
         out.append(_tile("Grade", f"{grade:.0f}/100",
@@ -966,8 +1481,52 @@ def _summary_panel(
                          klass=klass))
     out.append("</div></section>")
 
+    # Hero — sunburst + selected-segment detail card.
+    out.append('<section class="hero-section"><h2>Coverage map</h2>'
+               '<div class="hero">')
+    out.append(
+        '<div class="sunburst-card">'
+        '<div class="header"><h3>Hierarchical coverage</h3>'
+        '<div class="legend">'
+        '<span class="row"><span class="swatch" style="background:var(--good)"></span>≥85%</span>'
+        '<span class="row"><span class="swatch" style="background:var(--warn)"></span>60–85%</span>'
+        '<span class="row"><span class="swatch" style="background:var(--bad)"></span>&lt;60%</span>'
+        '</div></div>'
+    )
+    out.append(_sunburst_svg(db, goals, cg_summaries))
+    out.append(
+        '<div style="text-align:center;margin-top:6px;'
+        'color:var(--fg-faint);font-size:10px;">'
+        'Hover an arc for details · click to drill in · inner ring = subsystem · outer = covergroup'
+        '</div>'
+    )
+    out.append('</div>')
+
+    # Detail card.
+    out.append(
+        '<div class="detail-card">'
+        '<div class="lead" id="detail-lead">Click any arc to inspect</div>'
+        '<h3 class="target" id="detail-title">Coverage map</h3>'
+        '<div class="nums" id="detail-nums">'
+        f'<div><div class="num">{n_active_or(total_cgs)}</div>'
+        '<div class="num-label">covergroups</div></div>'
+        f'<div><div class="num">{n_hit_bins:,}</div>'
+        '<div class="num-label">bins hit</div></div>'
+        + (f'<div><div class="num" style="color:{_heat_color(pct)}">{pct:.1f}%</div>'
+           f'<div class="num-label">closed</div></div>' if goals else '')
+        + '</div>'
+        '<ul class="misses" id="detail-misses">'
+        '<li style="color:var(--fg-faint)">Hover or click an arc to see top missing bins</li>'
+        '</ul>'
+        '<div class="hint"><button id="detail-jump" '
+        'style="display:none" class="btn">View bins →</button>'
+        ' Press <span class="kbd">/</span> to search · <span class="kbd">Esc</span> to clear</div>'
+        '</div>'
+    )
+    out.append('</div></section>')
+
     # Pie + scorecard side by side
-    out.append('<section><h2>Coverage status</h2>'
+    out.append('<section><h2>Coverage breakdown</h2>'
                '<div class="charts-row">')
     out.append('<div class="chart-card"><h3>Bin status distribution</h3>'
                '<div class="pie-wrap">')
@@ -1372,6 +1931,16 @@ def dashboard_html(
     out.append('<div class="panel" data-panel="summary">')
     out.append(_summary_panel(db, goals, miss, cg_summaries, scorecard))
     out.append('</div>')
+
+    # Sunburst detail payload — read by the click handler.
+    sb_payload = _build_sunburst_detail_payload(db, goals, cg_summaries)
+    out.append('<script>')
+    out.append('window._sbDetail = '
+               + json.dumps({"subsys": sb_payload["subsys"],
+                             "cgs": sb_payload["cgs"]}) + ';')
+    out.append('window._sbCgToSub = '
+               + json.dumps(sb_payload["cg_to_sub"]) + ';')
+    out.append('</script>')
 
     out.append('<div class="panel" data-panel="covergroups">')
     out.append(_covergroups_panel(db, goals, miss, cg_summaries))
