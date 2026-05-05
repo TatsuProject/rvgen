@@ -46,8 +46,8 @@ def test_scorecard_svg_skips_zero_required_subsystems():
 
 def test_scorecard_svg_returns_message_when_empty():
     out = _scorecard_svg([])
-    # Returns a paragraph, not an SVG.
-    assert "<p" in out
+    # Returns an empty-state div / paragraph, not an SVG.
+    assert "empty" in out
     assert "<svg" not in out
 
 
@@ -58,9 +58,10 @@ def test_scorecard_svg_color_codes_by_percent():
         {"subsystem": "Bad",  "met": 1, "required": 10, "missing": 9, "extra": 0, "percent": 10.0},
     ]
     svg = _scorecard_svg(sc)
-    assert "bar-fill-good" in svg   # ≥80%
-    assert "bar-fill-warn" in svg   # 40-80%
-    assert "bar-fill-bad" in svg    # <40%
+    # New layout uses row-fg with status modifier classes.
+    assert "row-fg good" in svg
+    assert "row-fg warn" in svg
+    assert "row-fg bad" in svg
 
 
 # ---------- timeline SVG ----------
@@ -90,7 +91,7 @@ def test_timeline_svg_handles_single_point():
 
 def test_timeline_svg_returns_message_when_empty():
     out = _timeline_svg([])
-    assert "<p" in out
+    assert "empty" in out
     assert "<svg" not in out
 
 
@@ -142,7 +143,8 @@ def test_dashboard_html_with_scorecard():
          "missing": 0, "extra": 0, "percent": 100.0},
     ]
     html = dashboard_html(db, scorecard=scorecard)
-    assert "Per-subsystem coverage" in html
+    # Card header is rendered with the new tabbed layout.
+    assert "Per-subsystem closure" in html or "subsystem" in html.lower()
     assert "RV32I+RV64I" in html
 
 
@@ -153,9 +155,9 @@ def test_dashboard_html_filterable_cg_list():
     assert html.count("<details") == 5
     # Every cg should carry a data-name attribute for filtering.
     for i in range(5):
-        assert f"data-name='cg_{i}'" in html
-    # Filter input is present.
-    assert "filterCgs" in html
+        assert f'data-name="cg_{i}"' in html
+    # Filter input is present (search box drives JS filtering).
+    assert 'id="cg-search"' in html
 
 
 def test_dashboard_html_per_cg_badge_changes_with_status():

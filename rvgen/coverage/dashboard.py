@@ -1,40 +1,48 @@
-"""Self-contained interactive coverage dashboard.
+"""Self-contained interactive coverage dashboard — SOTA layout.
 
-Generates one HTML file with vanilla SVG charts + JS — no external
-CDN, no plotly, no chart.js. Works offline. Designed to drop into a
-CI artifact upload step or a `python -m http.server` directory.
+Generates one HTML file with vanilla SVG charts + JS — no external CDN,
+no plotly, no chart.js. Works offline. Single drop into a CI artifact
+upload step or `python -m http.server`.
 
-Sections (top to bottom):
+Design references
+-----------------
 
-1. **Summary tiles** — total covergroups / bins hit / % met / samples.
-2. **Per-subsystem bar chart** — same buckets as the `scorecard` CLI:
-   RV32I+M, Vector, Crypto, Bitmanip, Privileged, Modern checkbox,
-   etc. Each bar shows % met; missing-bin counts inline.
-3. **Convergence timeline** — line chart of new-bins-per-seed if a
-   timeline JSON is supplied. Hovering over a point shows the seed
-   number + new-bin count.
-4. **Top missing bins** — the 25 highest-required missing bins, with
-   covergroup + required count + cov-explain hint when one applies.
-5. **Per-covergroup details** — collapsible table with hit/required
-   per bin, color-coded by status (met/partial/missed).
+* Cadence IMC: hierarchical Groups page with score / goal / weight columns.
+* Synopsys Verdi vCoverage: per-cover-point status + drill-down.
+* Mentor Questa Visualizer: pie chart of covered/missed; filter by status.
+* Istanbul/nyc: per-row colored bars; sortable file tree.
+* coverage.py: green/yellow/red highlight; print-friendly stylesheet.
 
-The whole page is driven by a small embedded ``<script>`` that:
-- toggles section open/close
-- filters covergroups by name
-- redraws the convergence chart on resize
+Sections
+--------
 
-Public API:
+The dashboard ships as a tabbed single-page app:
 
-  dashboard_html(db, goals=None, timeline=None, scorecard=None) -> str
-      Render the full HTML.
+1. **Summary** — pie chart of bin status; KPI tiles; per-subsystem bar
+   chart; top-25 missing.
+2. **Covergroups** — sortable / filterable hierarchical table. Each
+   covergroup expands to a per-bin table with red/yellow/green bars,
+   hits, goals, percentage, status badge.
+3. **Cross-coverage** — heatmap matrix for ``*_cross_cg`` covergroups.
+4. **Misses** — flat ranked list of all unmet bins with required
+   counts and "why" tooltips when ``cov-explain`` matchers apply.
+5. **Convergence** — line chart of new-bins-per-seed (when timeline JSON
+   is provided).
+
+Public API
+----------
+
+  dashboard_html(db, goals=None, timeline=None, scorecard=None,
+                 title='...', explanations=None) -> str
   write_dashboard(db, output_path, ...) -> Path
-      Write to disk.
 """
 
 from __future__ import annotations
 
 import html as _html
 import json
+import math
+import re
 from pathlib import Path
 
 from rvgen.coverage.cgf import Goals, missing_bins
@@ -42,264 +50,746 @@ from rvgen.coverage.collectors import CoverageDB
 
 
 # ---------------------------------------------------------------------------
-# CSS — one inline blob so the file ships with no external deps.
+# CSS — themed, print-friendly, light/dark via [data-theme] attribute.
 # ---------------------------------------------------------------------------
 
 _CSS = """
-:root {
+:root, [data-theme="dark"] {
   --bg: #0d1117;
   --bg-sec: #161b22;
   --bg-card: #1f242c;
+  --bg-hover: #22272e;
   --fg: #e6edf3;
   --fg-mute: #8b949e;
+  --fg-faint: #484f58;
   --accent: #58a6ff;
   --good: #3fb950;
+  --good-fade: #1f4128;
   --warn: #d29922;
+  --warn-fade: #4d3a13;
   --bad: #f85149;
+  --bad-fade: #4a2127;
+  --info: #58a6ff;
   --grid: #30363d;
+  --grid-soft: #21262d;
+}
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-sec: #f6f8fa;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f3f6;
+  --fg: #1f2328;
+  --fg-mute: #59636e;
+  --fg-faint: #818b98;
+  --accent: #0969da;
+  --good: #1a7f37;
+  --good-fade: #d2f4de;
+  --warn: #9a6700;
+  --warn-fade: #fff8c5;
+  --bad: #cf222e;
+  --bad-fade: #ffebe9;
+  --info: #0969da;
+  --grid: #d1d9e0;
+  --grid-soft: #eaeef2;
 }
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont,
-               'Segoe UI', Roboto, sans-serif;
-  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter,
+               Roboto, ui-sans-serif, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
 }
-header {
-  padding: 24px 32px 16px;
+code, .mono {
+  font-family: 'SF Mono', Monaco, Menlo, ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* ---------- Top bar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg-sec);
+  border-bottom: 1px solid var(--grid);
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 16px;
+}
+.topbar h1 {
+  margin: 0; font-size: 16px; font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.topbar h1 .logo {
+  display: inline-block; width: 22px; height: 22px;
+  background: linear-gradient(135deg, var(--accent), var(--good));
+  border-radius: 4px;
+  text-align: center; line-height: 22px; color: #fff;
+  font-size: 12px; font-weight: 700;
+}
+.topbar .meta { color: var(--fg-mute); font-size: 11px; }
+.topbar .spacer { flex: 1; }
+.topbar .btn {
+  background: transparent; color: var(--fg);
+  border: 1px solid var(--grid); border-radius: 6px;
+  padding: 5px 10px; font-size: 12px; cursor: pointer;
+}
+.topbar .btn:hover { background: var(--bg-hover); }
+
+/* ---------- Tab strip ---------- */
+.tabs {
+  position: sticky; top: 49px; z-index: 99;
+  display: flex; gap: 4px;
+  padding: 0 24px;
+  background: var(--bg);
   border-bottom: 1px solid var(--grid);
 }
-header h1 {
-  margin: 0 0 4px 0;
-  font-size: 24px;
-  font-weight: 600;
+.tab {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-mute); cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+  user-select: none;
 }
-header .meta { color: var(--fg-mute); font-size: 12px; }
+.tab:hover { color: var(--fg); }
+.tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+.tab .badge {
+  display: inline-block; margin-left: 6px;
+  background: var(--bg-card); color: var(--fg-mute);
+  border-radius: 8px; padding: 1px 6px; font-size: 11px;
+}
+.tab.active .badge { background: var(--accent); color: #fff; }
 
-main { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
-section { margin-bottom: 32px; }
-h2 {
-  font-size: 16px;
-  margin: 0 0 12px 0;
+/* ---------- Panels ---------- */
+.panel { display: none; padding: 20px 24px 64px; }
+.panel.active { display: block; }
+section { margin: 0 0 28px; }
+section > h2 {
+  margin: 0 0 12px;
+  font-size: 13px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.6px;
   color: var(--fg-mute);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
+/* ---------- KPI tiles ---------- */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
 }
 .tile {
   background: var(--bg-card);
-  padding: 16px 20px;
+  border: 1px solid var(--grid);
   border-radius: 8px;
-  border: 1px solid var(--grid);
-}
-.tile .label { color: var(--fg-mute); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
-.tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
-.tile .pct-bar {
-  height: 4px; background: var(--grid); border-radius: 2px; margin-top: 8px;
-  overflow: hidden;
-}
-.tile .pct-fill { height: 100%; background: var(--good); transition: width 0.5s; }
-
-.scorecard svg { width: 100%; max-width: 100%; height: auto; display: block; }
-.scorecard text { fill: var(--fg); font-family: inherit; }
-.scorecard .bar-bg { fill: var(--grid); }
-.scorecard .bar-fill-good { fill: var(--good); }
-.scorecard .bar-fill-warn { fill: var(--warn); }
-.scorecard .bar-fill-bad { fill: var(--bad); }
-.scorecard .label-text { font-size: 11px; }
-
-.timeline svg { width: 100%; height: 220px; display: block; }
-.timeline .axis { stroke: var(--grid); stroke-width: 1; }
-.timeline .axis-text { fill: var(--fg-mute); font-size: 10px; }
-.timeline .line { fill: none; stroke: var(--accent); stroke-width: 2; }
-.timeline .point { fill: var(--accent); }
-.timeline .point:hover { fill: var(--good); cursor: pointer; }
-
-.missing-table, .cg-table {
-  width: 100%; border-collapse: collapse;
-}
-.missing-table th, .cg-table th, .missing-table td, .cg-table td {
-  padding: 6px 12px; text-align: left;
-  border-bottom: 1px solid var(--grid);
-  font-size: 13px;
-}
-.missing-table th, .cg-table th {
-  color: var(--fg-mute); font-weight: 500;
-  text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px;
-}
-.missing-table tr:hover, .cg-table tr:hover { background: var(--bg-sec); }
-
-.cg-list details {
-  background: var(--bg-card);
-  border: 1px solid var(--grid);
-  border-radius: 6px;
-  margin-bottom: 8px;
-  padding: 8px 16px;
-}
-.cg-list details summary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.cg-list .cg-name { font-weight: 500; }
-.cg-list .cg-meta { color: var(--fg-mute); font-size: 12px; flex: 1; }
-.cg-list .badge {
-  display: inline-block; padding: 2px 8px;
-  border-radius: 4px; font-size: 11px;
-}
-.cg-list .badge.met { background: var(--good); color: #fff; }
-.cg-list .badge.partial { background: var(--warn); color: #000; }
-.cg-list .badge.missed { background: var(--bad); color: #fff; }
-.cg-list .badge.untracked { background: var(--grid); color: var(--fg-mute); }
-.cg-list .mini-bar {
-  display: inline-block;
-  width: 80px; height: 6px; background: var(--grid); border-radius: 3px;
+  padding: 14px 16px;
   position: relative;
   overflow: hidden;
 }
-.cg-list .mini-bar::after {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-  width: var(--pct); background: var(--good);
+.tile .label { color: var(--fg-mute); font-size: 11px;
+               text-transform: uppercase; letter-spacing: 0.6px; }
+.tile .value { font-size: 22px; font-weight: 600;
+               margin-top: 2px; line-height: 1.2; }
+.tile .sub { color: var(--fg-mute); font-size: 11px; margin-top: 4px; }
+.tile.good .value { color: var(--good); }
+.tile.warn .value { color: var(--warn); }
+.tile.bad  .value { color: var(--bad); }
+
+/* ---------- Charts row ---------- */
+.charts-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 2fr;
+  gap: 16px;
+  align-items: stretch;
+}
+.chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  padding: 16px;
+}
+.chart-card h3 {
+  margin: 0 0 10px;
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--fg-mute);
 }
 
-.filter-bar {
-  display: flex; gap: 12px; align-items: center; margin-bottom: 16px;
+/* ---------- Pie chart ---------- */
+.pie-wrap { display: flex; align-items: center; gap: 16px; }
+.pie-legend { display: flex; flex-direction: column; gap: 8px;
+              font-size: 12px; }
+.pie-legend .row { display: flex; align-items: center; gap: 8px; }
+.pie-legend .swatch {
+  display: inline-block; width: 12px; height: 12px; border-radius: 2px;
 }
-.filter-bar input {
-  flex: 1; padding: 8px 12px;
+.pie-legend .pct { color: var(--fg-mute); margin-left: auto; }
+
+/* ---------- Toolbar (filter, search, sort) ---------- */
+.toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-bottom: 14px; align-items: center;
+}
+.toolbar input.search {
   background: var(--bg-card); color: var(--fg);
   border: 1px solid var(--grid); border-radius: 6px;
-  font-family: inherit; font-size: 13px;
+  padding: 6px 10px; font-size: 12px;
+  min-width: 240px; flex: 1; max-width: 400px;
 }
-.filter-bar button {
-  padding: 8px 16px;
+.toolbar input.search::placeholder { color: var(--fg-faint); }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 14px;
+  font-size: 12px; cursor: pointer; user-select: none;
+  background: var(--bg-card); color: var(--fg-mute);
+  border: 1px solid var(--grid);
+}
+.chip:hover { color: var(--fg); }
+.chip.active { color: var(--fg); background: var(--bg-hover);
+               border-color: var(--accent); }
+.chip .dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+}
+.chip.met .dot, .chip.hit .dot { background: var(--good); }
+.chip.partial .dot                { background: var(--warn); }
+.chip.missed .dot                 { background: var(--bad); }
+.chip.untracked .dot              { background: var(--fg-faint); }
+
+.toolbar button {
   background: var(--bg-card); color: var(--fg);
   border: 1px solid var(--grid); border-radius: 6px;
+  padding: 5px 10px; font-size: 12px; cursor: pointer;
+}
+.toolbar button:hover { background: var(--bg-hover); }
+
+/* ---------- Tables ---------- */
+table {
+  width: 100%; border-collapse: collapse;
+  background: var(--bg-card);
+  border: 1px solid var(--grid);
+  border-radius: 8px; overflow: hidden;
+  font-size: 12px;
+}
+thead th {
+  background: var(--bg-sec); color: var(--fg-mute);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 11px; font-weight: 600;
+  text-align: left; padding: 8px 10px;
+  border-bottom: 1px solid var(--grid);
+  position: sticky; top: 0; z-index: 1;
   cursor: pointer;
+  user-select: none;
 }
-.filter-bar button:hover { border-color: var(--accent); }
+thead th.sortable::after {
+  content: ' \\2195'; color: var(--fg-faint); font-size: 10px;
+}
+thead th.sort-asc::after  { content: ' \\2191'; color: var(--accent); }
+thead th.sort-desc::after { content: ' \\2193'; color: var(--accent); }
+tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--grid-soft);
+  vertical-align: middle;
+}
+tbody tr:hover td { background: var(--bg-hover); }
+tbody tr:last-child td { border-bottom: none; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.bin-name { font-family: 'SF Mono', Monaco, Menlo, ui-monospace, Consolas, monospace; font-size: 12px; }
+
+/* ---------- Per-bin progress bar ---------- */
+.bar {
+  display: inline-block;
+  position: relative;
+  width: 130px; height: 14px;
+  background: var(--grid-soft);
+  border-radius: 4px; overflow: hidden;
+  vertical-align: middle;
+}
+.bar .fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--good);
+  transition: width 0.3s;
+}
+.bar.partial .fill { background: var(--warn); }
+.bar.missed  .fill { background: var(--bad); }
+.bar .label {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  text-align: center; line-height: 14px; font-size: 10px;
+  color: var(--fg); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 2px rgba(0,0,0,0.4);
+}
+[data-theme="light"] .bar .label { text-shadow: 0 0 2px rgba(255,255,255,0.6); }
+
+/* ---------- Status badges ---------- */
+.badge {
+  display: inline-block;
+  padding: 2px 8px; border-radius: 10px;
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  font-variant-numeric: tabular-nums;
+}
+.badge.met,    .badge.hit  { background: var(--good-fade); color: var(--good); }
+.badge.partial             { background: var(--warn-fade); color: var(--warn); }
+.badge.missed              { background: var(--bad-fade);  color: var(--bad); }
+.badge.untracked           { background: var(--bg-hover);  color: var(--fg-mute); }
+
+/* ---------- Covergroup expandables ---------- */
+details.cg {
+  background: var(--bg-card);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+details.cg[hidden] { display: none; }
+details.cg > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(150px, 1fr) 140px 90px;
+  align-items: center; gap: 12px;
+}
+details.cg > summary::-webkit-details-marker { display: none; }
+details.cg > summary:hover { background: var(--bg-hover); }
+details.cg .cg-name {
+  font-weight: 600; font-size: 13px; color: var(--fg);
+  display: flex; align-items: center; gap: 8px;
+}
+details.cg .cg-name::before {
+  content: '▶'; font-size: 8px; color: var(--fg-mute);
+  display: inline-block;
+  transition: transform 0.15s;
+}
+details.cg[open] .cg-name::before { transform: rotate(90deg); }
+details.cg .cg-meta { color: var(--fg-mute); font-size: 12px; }
+details.cg .pct-text { font-variant-numeric: tabular-nums;
+                       text-align: right; }
+details.cg .body { border-top: 1px solid var(--grid); }
+details.cg .body table { border: none; border-radius: 0; }
+details.cg .body table thead th { background: var(--bg-card); }
+
+/* ---------- Sidebar nav ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.sidebar {
+  position: sticky; top: 96px;
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+}
+.sidebar h4 {
+  margin: 6px 6px 4px; font-size: 10px;
+  color: var(--fg-mute);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.sidebar a {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 8px; border-radius: 4px;
+  color: var(--fg-mute); text-decoration: none; font-size: 11px;
+}
+.sidebar a:hover { background: var(--bg-hover); color: var(--fg); }
+.sidebar a .pct { font-variant-numeric: tabular-nums;
+                  font-size: 10px; }
+
+/* ---------- Cross heatmap ---------- */
+.heatmap {
+  background: var(--bg-card);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.heatmap h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.heatmap .meta { color: var(--fg-mute); font-size: 11px; margin-bottom: 8px; }
+.heatmap-grid {
+  display: grid; gap: 1px;
+  background: var(--grid-soft);
+  padding: 1px;
+  border-radius: 4px;
+  overflow: auto;
+}
+.heatmap-cell {
+  background: var(--bg-card);
+  font-size: 9px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  min-width: 24px; min-height: 22px;
+  position: relative;
+}
+.heatmap-cell.hit { color: #fff; }
+.heatmap-cell.zero { color: var(--fg-faint); }
+.heatmap-cell.label {
+  background: var(--bg-sec); color: var(--fg-mute);
+  font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+
+/* ---------- SVG charts ---------- */
+svg.scorecard-svg, svg.timeline-svg, svg.pie-svg {
+  width: 100%; height: auto; display: block;
+}
+.scorecard-svg .row-bg { fill: var(--grid-soft); }
+.scorecard-svg .row-fg.good   { fill: var(--good); }
+.scorecard-svg .row-fg.warn   { fill: var(--warn); }
+.scorecard-svg .row-fg.bad    { fill: var(--bad); }
+.scorecard-svg .row-label,
+.scorecard-svg .row-value     { fill: var(--fg); font-size: 11px; }
+.timeline-svg .axis           { stroke: var(--grid); stroke-width: 1; }
+.timeline-svg .axis-text      { fill: var(--fg-mute); font-size: 10px; }
+.timeline-svg .line           { stroke: var(--accent); stroke-width: 2;
+                                fill: none; }
+.timeline-svg .point          { fill: var(--accent); cursor: pointer; }
+.pie-svg .slice-good { fill: var(--good); }
+.pie-svg .slice-warn { fill: var(--warn); }
+.pie-svg .slice-bad  { fill: var(--bad); }
+.pie-svg .slice-na   { fill: var(--fg-faint); }
+.pie-svg .ring       { fill: none; stroke: var(--bg-card); stroke-width: 2; }
+
+/* ---------- Misses table ---------- */
+.miss-row .why {
+  font-size: 11px; color: var(--fg-mute);
+  font-style: italic; margin-top: 2px;
+}
+
+/* ---------- Print styles ---------- */
+@media print {
+  body { background: #fff; color: #000; font-size: 10pt; }
+  .topbar, .tabs, .toolbar, .sidebar { display: none !important; }
+  .panel { display: block !important; padding: 0; page-break-inside: avoid; }
+  details.cg { page-break-inside: avoid; }
+  details.cg > summary > * { color: #000 !important; }
+  table, thead th { background: #fff !important; color: #000 !important; }
+  .bar { background: #eee; }
+  .bar .fill { background: #888 !important; }
+}
+
+/* ---------- Misc ---------- */
+.empty {
+  text-align: center; padding: 32px;
+  color: var(--fg-mute); font-style: italic;
+}
+.kbd {
+  font-family: 'SF Mono', Monaco, Menlo, ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  background: var(--bg-sec); border: 1px solid var(--grid);
+  border-bottom-width: 2px;
+  border-radius: 3px; padding: 1px 5px;
+  color: var(--fg-mute);
+}
 """
 
 
 # ---------------------------------------------------------------------------
-# JS — bundled inline.
+# JavaScript — sort, filter, tab, theme toggle. Vanilla, no deps.
 # ---------------------------------------------------------------------------
 
-_JS = """
-function filterCgs(needle) {
-  needle = needle.toLowerCase();
-  document.querySelectorAll('.cg-list details').forEach(d => {
-    const name = d.dataset.name.toLowerCase();
-    d.style.display = (name.indexOf(needle) >= 0) ? '' : 'none';
+_JS = r"""
+(() => {
+  // ---------- Theme toggle ----------
+  const root = document.documentElement;
+  const stored = localStorage.getItem('rvgenTheme');
+  if (stored) root.setAttribute('data-theme', stored);
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const cur = root.getAttribute('data-theme') || 'dark';
+    const next = cur === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    localStorage.setItem('rvgenTheme', next);
   });
-}
-function toggleAll(open) {
-  const sel = (open === undefined)
-    ? !document.querySelector('.cg-list details[open]')
-    : open;
-  document.querySelectorAll('.cg-list details').forEach(d => {
-    if (sel) d.setAttribute('open', '');
-    else d.removeAttribute('open');
+
+  // ---------- Tab switching ----------
+  const tabs = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.panel');
+  function show(id) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+    panels.forEach(p => p.classList.toggle('active', p.dataset.panel === id));
+    location.hash = '#' + id;
+  }
+  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab)));
+  // Initial tab from URL hash, default 'summary'.
+  const initial = (location.hash || '#summary').replace('#', '');
+  show(document.querySelector('.tab[data-tab="' + initial + '"]') ? initial : 'summary');
+
+  // ---------- Search + status filter ----------
+  const search = document.getElementById('cg-search');
+  const chips = document.querySelectorAll('.chip[data-status]');
+  let activeStatus = 'all';
+  chips.forEach(c => c.addEventListener('click', () => {
+    chips.forEach(x => x.classList.remove('active'));
+    c.classList.add('active');
+    activeStatus = c.dataset.status;
+    apply();
+  }));
+
+  function apply() {
+    const q = (search?.value || '').toLowerCase();
+    document.querySelectorAll('details.cg').forEach(el => {
+      const name = (el.dataset.name || '').toLowerCase();
+      const status = el.dataset.status || 'untracked';
+      const matchSearch = !q || name.includes(q);
+      const matchStatus = activeStatus === 'all' || status === activeStatus;
+      el.hidden = !(matchSearch && matchStatus);
+    });
+  }
+  search?.addEventListener('input', apply);
+
+  // ---------- Expand / collapse all ----------
+  document.getElementById('expand-all')?.addEventListener('click',
+    () => document.querySelectorAll('details.cg').forEach(d => { if (!d.hidden) d.open = true; }));
+  document.getElementById('collapse-all')?.addEventListener('click',
+    () => document.querySelectorAll('details.cg').forEach(d => d.open = false));
+
+  // ---------- Sortable column headers ----------
+  document.querySelectorAll('table.sortable').forEach(table => {
+    const ths = table.querySelectorAll('thead th');
+    ths.forEach((th, idx) => {
+      th.classList.add('sortable');
+      th.addEventListener('click', () => {
+        const dir = th.classList.contains('sort-asc') ? 'desc' : 'asc';
+        ths.forEach(x => x.classList.remove('sort-asc', 'sort-desc'));
+        th.classList.add('sort-' + dir);
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+          const av = a.children[idx]?.dataset?.sort ?? a.children[idx]?.innerText ?? '';
+          const bv = b.children[idx]?.dataset?.sort ?? b.children[idx]?.innerText ?? '';
+          const an = parseFloat(av);
+          const bn = parseFloat(bv);
+          if (!isNaN(an) && !isNaN(bn)) {
+            return dir === 'asc' ? an - bn : bn - an;
+          }
+          return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+        });
+        rows.forEach(r => tbody.appendChild(r));
+      });
+    });
   });
-}
+
+  // ---------- Keyboard: '/' focuses search ----------
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+      e.preventDefault();
+      search?.focus();
+    } else if (e.key === 'Escape' && document.activeElement === search) {
+      search.value = '';
+      apply();
+      search.blur();
+    }
+  });
+})();
 """
 
 
 # ---------------------------------------------------------------------------
-# SVG bar-chart for the scorecard.
+# Data shaping helpers.
 # ---------------------------------------------------------------------------
 
 
-def _scorecard_svg(scorecard: list[dict], width: int = 900,
-                   bar_height: int = 22, gap: int = 8) -> str:
-    """Render the per-subsystem scorecard as an SVG bar chart.
+def _summarise_cg(
+    bins: dict[str, int],
+    goal_bins: dict[str, int],
+) -> dict:
+    """Compute the per-covergroup KPIs.
 
-    ``scorecard`` is the same shape the ``scorecard`` CLI produces:
-    list of dicts with ``subsystem``, ``met``, ``required``,
-    ``percent`` keys. Empty subsystems (no goals) are dropped.
+    Returns a dict with: status (met/partial/missed/untracked), pct
+    (0-100), required (count), met (count), missing (count), n_hit
+    (unique bins observed), total_hits.
     """
-    rows = [r for r in scorecard if r["required"] > 0]
-    if not rows:
-        return "<p style='color:var(--fg-mute)'>No subsystems with required bins.</p>"
+    n_hit = len(bins)
+    total_hits = sum(bins.values())
 
-    rows.sort(key=lambda r: r["percent"])
-    total_height = len(rows) * (bar_height + gap) + 16
-    label_pad = 180
-    bar_pad_right = 80
-    bar_w = width - label_pad - bar_pad_right
+    required_bins = {bn: req for bn, req in goal_bins.items() if req > 0}
+    if not required_bins:
+        return {
+            "status": "untracked",
+            "pct": 100.0 if n_hit > 0 else 0.0,
+            "required": 0, "met": 0, "missing": 0,
+            "n_hit": n_hit, "total_hits": total_hits,
+        }
 
-    out: list[str] = []
-    out.append(f'<svg viewBox="0 0 {width} {total_height}" xmlns="http://www.w3.org/2000/svg">')
-    for i, row in enumerate(rows):
-        y = i * (bar_height + gap) + 8
-        cx = (label_pad + bar_w + 8)
-        pct = row["percent"]
-        fill_class = ("bar-fill-good" if pct >= 80
-                      else "bar-fill-warn" if pct >= 40
-                      else "bar-fill-bad")
-        # Subsystem label.
+    met = sum(1 for bn, req in required_bins.items()
+              if bins.get(bn, 0) >= req)
+    missing = len(required_bins) - met
+    pct = (met / len(required_bins) * 100.0) if required_bins else 0.0
+    if missing == 0:
+        status = "met"
+    elif met == 0:
+        status = "missed"
+    else:
+        status = "partial"
+    return {
+        "status": status, "pct": pct,
+        "required": len(required_bins), "met": met, "missing": missing,
+        "n_hit": n_hit, "total_hits": total_hits,
+    }
+
+
+def _bin_status(observed: int, required: int) -> tuple[str, float]:
+    """Return (status, percent) for a single bin.
+
+    - required==0: untracked. percent = 100 if observed>0 else 0.
+    - observed>=required: hit (percent = 100).
+    - observed==0: missed (percent = 0).
+    - else: partial (percent = observed/required*100).
+    """
+    if required == 0:
+        return ("hit" if observed > 0 else "untracked",
+                100.0 if observed > 0 else 0.0)
+    pct = min(100.0, observed / required * 100.0)
+    if observed >= required:
+        return "hit", 100.0
+    if observed == 0:
+        return "missed", 0.0
+    return "partial", pct
+
+
+def _bar_html(observed: int, required: int) -> str:
+    """Render the inline coverage bar with hit/required label."""
+    status, pct = _bin_status(observed, required)
+    label = f"{observed}/{required}" if required > 0 else f"{observed}"
+    klass = "" if status == "hit" else f"{status}"
+    return (
+        f'<span class="bar {klass}">'
+        f'<span class="fill" style="width: {pct:.1f}%"></span>'
+        f'<span class="label">{_html.escape(label)}</span>'
+        f'</span>'
+    )
+
+
+def _badge(status: str, text: str | None = None) -> str:
+    label = text or status.upper()
+    return f'<span class="badge {status}">{_html.escape(label)}</span>'
+
+
+def _is_cross(cg_name: str) -> bool:
+    """Heuristic: covergroups named *_cross_cg or *__* with two parts."""
+    return cg_name.endswith("_cross_cg") or cg_name.endswith("_cross")
+
+
+# ---------------------------------------------------------------------------
+# SVG charts.
+# ---------------------------------------------------------------------------
+
+
+def _pie_svg(hit: int, partial: int, missed: int, untracked: int) -> str:
+    """Render a donut pie of the four bin-status totals."""
+    total = hit + partial + missed + untracked
+    if total == 0:
+        return '<svg viewBox="0 0 200 200"></svg>'
+    cx, cy, r, w = 80, 80, 70, 22
+    parts = [
+        ("good", hit), ("warn", partial),
+        ("bad", missed), ("na", untracked),
+    ]
+    out = ['<svg class="pie-svg" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">']
+    angle = -math.pi / 2  # start at top
+    for klass, val in parts:
+        if val <= 0:
+            continue
+        theta = val / total * 2 * math.pi
+        a0, a1 = angle, angle + theta
+        x0 = cx + r * math.cos(a0)
+        y0 = cy + r * math.sin(a0)
+        x1 = cx + r * math.cos(a1)
+        y1 = cy + r * math.sin(a1)
+        large = 1 if theta > math.pi else 0
         out.append(
-            f'<text class="label-text" x="{label_pad - 8}" y="{y + bar_height // 2 + 4}" '
-            f'text-anchor="end">{_html.escape(row["subsystem"])}</text>'
+            f'<path class="slice-{klass}" d="M{cx},{cy} L{x0:.1f},{y0:.1f} '
+            f'A{r},{r} 0 {large} 1 {x1:.1f},{y1:.1f} Z" />'
         )
-        # Bar background.
+        angle = a1
+    # Inner circle (donut hole) — uses bg-card colour
+    out.append(f'<circle cx="{cx}" cy="{cy}" r="{r - w}" '
+               f'fill="var(--bg-card)" />')
+    # Center label: total covered percent.
+    covered = hit
+    pct = covered / total * 100.0 if total else 0
+    out.append(f'<text x="{cx}" y="{cy + 2}" text-anchor="middle" '
+               f'fill="var(--fg)" font-size="22" font-weight="600">'
+               f'{pct:.0f}%</text>')
+    out.append(f'<text x="{cx}" y="{cy + 18}" text-anchor="middle" '
+               f'fill="var(--fg-mute)" font-size="10">covered</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
+def _scorecard_svg(rows: list[dict]) -> str:
+    """Horizontal bar chart per subsystem.
+
+    Each row dict: {subsystem, met, required, percent}.
+    """
+    visible = [r for r in rows if (r.get("required") or 0) > 0]
+    if not visible:
+        return '<div class="empty">No subsystem rows to plot.</div>'
+
+    width = 720
+    row_h = 26
+    gap = 6
+    label_w = 160
+    pct_w = 80
+    chart_w = width - label_w - pct_w - 24
+    height = len(visible) * (row_h + gap) + 12
+    out = [f'<svg class="scorecard-svg" viewBox="0 0 {width} {height}" '
+           f'xmlns="http://www.w3.org/2000/svg">']
+    for i, r in enumerate(visible):
+        y = i * (row_h + gap) + 4
+        pct = float(r.get("percent", 0.0))
+        klass = "good" if pct >= 80 else ("warn" if pct >= 40 else "bad")
         out.append(
-            f'<rect class="bar-bg" x="{label_pad}" y="{y}" '
-            f'width="{bar_w}" height="{bar_height}" rx="3" />'
+            f'<rect class="row-bg" x="{label_w}" y="{y}" '
+            f'width="{chart_w}" height="{row_h}" rx="4" />'
         )
-        # Bar fill.
-        fill_w = bar_w * pct / 100
         out.append(
-            f'<rect class="{fill_class}" x="{label_pad}" y="{y}" '
-            f'width="{fill_w:.1f}" height="{bar_height}" rx="3" />'
+            f'<rect class="row-fg {klass}" x="{label_w}" y="{y}" '
+            f'width="{chart_w * pct / 100.0:.1f}" height="{row_h}" rx="4" />'
         )
-        # Right-side stats.
-        stats = f'{row["met"]}/{row["required"]}  {pct:.1f}%'
         out.append(
-            f'<text class="label-text" x="{cx}" y="{y + bar_height // 2 + 4}">{stats}</text>'
+            f'<text class="row-label" x="{label_w - 10}" y="{y + 17}" '
+            f'text-anchor="end">'
+            f'{_html.escape(str(r.get("subsystem", "")))}</text>'
+        )
+        out.append(
+            f'<text class="row-value" x="{label_w + chart_w + 8}" '
+            f'y="{y + 17}">'
+            f'{r.get("met", 0)}/{r.get("required", 0)} ({pct:.1f}%)</text>'
         )
     out.append("</svg>")
     return "\n".join(out)
 
 
-# ---------------------------------------------------------------------------
-# SVG line-chart for the timeline.
-# ---------------------------------------------------------------------------
+def _timeline_svg(timeline: list) -> str:
+    """Convergence timeline: new bins per seed."""
+    pts = []
+    for entry in timeline or []:
+        if isinstance(entry, dict):
+            seed = entry.get("seed", entry.get("idx"))
+            new_bins = entry.get("new_bins", entry.get("delta", 0))
+        elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            seed, new_bins = entry[0], entry[1]
+        else:
+            continue
+        if seed is None:
+            continue
+        pts.append((int(seed), int(new_bins)))
 
-
-def _timeline_svg(timeline: list[dict], width: int = 900, height: int = 200) -> str:
-    """Line chart of new-bins-per-seed.
-
-    ``timeline`` items are dicts with ``seed`` and ``new_bins`` keys.
-    """
-    if not timeline:
-        return "<p style='color:var(--fg-mute)'>No timeline data.</p>"
-
-    pts = [(t.get("seed", i), t.get("new_bins", 0))
-           for i, t in enumerate(timeline)]
     if not pts:
-        return ""
+        return '<div class="empty">No timeline data.</div>'
 
-    margin_l, margin_r = 50, 16
-    margin_t, margin_b = 16, 28
+    width, height = 760, 200
+    margin_l, margin_t, margin_r, margin_b = 40, 12, 12, 26
     chart_w = width - margin_l - margin_r
     chart_h = height - margin_t - margin_b
 
-    max_y = max(p[1] for p in pts) or 1
     n = len(pts)
-    if n == 1:
-        # Avoid div-by-zero on single-point timeline.
-        x_step = chart_w
-    else:
-        x_step = chart_w / (n - 1)
+    max_y = max((p[1] for p in pts), default=1)
+    if max_y < 1:
+        max_y = 1
+    x_step = chart_w if n == 1 else chart_w / (n - 1)
 
     poly_pts = []
     circles = []
@@ -312,36 +802,471 @@ def _timeline_svg(timeline: list[dict], width: int = 900, height: int = 200) -> 
             f'<title>seed {seed}: {new_bins} new bins</title></circle>'
         )
 
-    out: list[str] = []
-    out.append(f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">')
-    # Y axis
+    out = [f'<svg class="timeline-svg" viewBox="0 0 {width} {height}" '
+           f'xmlns="http://www.w3.org/2000/svg">']
     out.append(f'<line class="axis" x1="{margin_l}" y1="{margin_t}" '
                f'x2="{margin_l}" y2="{margin_t + chart_h}" />')
-    # X axis
     out.append(f'<line class="axis" x1="{margin_l}" y1="{margin_t + chart_h}" '
                f'x2="{margin_l + chart_w}" y2="{margin_t + chart_h}" />')
-    # Y axis labels
     out.append(f'<text class="axis-text" x="{margin_l - 6}" y="{margin_t + 4}" '
                f'text-anchor="end">{max_y}</text>')
-    out.append(f'<text class="axis-text" x="{margin_l - 6}" y="{margin_t + chart_h + 4}" '
-               f'text-anchor="end">0</text>')
-    # X axis labels (first/last seed)
+    out.append(f'<text class="axis-text" x="{margin_l - 6}" '
+               f'y="{margin_t + chart_h + 4}" text-anchor="end">0</text>')
     out.append(f'<text class="axis-text" x="{margin_l}" '
                f'y="{margin_t + chart_h + 18}">seed {pts[0][0]}</text>')
     if n > 1:
         out.append(f'<text class="axis-text" x="{margin_l + chart_w}" '
                    f'y="{margin_t + chart_h + 18}" text-anchor="end">'
                    f'seed {pts[-1][0]}</text>')
-    # Polyline + points
     out.append(f'<polyline class="line" points="{" ".join(poly_pts)}" />')
     out.extend(circles)
     out.append("</svg>")
     return "\n".join(out)
 
 
+def _heatmap_html(name: str, bins: dict[str, int],
+                  goal_bins: dict[str, int]) -> str:
+    """Render a cross-coverage covergroup as a 2-D heatmap.
+
+    Cross bins are formatted ``A__B`` (riscv-isac convention). We
+    pivot into a matrix; rows = unique A, cols = unique B. Cell
+    intensity scales with hit count.
+    """
+    rows: dict[str, dict[str, int]] = {}
+    for bn in set(bins) | set(goal_bins):
+        if "__" not in bn:
+            continue
+        a, b = bn.split("__", 1)
+        rows.setdefault(a, {})[b] = bins.get(bn, 0)
+
+    if not rows:
+        return ""
+
+    row_keys = sorted(rows.keys())
+    col_keys = sorted({c for v in rows.values() for c in v})
+    if not col_keys or not row_keys:
+        return ""
+
+    # Cap heatmap at 24x24 to keep DOM size sane on huge crosses.
+    if len(row_keys) > 24:
+        row_keys = row_keys[:24]
+    if len(col_keys) > 24:
+        col_keys = col_keys[:24]
+
+    max_val = max(
+        (rows.get(r, {}).get(c, 0) for r in row_keys for c in col_keys),
+        default=0,
+    )
+    if max_val == 0:
+        max_val = 1
+
+    out = [f'<div class="heatmap"><h3>{_html.escape(name)}</h3>',
+           f'<div class="meta">{len(row_keys)}×{len(col_keys)} matrix · '
+           f'max hits {max_val}</div>']
+    cols = len(col_keys) + 1
+    out.append(
+        f'<div class="heatmap-grid" '
+        f'style="grid-template-columns: 80px repeat({len(col_keys)}, 1fr)">'
+    )
+    out.append('<div class="heatmap-cell label"></div>')
+    for c in col_keys:
+        out.append(f'<div class="heatmap-cell label">{_html.escape(c)}</div>')
+    for r in row_keys:
+        out.append(f'<div class="heatmap-cell label">{_html.escape(r)}</div>')
+        for c in col_keys:
+            v = rows.get(r, {}).get(c, 0)
+            if v == 0:
+                klass = "zero"
+                bg = ""
+                txt = "·"
+            else:
+                klass = "hit"
+                # Heat scaled to log to keep the gradient readable.
+                intensity = math.log1p(v) / math.log1p(max_val)
+                # Interpolate from green to yellow to red as intensity
+                # rises (high hits = green, near-zero = warn).
+                # Use HSL: 120 (green) at intensity=1 → 0 (red) at low.
+                # We want HIGH hits to be VIBRANT GREEN.
+                hue = 120
+                lightness = 18 + 28 * intensity  # 18% to 46%
+                bg = f'background:hsl({hue},55%,{lightness:.0f}%)'
+                txt = str(v)
+            out.append(
+                f'<div class="heatmap-cell {klass}" style="{bg}" '
+                f'title="{_html.escape(r)}__{_html.escape(c)}: {v}">'
+                f'{_html.escape(txt)}</div>'
+            )
+    out.append("</div></div>")
+    return "\n".join(out)
+
+
 # ---------------------------------------------------------------------------
-# Top-level renderer.
+# Section renderers.
 # ---------------------------------------------------------------------------
+
+
+def _summary_panel(
+    db: CoverageDB,
+    goals: Goals | None,
+    miss: dict,
+    cg_summaries: dict[str, dict],
+    scorecard: list[dict] | None,
+) -> str:
+    total_cgs = sum(1 for s in cg_summaries.values()
+                    if s["n_hit"] > 0 or s["required"] > 0)
+    n_hit_bins = sum(s["n_hit"] for s in cg_summaries.values())
+    n_total_hits = sum(s["total_hits"] for s in cg_summaries.values())
+
+    if goals:
+        total_req = sum(s["required"] for s in cg_summaries.values())
+        total_met = sum(s["met"] for s in cg_summaries.values())
+        total_missing = total_req - total_met
+        pct = (total_met / total_req * 100.0) if total_req else 100.0
+    else:
+        total_req = total_met = total_missing = 0
+        pct = 100.0
+
+    # Per-bin pie counts.
+    pie_hit = pie_part = pie_miss = pie_untracked = 0
+    for cg, bins in db.items():
+        gb = goals.covergroup(cg) if goals else {}
+        all_bins = set(bins) | set(gb)
+        for bn in all_bins:
+            obs = bins.get(bn, 0)
+            req = gb.get(bn, 0)
+            status, _ = _bin_status(obs, req)
+            if status == "hit":
+                pie_hit += 1
+            elif status == "partial":
+                pie_part += 1
+            elif status == "missed":
+                pie_miss += 1
+            else:
+                pie_untracked += 1
+
+    out: list[str] = []
+
+    out.append('<section><h2>Key metrics</h2><div class="tiles">')
+    out.append(_tile("Active covergroups", str(total_cgs)))
+    out.append(_tile("Unique bins hit", str(n_hit_bins),
+                     sub=f"{n_total_hits:,} total samples"))
+    if goals:
+        klass = "good" if pct >= 95 else ("warn" if pct >= 70 else "bad")
+        out.append(_tile("Goals met", f"{total_met}/{total_req}",
+                         sub=f"{pct:.1f}% closed",
+                         klass=klass))
+        out.append(_tile("Missing required", str(total_missing),
+                         sub="bins below quota",
+                         klass="warn" if total_missing else "good"))
+        # Composite grade
+        grade = pct
+        klass = "good" if grade >= 85 else ("warn" if grade >= 60 else "bad")
+        out.append(_tile("Grade", f"{grade:.0f}/100",
+                         sub="composite goal-closure",
+                         klass=klass))
+    out.append("</div></section>")
+
+    # Pie + scorecard side by side
+    out.append('<section><h2>Coverage status</h2>'
+               '<div class="charts-row">')
+    out.append('<div class="chart-card"><h3>Bin status distribution</h3>'
+               '<div class="pie-wrap">')
+    out.append(_pie_svg(pie_hit, pie_part, pie_miss, pie_untracked))
+    out.append('<div class="pie-legend">')
+    pie_total = pie_hit + pie_part + pie_miss + pie_untracked
+    _swatch_var = {"good": "good", "warn": "warn",
+                   "bad": "bad", "na": "fg-faint"}
+    for label, val, klass in (("Hit", pie_hit, "good"),
+                              ("Partial", pie_part, "warn"),
+                              ("Missed", pie_miss, "bad"),
+                              ("Untracked", pie_untracked, "na")):
+        if val == 0 and label != "Hit":
+            continue
+        p = (val / pie_total * 100.0) if pie_total else 0.0
+        var_name = _swatch_var[klass]
+        out.append(
+            f'<div class="row"><span class="swatch" '
+            f'style="background:var(--{var_name})"></span>'
+            f'<span>{label}</span>'
+            f'<span class="pct">{val:,} ({p:.1f}%)</span></div>'
+        )
+    out.append('</div></div></div>')
+
+    if scorecard:
+        out.append('<div class="chart-card"><h3>Per-subsystem closure</h3>')
+        out.append(_scorecard_svg(scorecard))
+        out.append('</div>')
+    out.append('</div></section>')
+
+    # Top missing
+    if goals:
+        rows = []
+        for cg, bins in miss.items():
+            for bn in bins:
+                req = goals.covergroup(cg).get(bn, 0)
+                obs = db.get(cg, {}).get(bn, 0)
+                if req > 0:
+                    rows.append((cg, bn, obs, req))
+        rows.sort(key=lambda r: -r[3])
+        rows = rows[:25]
+        if rows:
+            out.append('<section><h2>Top missing bins</h2>')
+            out.append('<table class="sortable"><thead><tr>'
+                       '<th>Covergroup</th><th>Bin</th>'
+                       '<th>Coverage</th>'
+                       '<th>Status</th></tr></thead><tbody>')
+            for cg, bn, obs, req in rows:
+                status, _pct = _bin_status(obs, req)
+                out.append(
+                    '<tr class="miss-row">'
+                    f'<td><a href="#cg-{_html.escape(cg)}" onclick="document.querySelector(\'.tab[data-tab=covergroups]\').click();">{_html.escape(cg)}</a></td>'
+                    f'<td class="bin-name">{_html.escape(bn)}</td>'
+                    f'<td>{_bar_html(obs, req)}</td>'
+                    f'<td>{_badge(status)}</td>'
+                    '</tr>'
+                )
+            out.append('</tbody></table></section>')
+
+    return "\n".join(out)
+
+
+def _covergroups_panel(
+    db: CoverageDB,
+    goals: Goals | None,
+    miss: dict,
+    cg_summaries: dict[str, dict],
+) -> str:
+    out: list[str] = []
+
+    # Toolbar: search + status chips + expand/collapse.
+    out.append('<div class="toolbar">')
+    out.append('<input id="cg-search" class="search" type="search" '
+               'placeholder="Filter covergroups (press / to focus)" />')
+    counts = {"all": 0, "met": 0, "partial": 0, "missed": 0, "untracked": 0}
+    for s in cg_summaries.values():
+        counts["all"] += 1
+        counts[s["status"]] = counts.get(s["status"], 0) + 1
+    for k, label in (("all", "All"), ("met", "Met"),
+                     ("partial", "Partial"), ("missed", "Missed"),
+                     ("untracked", "Untracked")):
+        if counts.get(k, 0) == 0 and k != "all":
+            continue
+        active = " active" if k == "all" else ""
+        cls = "" if k == "all" else f" {k}"
+        out.append(
+            f'<span class="chip{cls}{active}" data-status="{k}">'
+            f'<span class="dot"></span>{label}'
+            f' <span style="color:var(--fg-faint)">{counts[k]}</span>'
+            f'</span>'
+        )
+    out.append('<span style="flex:1"></span>')
+    out.append('<button id="expand-all">Expand all</button>')
+    out.append('<button id="collapse-all">Collapse all</button>')
+    out.append('</div>')
+
+    # Two-column layout: sidebar nav + main list.
+    out.append('<div class="layout">')
+
+    # Sidebar nav with anchor links.
+    out.append('<nav class="sidebar"><h4>Jump to</h4>')
+    for name in sorted(cg_summaries.keys()):
+        s = cg_summaries[name]
+        if s["n_hit"] == 0 and s["required"] == 0:
+            continue
+        out.append(
+            f'<a href="#cg-{_html.escape(name)}">'
+            f'<span style="overflow:hidden;text-overflow:ellipsis;'
+            f'white-space:nowrap;">{_html.escape(name)}</span>'
+            f'<span class="pct">{s["pct"]:.0f}%</span></a>'
+        )
+    out.append('</nav>')
+
+    out.append('<div class="cg-list">')
+    for name in sorted(cg_summaries.keys()):
+        s = cg_summaries[name]
+        if s["n_hit"] == 0 and s["required"] == 0:
+            continue
+        bins = db.get(name, {})
+        gb = goals.covergroup(name) if goals else {}
+        out.append(_render_cg(name, s, bins, gb))
+    out.append('</div></div>')
+    return "\n".join(out)
+
+
+def _render_cg(name: str, s: dict, bins: dict[str, int],
+               gb: dict[str, int]) -> str:
+    """Render one covergroup as a <details> with a sortable bin table."""
+    if s["status"] == "untracked":
+        badge_text = "no goals"
+    elif s["status"] == "met":
+        badge_text = f"MET {s['met']}/{s['required']}"
+    elif s["status"] == "missed":
+        badge_text = f"MISS 0/{s['required']}"
+    else:
+        badge_text = f"PART {s['met']}/{s['required']}"
+
+    out: list[str] = []
+    out.append(
+        f'<details class="cg" id="cg-{_html.escape(name)}" '
+        f'data-name="{_html.escape(name)}" '
+        f'data-status="{s["status"]}">'
+    )
+    out.append('<summary>')
+    out.append(f'<span class="cg-name">{_html.escape(name)}</span>')
+    out.append(
+        f'<span class="cg-meta">{s["n_hit"]} bin(s) · '
+        f'{s["total_hits"]:,} hits'
+        + (f' · <b>{s["missing"]}</b> missing' if s["missing"] else "")
+        + '</span>'
+    )
+    # Big bar with percent text.
+    klass = ("hit" if s["status"] == "met"
+             else ("partial" if s["status"] == "partial"
+                   else ("missed" if s["status"] == "missed"
+                         else "")))
+    out.append(
+        f'<span class="bar {klass}" style="width: 100%;">'
+        f'<span class="fill" style="width: {s["pct"]:.1f}%"></span>'
+        f'<span class="label">{s["pct"]:.1f}%</span></span>'
+    )
+    out.append(_badge(s["status"], badge_text))
+    out.append('</summary>')
+
+    # Body: sortable bin table.
+    out.append('<div class="body"><table class="sortable">')
+    out.append('<thead><tr>'
+               '<th>Bin</th>'
+               '<th>Coverage</th>'
+               '<th class="num">Hits</th>'
+               '<th class="num">Required</th>'
+               '<th>Status</th>'
+               '</tr></thead><tbody>')
+    all_bins = set(bins) | set(gb)
+    # Initial sort: missing/under-quota first, then hits desc.
+    def _key(bn):
+        obs = bins.get(bn, 0)
+        req = gb.get(bn, 0)
+        status, _ = _bin_status(obs, req)
+        prio = {"missed": 0, "partial": 1, "untracked": 2, "hit": 3}[status]
+        return (prio, -obs)
+
+    for bn in sorted(all_bins, key=_key):
+        obs = bins.get(bn, 0)
+        req = gb.get(bn, 0)
+        status, pct = _bin_status(obs, req)
+        out.append(
+            '<tr>'
+            f'<td class="bin-name" data-sort="{_html.escape(bn)}">{_html.escape(bn)}</td>'
+            f'<td data-sort="{pct:.2f}">{_bar_html(obs, req)}</td>'
+            f'<td class="num" data-sort="{obs}">{obs:,}</td>'
+            f'<td class="num" data-sort="{req}">{req if req else "—"}</td>'
+            f'<td data-sort="{status}">{_badge(status)}</td>'
+            '</tr>'
+        )
+    out.append('</tbody></table></div></details>')
+    return "\n".join(out)
+
+
+def _crosses_panel(db: CoverageDB, goals: Goals | None) -> str:
+    out: list[str] = []
+    crosses = sorted(cg for cg in db if _is_cross(cg))
+    if goals:
+        crosses += sorted(cg for cg in goals.data if _is_cross(cg)
+                          and cg not in db)
+    crosses = list(dict.fromkeys(crosses))  # dedupe preserving order
+    if not crosses:
+        out.append('<div class="empty">No cross-coverage covergroups found.</div>')
+        return "\n".join(out)
+    out.append('<section><h2>Cross-coverage matrices</h2>')
+    out.append('<p style="color:var(--fg-mute);font-size:12px;'
+               'margin:0 0 12px;">Each cell = (rs1__rs2) hit count. '
+               'Empty cells (·) never observed.</p>')
+    for cg in crosses:
+        bins = db.get(cg, {})
+        gb = goals.covergroup(cg) if goals else {}
+        hm = _heatmap_html(cg, bins, gb)
+        if hm:
+            out.append(hm)
+    out.append('</section>')
+    return "\n".join(out)
+
+
+def _misses_panel(db: CoverageDB, goals: Goals | None,
+                  miss: dict, explanations: dict | None) -> str:
+    if not goals:
+        return '<div class="empty">No goals provided — no misses to report.</div>'
+
+    rows = []
+    for cg, bins in miss.items():
+        for bn in bins:
+            req = goals.covergroup(cg).get(bn, 0)
+            obs = db.get(cg, {}).get(bn, 0)
+            if req > 0:
+                why = ""
+                if explanations:
+                    why = explanations.get(f"{cg}.{bn}", "")
+                rows.append((cg, bn, obs, req, why))
+    if not rows:
+        return ('<div class="empty" style="color:var(--good)">'
+                'All required bins met! ✓</div>')
+    rows.sort(key=lambda r: -r[3])
+
+    out = ['<section><h2>All missing bins</h2>',
+           f'<p style="color:var(--fg-mute);font-size:12px;'
+           f'margin:0 0 12px;">{len(rows)} unmet bin(s), '
+           f'sorted by required count.</p>',
+           '<table class="sortable"><thead><tr>'
+           '<th>Covergroup</th><th>Bin</th><th>Coverage</th>'
+           '<th class="num">Hits</th>'
+           '<th class="num">Required</th>'
+           '<th>Status</th></tr></thead><tbody>']
+    for cg, bn, obs, req, why in rows:
+        status, pct = _bin_status(obs, req)
+        why_html = (f'<div class="why">{_html.escape(why)}</div>'
+                    if why else "")
+        out.append(
+            '<tr class="miss-row">'
+            f'<td>{_html.escape(cg)}</td>'
+            f'<td class="bin-name">{_html.escape(bn)}{why_html}</td>'
+            f'<td data-sort="{pct:.2f}">{_bar_html(obs, req)}</td>'
+            f'<td class="num" data-sort="{obs}">{obs}</td>'
+            f'<td class="num" data-sort="{req}">{req}</td>'
+            f'<td data-sort="{status}">{_badge(status)}</td>'
+            '</tr>'
+        )
+    out.append('</tbody></table></section>')
+    return "\n".join(out)
+
+
+def _convergence_panel(timeline: list | None) -> str:
+    if not timeline:
+        return ('<div class="empty">No timeline data — pass '
+                '<code>--timeline cov_timeline.json</code>.</div>')
+    out = ['<section><h2>Convergence timeline</h2>',
+           '<p style="color:var(--fg-mute);font-size:12px;'
+           'margin:0 0 12px;">New bins observed per seed across the '
+           'regression. Steeper drop-offs indicate plateau.</p>',
+           '<div class="chart-card">',
+           _timeline_svg(timeline),
+           '</div></section>']
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Tile + top-level renderer.
+# ---------------------------------------------------------------------------
+
+
+def _tile(label: str, value: str, *, sub: str | None = None,
+          klass: str | None = None) -> str:
+    klass_attr = f' class="tile {klass}"' if klass else ' class="tile"'
+    sub_html = f'<div class="sub">{_html.escape(sub)}</div>' if sub else ""
+    return (
+        f'<div{klass_attr}>'
+        f'<div class="label">{_html.escape(label)}</div>'
+        f'<div class="value">{_html.escape(value)}</div>'
+        f'{sub_html}</div>'
+    )
 
 
 def dashboard_html(
@@ -350,164 +1275,126 @@ def dashboard_html(
     timeline: list | None = None,
     scorecard: list[dict] | None = None,
     title: str = "rvgen Coverage Dashboard",
+    explanations: dict[str, str] | None = None,
 ) -> str:
-    """Render the full self-contained HTML dashboard."""
+    """Render the full self-contained HTML dashboard.
+
+    Layout: tabbed single-page app — Summary / Covergroups / Crosses /
+    Misses / Convergence — with per-bin red/yellow/green progress bars,
+    sortable column headers, search + filter chips, sticky sidebar nav,
+    and dark/light theme toggle.
+
+    Parameters
+    ----------
+    db : CoverageDB
+        ``{covergroup: {bin: count}}``.
+    goals : Goals, optional
+        Loaded coverage goals. When omitted, badges + percentages show
+        as "untracked".
+    timeline : list, optional
+        Convergence-tracking data: list of ``{seed, new_bins}`` dicts
+        or ``(seed, new_bins)`` tuples.
+    scorecard : list of dict, optional
+        Per-subsystem closure rows: ``{subsystem, met, required,
+        percent}``. Typically produced by
+        ``rvgen.coverage.tools.scorecard``.
+    title : str
+        Page title.
+    explanations : dict, optional
+        ``{covergroup.bin_name: why-string}`` from cov-explain matchers.
+    """
     miss = missing_bins(db, goals) if goals else {}
-
-    total_cgs = len([cg for cg, bins in db.items() if bins])
-    total_bins_hit = sum(len(b) for b in db.values())
-    total_hits = sum(sum(b.values()) for b in db.values())
-
+    cg_summaries = {
+        cg: _summarise_cg(bins, goals.covergroup(cg) if goals else {})
+        for cg, bins in db.items()
+    }
     if goals:
-        total_req = sum(1 for b in goals.data.values() for v in b.values() if v > 0)
-        total_missing = sum(len(v) for v in miss.values())
-        met = total_req - total_missing
-        pct = (met / total_req * 100) if total_req else 100.0
-    else:
-        total_req = 0
-        met = 0
-        pct = 100.0
+        for cg in goals.data:
+            if cg not in cg_summaries:
+                cg_summaries[cg] = _summarise_cg(
+                    {}, goals.covergroup(cg)
+                )
+
+    n_hit_bins = sum(s["n_hit"] for s in cg_summaries.values())
+    n_total_hits = sum(s["total_hits"] for s in cg_summaries.values())
+    n_active = sum(1 for s in cg_summaries.values()
+                   if s["n_hit"] > 0 or s["required"] > 0)
+    n_total_req = sum(s["required"] for s in cg_summaries.values())
+    n_missing = sum(s["missing"] for s in cg_summaries.values())
+    n_cross = sum(1 for cg in cg_summaries if _is_cross(cg))
 
     out: list[str] = []
-    out.append("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>")
+    out.append("<!DOCTYPE html><html lang='en' data-theme='dark'>")
+    out.append("<head><meta charset='utf-8'>")
+    out.append("<meta name='viewport' content='width=device-width,initial-scale=1'>")
     out.append(f"<title>{_html.escape(title)}</title>")
-    out.append(f"<style>{_CSS}</style>")
-    out.append("</head><body>")
+    out.append(f"<style>{_CSS}</style></head><body>")
 
-    out.append(f"<header><h1>{_html.escape(title)}</h1>")
-    out.append(f"<div class='meta'>{total_cgs} active covergroup(s) · "
-               f"{total_bins_hit} unique bin(s) hit · {total_hits} total samples</div>"
-               "</header>")
-
-    out.append("<main>")
-
-    # Summary tiles
-    out.append("<section><h2>Summary</h2><div class='tiles'>")
-    out.append(_tile("Covergroups", total_cgs))
-    out.append(_tile("Bins hit", total_bins_hit))
-    out.append(_tile("Total samples", total_hits))
-    if goals:
-        out.append(_tile("Goals met",
-                         f"{met}/{total_req}",
-                         pct=pct))
-    out.append("</div></section>")
-
-    # Scorecard chart
-    if scorecard:
-        out.append("<section class='scorecard'><h2>Per-subsystem coverage</h2>")
-        out.append(_scorecard_svg(scorecard))
-        out.append("</section>")
-
-    # Timeline chart
-    if timeline:
-        out.append("<section class='timeline'><h2>Convergence timeline</h2>")
-        out.append(_timeline_svg(timeline))
-        out.append("</section>")
-
-    # Top missing bins
-    if miss:
-        out.append("<section><h2>Top missing bins</h2>")
-        rows = []
-        for cg, bins in miss.items():
-            for bn in bins:
-                req = goals.covergroup(cg).get(bn, 0) if goals else 0
-                if req > 0:
-                    rows.append((cg, bn, req))
-        rows.sort(key=lambda r: -r[2])
-        rows = rows[:25]
-        if rows:
-            out.append("<table class='missing-table'><thead><tr>"
-                       "<th>Covergroup</th><th>Bin</th><th>Required</th>"
-                       "</tr></thead><tbody>")
-            for cg, bn, req in rows:
-                out.append(
-                    f"<tr><td>{_html.escape(cg)}</td>"
-                    f"<td>{_html.escape(bn)}</td>"
-                    f"<td>{req}</td></tr>"
-                )
-            out.append("</tbody></table>")
-        else:
-            out.append("<p style='color:var(--good)'>All required bins met!</p>")
-        out.append("</section>")
-
-    # Per-covergroup details
-    out.append("<section><h2>Covergroups</h2>")
+    # Top bar.
+    out.append('<div class="topbar">')
+    out.append(f'<h1><span class="logo">rv</span>{_html.escape(title)}</h1>')
     out.append(
-        "<div class='filter-bar'>"
-        "<input placeholder='Filter covergroups...' oninput='filterCgs(this.value)' />"
-        "<button onclick='toggleAll(true)'>Expand all</button>"
-        "<button onclick='toggleAll(false)'>Collapse all</button>"
-        "</div>"
+        f'<div class="meta">{n_active} covergroups · '
+        f'{n_hit_bins:,} bins hit · {n_total_hits:,} samples'
+        + (f' · {n_total_req:,} required, {n_missing:,} missing'
+           if goals else '')
+        + '</div>'
     )
-    out.append("<div class='cg-list'>")
-    for cg in sorted(db):
-        bins = db[cg]
-        goal_bins = goals.covergroup(cg) if goals else {}
-        cg_miss = miss.get(cg, {}) if goals else {}
-        if not bins and not goal_bins:
-            continue
+    out.append('<span class="spacer"></span>')
+    out.append('<button id="theme-toggle" class="btn" title="Toggle theme">'
+               '◐ Theme</button>')
+    out.append('<button class="btn" onclick="window.print()" '
+               'title="Print or save PDF">⎙ Print</button>')
+    out.append('</div>')
 
-        if goal_bins:
-            n_req = sum(1 for v in goal_bins.values() if v > 0)
-            n_miss = len(cg_miss)
-            cg_pct = ((n_req - n_miss) / n_req * 100) if n_req else 100.0
-            if n_miss == 0:
-                badge = "met"; badge_text = f"MET {n_req}/{n_req}"
-            elif n_miss == n_req:
-                badge = "missed"; badge_text = f"MISS 0/{n_req}"
-            else:
-                badge = "partial"; badge_text = f"PART {n_req - n_miss}/{n_req}"
-        else:
-            cg_pct = 100.0
-            badge = "untracked"; badge_text = "no goals"
-
-        meta = f"{len(bins)} bin(s), {sum(bins.values())} hits"
-        if cg_miss:
-            meta += f" · <b>{len(cg_miss)}</b> missing"
-
-        out.append(f"<details data-name='{_html.escape(cg)}'>")
+    # Tab strip.
+    out.append('<nav class="tabs">')
+    out.append('<div class="tab" data-tab="summary">Summary</div>')
+    out.append(
+        f'<div class="tab" data-tab="covergroups">Covergroups'
+        f'<span class="badge">{n_active}</span></div>'
+    )
+    if n_cross:
         out.append(
-            "<summary>"
-            f"<span class='cg-name'>{_html.escape(cg)}</span>"
-            f"<span class='cg-meta'>{meta}</span>"
-            f"<span class='mini-bar' style='--pct: {cg_pct:.1f}%'></span>"
-            f"<span class='badge {badge}'>{badge_text}</span>"
-            "</summary>"
+            f'<div class="tab" data-tab="crosses">Cross-coverage'
+            f'<span class="badge">{n_cross}</span></div>'
         )
-        out.append("<table class='cg-table'><thead><tr>"
-                   "<th>Bin</th><th>Observed</th><th>Required</th>"
-                   "</tr></thead><tbody>")
-        all_bins = set(bins) | set(goal_bins)
-        for bn in sorted(all_bins, key=lambda b: -bins.get(b, 0)):
-            obs = bins.get(bn, 0)
-            req = goal_bins.get(bn, "")
-            out.append(
-                f"<tr><td>{_html.escape(bn)}</td>"
-                f"<td>{obs}</td><td>{req}</td></tr>"
-            )
-        out.append("</tbody></table></details>")
-    out.append("</div></section>")
+    if goals:
+        out.append(
+            f'<div class="tab" data-tab="misses">Misses'
+            f'<span class="badge">{n_missing}</span></div>'
+        )
+    if timeline:
+        out.append('<div class="tab" data-tab="convergence">Convergence</div>')
+    out.append('</nav>')
 
-    out.append("</main>")
-    out.append(f"<script>{_JS}</script>")
-    out.append("</body></html>")
+    # Panels.
+    out.append('<div class="panel" data-panel="summary">')
+    out.append(_summary_panel(db, goals, miss, cg_summaries, scorecard))
+    out.append('</div>')
+
+    out.append('<div class="panel" data-panel="covergroups">')
+    out.append(_covergroups_panel(db, goals, miss, cg_summaries))
+    out.append('</div>')
+
+    if n_cross:
+        out.append('<div class="panel" data-panel="crosses">')
+        out.append(_crosses_panel(db, goals))
+        out.append('</div>')
+
+    if goals:
+        out.append('<div class="panel" data-panel="misses">')
+        out.append(_misses_panel(db, goals, miss, explanations))
+        out.append('</div>')
+
+    if timeline:
+        out.append('<div class="panel" data-panel="convergence">')
+        out.append(_convergence_panel(timeline))
+        out.append('</div>')
+
+    out.append(f'<script>{_JS}</script>')
+    out.append('</body></html>')
     return "\n".join(out)
-
-
-def _tile(label: str, value, pct: float | None = None) -> str:
-    pct_html = ""
-    if pct is not None:
-        pct_html = (
-            f"<div class='pct-bar'><div class='pct-fill' "
-            f"style='width: {pct:.1f}%'></div></div>"
-        )
-    return (
-        "<div class='tile'>"
-        f"<div class='label'>{_html.escape(label)}</div>"
-        f"<div class='value'>{_html.escape(str(value))}</div>"
-        f"{pct_html}"
-        "</div>"
-    )
 
 
 def write_dashboard(
@@ -518,6 +1405,7 @@ def write_dashboard(
     timeline: list | None = None,
     scorecard: list[dict] | None = None,
     title: str = "rvgen Coverage Dashboard",
+    explanations: dict[str, str] | None = None,
 ) -> Path:
     """Render the dashboard and write it to ``output_path``."""
     p = Path(output_path)
@@ -525,5 +1413,6 @@ def write_dashboard(
     p.write_text(dashboard_html(
         db, goals=goals, timeline=timeline,
         scorecard=scorecard, title=title,
+        explanations=explanations,
     ))
     return p
