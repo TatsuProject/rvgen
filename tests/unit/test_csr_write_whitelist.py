@@ -37,27 +37,55 @@ def test_plusarg_empty_value_keeps_default():
 
 def test_extended_whitelist_lets_extra_csrs_through(tmp_path):
     # End-to-end: include_write_reg adds MTVEC to the writable set.
-    # Run a short generation and verify that at least one csrr* op now
-    # writes a CSR beyond MSCRATCH.
-    import subprocess
-    import sys
+    # Build the stream directly (no CLI) so we don't depend on a
+    # riscv-dv testlist resolution path that CI runners don't have.
+    import random
 
-    out = tmp_path / "ext_csr"
-    subprocess.run(
-        [
-            sys.executable, "-m", "rvgen",
-            "--target", "rv32imc",
-            "--test", "riscv_csr_test",
-            "--steps", "gen",
-            "--output", str(out),
-            "--start_seed", "100",
-            "-i", "1",
-            "--gen_opts=+instr_cnt=4000 +include_write_reg=MSCRATCH,MTVEC,MEPC",
-        ],
-        check=True,
-        capture_output=True,
+    from rvgen.config import make_config
+    from rvgen.isa.csr_ops import CsrInstr
+    from rvgen.isa.enums import (
+        PrivilegedReg,
+        RiscvInstrName as N,
+        RiscvReg as R,
     )
-    asm = (out / "asm_test" / "riscv_csr_test_0.S").read_text()
-    # MTVEC and MEPC are reachable now — at least one of them should appear
-    # as the operand to a csrrw/csrrs/csrrc.
-    assert "csrrw" in asm or "csrrs" in asm or "csrrc" in asm
+    from rvgen.isa.filtering import create_instr_list
+    from rvgen.stream import RandInstrStream
+
+    cfg = make_config(
+        get_target("rv32imc"),
+        gen_opts="+include_write_reg=MSCRATCH,MTVEC,MEPC",
+    )
+    avail = create_instr_list(cfg)
+    rng = random.Random(0)
+    stream = RandInstrStream(
+        cfg=cfg, avail=avail, instr_cnt=4000,
+        avail_regs=(R.A0, R.A1, R.A2, R.A3, R.A4, R.A5),
+    )
+    stream.gen_instr(rng, no_branch=True, no_load_store=True)
+
+    write_ops = (N.CSRRW, N.CSRRWI)
+    setclr_ops = (N.CSRRS, N.CSRRC, N.CSRRSI, N.CSRRCI)
+    seen_writable = set()
+    for ins in stream.instr_list:
+        if not isinstance(ins, CsrInstr):
+            continue
+        if ins.instr_name in write_ops:
+            seen_writable.add(ins.csr)
+        elif ins.instr_name in setclr_ops:
+            # set/clear with non-zero rs1 / imm == effective write.
+            non_zero = (
+                getattr(ins, "rs1", R.ZERO) != R.ZERO
+                if ins.instr_name in (N.CSRRS, N.CSRRC)
+                else getattr(ins, "imm", 0) != 0
+            )
+            if non_zero:
+                seen_writable.add(ins.csr)
+
+    # The widened whitelist must let at least one of MTVEC / MEPC through.
+    assert (PrivilegedReg.MTVEC.value in seen_writable
+            or PrivilegedReg.MEPC.value in seen_writable), (
+        "Widened whitelist should produce csrr* writes targeting MTVEC or MEPC"
+    )
+    # USTATUS / SATP / etc must NOT appear (rv32imc doesn't implement them).
+    assert PrivilegedReg.USTATUS.value not in seen_writable
+    assert PrivilegedReg.SATP.value not in seen_writable

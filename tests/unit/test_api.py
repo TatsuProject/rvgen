@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from rvgen import Generator, Pipeline, PipelineResult, GeneratedAsm
@@ -102,6 +104,16 @@ def test_pipeline_gen_only_writes_files(tmp_path):
 
 
 def test_pipeline_full_run_through_iss(tmp_path):
+    # Requires the RISC-V GNU toolchain + Spike on $PATH. On CI runners
+    # without those, skip rather than fail — the unit-test layer already
+    # covers the Python pipeline; gcc/iss is an integration concern.
+    import shutil
+    if not (shutil.which("riscv64-unknown-elf-gcc") or
+            os.environ.get("RISCV_GCC") or os.environ.get("RISCV_TOOLCHAIN")):
+        pytest.skip("riscv-gcc not available — integration test")
+    if not shutil.which("spike"):
+        pytest.skip("spike not available — integration test")
+
     p = Pipeline(target="rv32imc", test="riscv_arithmetic_basic_test",
                  start_seed=100, iterations=1,
                  output_dir=str(tmp_path))

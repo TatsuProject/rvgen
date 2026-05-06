@@ -497,10 +497,15 @@ svg.sunburst .sb-arc:hover { opacity: 0.78; }
 svg.sunburst .sb-arc.dimmed { opacity: 0.18; }
 svg.sunburst .sb-arc.highlighted { opacity: 1; filter: brightness(1.1); }
 svg.sunburst .sb-label {
-  font-size: 13px; font-weight: 600; fill: #fff;
-  text-shadow: 0 0 3px rgba(0,0,0,0.7);
+  font-size: 12px; font-weight: 700; fill: #fff;
+  paint-order: stroke fill;
+  stroke: rgba(0,0,0,0.55); stroke-width: 3px; stroke-linejoin: round;
   pointer-events: none;
   letter-spacing: 0.2px;
+}
+[data-theme="light"] svg.sunburst .sb-label {
+  fill: #fff;
+  stroke: rgba(0,0,0,0.45);
 }
 [data-theme="light"] svg.sunburst .sb-label {
   fill: #fff;
@@ -1043,20 +1048,30 @@ def _sunburst_svg(
             f'fill="{color}" stroke="var(--bg-card)" stroke-width="2" '
             f'd="{path}"><title>{_html.escape(title)}</title></path>'
         )
-        # Subsystem label — show whenever there's even a thin wedge,
-        # rotated to follow the arc. Larger chart = more room for labels.
-        if sweep > math.radians(8):
+        # Subsystem label — placed *radially* along the slice's
+        # angle-bisector ray. Two labels can never overlap because each
+        # one occupies a unique angle from the center. We bend the text
+        # so it always reads outward (no upside-down).
+        if sweep > math.radians(6):
             mid = (a0 + a1) / 2
-            r_label = (r_inner_hole + r_inner_ring) / 2
-            tx, ty = _polar(cx, cy, r_label, mid)
-            # Rotate text so it follows the arc (legible).
-            deg = math.degrees(mid) + 90
-            if 90 < deg < 270:
-                deg -= 180
+            mid_deg = math.degrees(mid)
+            # Right half (cos > 0): text reads outward, anchored at the
+            # inner edge. Left half: rotate 180° + anchor at the outer
+            # edge so it still reads left-to-right.
+            on_right = math.cos(mid) >= 0
+            if on_right:
+                r_anchor = r_inner_hole + 6
+                rot_deg = mid_deg
+                anchor = "start"
+            else:
+                r_anchor = r_inner_ring - 6
+                rot_deg = mid_deg + 180
+                anchor = "end"
+            tx, ty = _polar(cx, cy, r_anchor, mid)
             out.append(
                 f'<text class="sb-label" x="{tx:.1f}" y="{ty:.1f}" '
-                f'text-anchor="middle" dominant-baseline="middle" '
-                f'transform="rotate({deg:.1f} {tx:.1f} {ty:.1f})" '
+                f'text-anchor="{anchor}" dominant-baseline="middle" '
+                f'transform="rotate({rot_deg:.1f} {tx:.1f} {ty:.1f})" '
                 f'pointer-events="none">'
                 f'{_html.escape(sub_name)}</text>'
             )

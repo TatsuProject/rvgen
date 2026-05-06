@@ -41,7 +41,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    # Only deploy on main, and only when GitHub Pages is enabled at the
+    # repo level (vars.PAGES_ENABLED set to "true" in repo settings).
+    # Otherwise the build still runs and uploads the artifact, but we
+    # skip the deploy step instead of failing CI with HTTP 404.
+    if: github.ref == 'refs/heads/main' && vars.PAGES_ENABLED == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
