@@ -496,19 +496,18 @@ svg.sunburst .sb-arc {
 svg.sunburst .sb-arc:hover { opacity: 0.78; }
 svg.sunburst .sb-arc.dimmed { opacity: 0.18; }
 svg.sunburst .sb-arc.highlighted { opacity: 1; filter: brightness(1.1); }
-svg.sunburst .sb-pill {
-  fill: rgba(13, 17, 23, 0.92);
-  stroke: rgba(255,255,255,0.12);
-  stroke-width: 0.5px;
-}
-[data-theme="light"] svg.sunburst .sb-pill {
-  fill: rgba(31, 35, 40, 0.92);
-  stroke: rgba(255,255,255,0.18);
-}
 svg.sunburst .sb-label {
-  font-size: 11px; font-weight: 600; fill: #fff;
+  font-size: 13px; font-weight: 700; fill: #fff;
+  paint-order: stroke fill;
+  stroke: rgba(0,0,0,0.85);
+  stroke-width: 4px;
+  stroke-linejoin: round;
   letter-spacing: 0.3px;
   pointer-events: none;
+}
+[data-theme="light"] svg.sunburst .sb-label {
+  fill: #fff;
+  stroke: rgba(0,0,0,0.7);
 }
 [data-theme="light"] svg.sunburst .sb-label {
   fill: #fff;
@@ -1087,68 +1086,32 @@ def _sunburst_svg(
     total_req = sum(s["required"] for s in cg_summaries.values())
     overall_pct = (total_met / total_req * 100.0) if total_req else 0.0
 
-    # ---- Label pills (drawn over arcs so they're always crisp) ----
-    # Each label is a rotated dark rounded-rect plus white text on top.
-    # Geometry: width estimated from label length × ~7px per char + 16px
-    # padding. Height fixed at 20px. Rotation = the slice's bisector
-    # angle, flipped 180° on the left half so text reads upright.
-    char_w = 7.2
-    pill_h = 20
+    # ---- Subsystem labels (inner ring only) ----
+    # Plain white text with a paint-order stroke for contrast. The text
+    # baseline is anchored at the midpoint of the inner ring along each
+    # slice's bisector ray, and `textLength` constrains rendering width
+    # to ring-width minus padding so labels can never spill into the
+    # outer ring. Outer ring (covergroups) is unlabelled — covergroup
+    # name shows up in the detail card on click.
     for label, mid, r_inner, r_outer in label_rows:
-        text_w = max(len(label) * char_w + 14, 36)
         ring_w = r_outer - r_inner
-        # If the pill won't fit along the radial direction, anchor it
-        # outside the ring rather than truncate. (Rare for our slice
-        # widths but handled for safety.)
-        on_right = math.cos(mid) >= 0
-        if on_right:
-            # Pill spans from r_inner+4 outward.
-            r_pill_start = r_inner + 4
-            rot_deg = math.degrees(mid)
-            # Pill rectangle local-coord: x spans [0, text_w], y is
-            # vertical with -h/2 above center.
-            anchor_x_offset = 0
-            text_x_offset = text_w / 2
-        else:
-            # Pill spans from r_outer-4 inward (then flipped 180°).
-            r_pill_start = r_outer - 4 - text_w
-            rot_deg = math.degrees(mid)
-            anchor_x_offset = 0
-            text_x_offset = text_w / 2
-        # Pill anchor in chart coords.
-        ax, ay = _polar(cx, cy, r_pill_start, mid)
-        # On the left half we still rotate by the same angle but the
-        # pill is positioned far enough out that it ends close to the
-        # inner edge — text orientation stays correct because we draw
-        # in the rotated local frame.
-        if not on_right:
-            # Reflect the rotation by 180° so text reads upright.
-            ax2, ay2 = _polar(cx, cy, r_outer - 4, mid)
-            rot_deg = math.degrees(mid) + 180
-            ax, ay = ax2, ay2
-            r_pill_start_local = 0
-            text_x_offset = -text_w / 2
+        max_text_w = ring_w - 16  # 8px padding each end
+        # Anchor at the midpoint of the inner ring along the bisector.
+        r_anchor = (r_inner + r_outer) / 2
+        ax, ay = _polar(cx, cy, r_anchor, mid)
+        # Rotate so the text reads outward; flip 180° on the left half
+        # so it's always upright.
+        rot_deg = math.degrees(mid)
+        if math.cos(mid) < 0:
+            rot_deg += 180
         out.append(
-            f'<g transform="translate({ax:.1f},{ay:.1f}) rotate({rot_deg:.1f})" '
+            f'<text class="sb-label" x="{ax:.1f}" y="{ay:.1f}" '
+            f'text-anchor="middle" dominant-baseline="middle" '
+            f'transform="rotate({rot_deg:.1f} {ax:.1f} {ay:.1f})" '
+            f'textLength="{max_text_w:.0f}" lengthAdjust="spacingAndGlyphs" '
             f'pointer-events="none">'
-        )
-        # Pill rect: on right-half origin is at left edge of pill.
-        # On left-half (rot+180), origin is at right edge of pill, so
-        # we draw from -text_w to 0.
-        if on_right:
-            rx = 0
-        else:
-            rx = -text_w
-        out.append(
-            f'<rect class="sb-pill" x="{rx:.1f}" y="{-pill_h/2:.1f}" '
-            f'width="{text_w:.1f}" height="{pill_h}" rx="4" />'
-        )
-        out.append(
-            f'<text class="sb-label" x="{rx + text_w/2:.1f}" y="0" '
-            f'text-anchor="middle" dominant-baseline="middle">'
             f'{_html.escape(label)}</text>'
         )
-        out.append('</g>')
 
     out.append(
         f'<circle cx="{cx}" cy="{cy}" r="{r_inner_hole - 2}" '
