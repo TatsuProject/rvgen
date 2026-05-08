@@ -39,6 +39,8 @@ on rs1/rs2/rd), not memory hazards — those need a runtime trace.
 from __future__ import annotations
 
 import copy
+import re
+from collections import deque
 from typing import Iterable
 
 from rvgen.isa.base import Instr
@@ -206,6 +208,197 @@ CG_CSR_READ = "csr_read_cg"
 # Sampled from FP register writes parsed out of the spike commit log.
 CG_FP_DATASET = "fp_dataset_cg"
 
+# ---------------------------------------------------------------------------
+# Sprint-2 (deep-coverage) additions — gap closure vs riscv-isac/-ctg,
+# OpenHW core-v-verif coverage plans, and ARM/Imperas micro-arch
+# coverage methodology.
+# ---------------------------------------------------------------------------
+#
+# Pipeline depth — riscv-dv's hazard_cg only flags raw/war/waw/none, not
+# the *distance* between producer and consumer. Modern in-order +
+# OoO pipelines stall differently at distance 1 (load-use), 2-3
+# (forwarding paths), 4+ (no stall). Bin per cycle distance lets a
+# verification team confirm the pipeline saw every forwarding-path
+# corner.
+CG_HAZARD_DIST = "hazard_distance_cg"
+# Load → consumer distance — sampled per LOAD producer. Bins:
+# load_use_d1, load_use_d2, load_use_d3, load_use_d4_plus, load_no_use.
+# Critical for verifying load-use stall + forwarding networks.
+CG_LOAD_USE = "load_use_dist_cg"
+# Multi-cycle producer (MUL/DIV/REM, FDIV/FSQRT, AMO) → consumer.
+# Bins: mc_use_d1..d3, mc_use_d4_plus, mc_no_use, plus per-class crosses.
+CG_MC_USE = "mc_producer_use_dist_cg"
+# Branch-shadow — what category sits in the slot immediately after a
+# taken/not-taken branch. Useful for verifying branch-misprediction
+# recovery + delay-slot behavior. Bins: shadow_<category>.
+CG_BRANCH_SHADOW = "branch_shadow_cg"
+# Static memory address aliasing — when a base reg + offset pair appears
+# multiple times in a sliding window, sample whether the second reference
+# could alias (same base reg, same/different offset). Captures
+# store-to-load forwarding opportunity coverage statically; complements
+# the runtime EA tracker.
+CG_MEM_ALIAS = "mem_alias_cg"
+# Branch direction history 4-gram — extends branch_pattern_cg's 3-gram
+# to capture predictor patterns missing one bit (TTTN, NNTT, ...).
+CG_BRANCH_PATTERN4 = "branch_pattern4_cg"
+# Branch loop / skip classification — for each branch, classify by
+# direction (fwd/bwd) × outcome (taken/not_taken). bwd_taken is "loop
+# closing"; fwd_taken is "if/skip"; bwd_not_taken is "loop falling
+# through" (rare, useful corner); fwd_not_taken is "if not taken".
+CG_BRANCH_LOOP = "branch_loop_cg"
+# Return-address-stack (RAS) classification — JAL/JALR semantic call
+# vs return vs computed-jump. Bins: call (jal/jalr with rd=ra/x5),
+# return (jalr with rs1=ra/x5, rd=zero), tail_call (jalr with rd=zero,
+# rs1!=ra), computed (jalr with rd=ra, rs1!=zero), other.
+# Required for verifying RAS prediction (mismatched depth → bug).
+CG_RAS = "ras_cg"
+# JALR target register class — sp/ra/gp/tp/saved/temporary/argument.
+# Captures the ABI-vs-microarch design choice "what indirect target
+# does this code use".
+CG_JALR_TARGET = "jalr_target_class_cg"
+# AMO acquire/release combinations. Spec allows {none, aq, rl, aqrl};
+# rvgen's randomizer currently picks one of {none, aq, rl} (mutually
+# exclusive). Bin {aq_and_rl, aq_only, rl_only, neither} so a missing
+# `aqrl` bin is visible — exposes a randomizer gap and lets future
+# work fix it.
+CG_AMO_AQRL = "amo_aqrl_cg"
+# AMO operation × width — AMOADD.W vs AMOADD.D, etc. (the W/D split is
+# also visible from the trailing letter of the mnemonic).
+CG_AMO_OP_WIDTH = "amo_op_width_cg"
+# AMO operation × aq/rl pair — captures whether each op family was
+# exercised under each ordering.
+CG_AMO_OP_X_AQRL = "amo_op_aqrl_cross_cg"
+# FP semantic operation — collapses the 100+ FP mnemonics into a
+# small semantic op class (add/sub/mul/div/sqrt/fma/cmp/cvt/sgn/
+# minmax/mv/class/load/store). Lets a verif team confirm "every FP
+# op family was exercised at every precision under every rounding
+# mode" without enumerating mnemonic-by-mnemonic.
+CG_FP_OP = "fp_op_class_cg"
+# FP rounding mode × FP semantic op — cross. Bins like
+# RNE__add, RTZ__div, RUP__sqrt, RDN__fma. Required by ImperasDV /
+# riscvISACOV golden coverage.
+CG_FP_RM_OP_CROSS = "fp_rm_op_cross_cg"
+# FP precision × FP semantic op — half (Zfh) vs single vs double.
+# Bins: H__add, S__add, D__add, etc.
+CG_FP_PREC_OP = "fp_precision_op_cross_cg"
+# Vector AVL corners — sampled when a vsetvli is observed with an
+# inferable AVL. Bins: avl_zero, avl_one, avl_max_minus_one, avl_max,
+# avl_eq_vlmax (special-case when AVL == VLMAX), avl_other.
+CG_VEC_AVL = "vec_avl_corner_cg"
+# Vector tail / mask policy — TA × MA cross (4 combinations). Tail-
+# undisturbed (TU) + mask-undisturbed (MU) leave masked elements
+# untouched; tail/mask-agnostic (TA/MA) may set them to 1s. Critical
+# for memory-coherency under masked vector ops.
+CG_VEC_TA_MA = "vec_tail_mask_policy_cg"
+# Vector vsetvl flavor — vsetvl (rs2 supplies vtype) vs vsetvli (imm
+# supplies vtype) vs vsetivli (5-bit imm AVL).
+CG_VEC_VSETVL_FLAVOR = "vec_vsetvl_flavor_cg"
+# MSTATUS field decode — runtime, sampled when MSTATUS is written.
+# Bins: mie_set, mie_clear, mpie_set, mpp_M, mpp_S, mpp_U, mprv_set,
+# mxr_set, sum_set, fs_initial, fs_clean, fs_dirty, vs_initial,
+# vs_clean, vs_dirty. Lets us track field-level coverage of one of the
+# most security-relevant CSRs.
+CG_MSTATUS_FIELD = "mstatus_field_cg"
+# xTVEC mode — DIRECT vs VECTORED, both for mtvec and stvec. Bins:
+# mtvec_direct, mtvec_vectored, stvec_direct, stvec_vectored.
+CG_XTVEC_MODE = "xtvec_mode_cg"
+# Trap-delegation — runtime, sampled on medeleg/mideleg/hedeleg writes.
+# Bins per delegated cause/interrupt: medeleg_<cause>, mideleg_<irq>.
+CG_DELEGATION = "delegation_cg"
+# HPM counter access — runtime, sampled on csrr/csrrs/csrrw of any
+# mhpmcounterN / mhpmevent N CSR. Bins: counter_<N> + counter_any.
+# Required by Smcntrpmf / counter-perf-mon coverage in OpenHW plans.
+CG_HPM_ACCESS = "hpm_access_cg"
+# MISA letter bits — runtime, decoded from MISA writes. Bins: misa_A,
+# misa_C, misa_D, misa_F, misa_H, misa_I, misa_M, misa_S, misa_U,
+# misa_V. Covers "did the test exercise misa-changeable extensions".
+CG_MISA = "misa_cg"
+# Multiplier / divider corner-values — static, derived from rs1/rs2 when
+# the runtime tracker has values. Bins: div_by_zero (rs2==0 for DIV*/REM*),
+# signed_overflow (rs1==INT_MIN, rs2==-1 for DIV/REM signed), no_corner.
+CG_MULDIV_CORNER = "mul_div_corner_cg"
+# Bitmanip semantic op — rotate / shuffle / popcount / clz / ctz / bclr
+# / bset / clmul / minmax / pack / orc / rev / sext / zext.
+CG_BMANIP_OP = "bitmanip_op_cg"
+# Compressed-imm corner — for RVC ops with NZIMM/NZUIMM constraints,
+# sample whether the imm hit the enforced-nonzero edge (small_imm,
+# max_imm, mid_imm) and whether C.LUI/C.ADDI16SP fields were near
+# their respective boundaries.
+CG_C_IMM_CORNER = "c_imm_corner_cg"
+# Nested trap — runtime, counts traps that occur with priv level
+# already in trap context. Bins: nested_M_in_M, nested_S_in_S,
+# nested_M_in_S, no_nesting. Detected via xCAUSE writes inside a
+# trap-handler label window.
+CG_NESTED_TRAP = "nested_trap_cg"
+# Debug DCSR.cause — runtime, decoded from dcsr writes (when present
+# in the trace). Bins per spec §A.4: cause_ebreak, cause_trigger,
+# cause_haltreq, cause_step, cause_resethaltreq, cause_group.
+CG_DCSR_CAUSE = "dcsr_cause_cg"
+# FP source-operand class — runtime, classifies the source FP value
+# class (read from the virtual FP-state we track from FP writes).
+# Bins: src_nan, src_inf, src_subnormal, src_zero, src_normal.
+# Sampled per-FP-op when at least one source's prior write is known.
+CG_FP_SRC_CLASS = "fp_src_class_cg"
+# Interrupts pending — MIP write decode. Bins: mip_<bit>_set per bit
+# 3/7/11 plus aggregate any_pending.
+CG_MIP_FIELD = "mip_field_cg"
+# Walking-ones / walking-zeros bit coverage — riscv-isac CGF
+# `walking_ones(XLEN)` and `walking_zeros(XLEN)`. For each register
+# operand value observed at runtime, sample bins
+# `bit_<i>_set` and `bit_<i>_clear` for i in [0, 64). Catches
+# bit-slice-MUX and clamp-on-shift bugs invisible to corner-bucket
+# coverage.
+CG_WALKING_ONES = "walking_ones_cg"
+CG_WALKING_ZEROS = "walking_zeros_cg"
+# Alternating bit-pattern coverage — riscv-isac CGF `alternate(XLEN)`.
+# Bins: alt_5555 (0x5555…) / alt_AAAA / alt_byte_5A / alt_byte_A5.
+# Reveals checkerboard / nibble-swap data-path bugs.
+CG_ALTERNATE = "alternating_pattern_cg"
+# Leading / trailing ones/zeros count — for verifying clz/ctz/cpop
+# value-class coverage. Bins: lead0_<n> / lead1_<n> / trail0_<n>
+# / trail1_<n> for n in {0..XLEN}, capped to a coarse log2 bucket.
+CG_LEAD_TRAIL = "leading_trailing_cg"
+# MXR × SUM × MPRV cross — sampled at every load/store. Captures
+# the "supervisor accesses user-page" corner that core-v-verif
+# flags as one of the most-broken-ships configs.
+CG_MXR_SUM_MPRV = "mxr_sum_mprv_cross_cg"
+# FCVT-overflow / saturation corners — runtime, sampled per FCVT
+# instruction with operand class. Bins: fcvt_w_inf, fcvt_w_nan,
+# fcvt_w_overflow_pos, fcvt_w_overflow_neg, fcvt_l_inf, fcvt_l_nan,
+# fcvt_lu_neg_zero (RISC-V spec: NaN→max+1, signed-overflow→max,
+# unsigned-negative→0). Critical because every shipped RISC-V
+# core has had at least one FCVT saturation bug.
+CG_FCVT_CORNER = "fcvt_corner_cg"
+# RVC illegal-immediate corners — directed-stream-injected; bin per
+# spec-defined illegal RVC encoding (c.addi nzimm=0 reserved,
+# c.addi16sp imm=0 reserved, c.lui nzimm=0 reserved, etc.).
+CG_RVC_ILLEGAL = "rvc_illegal_corner_cg"
+# Shamt boundary corners — slli/srli/srai/sllw/sraw/srlw + Zb*-rotates
+# with shamt at {0, 1, XLEN-1, XLEN}. Catches off-by-one in shifters.
+CG_SHAMT_CORNER = "shamt_corner_cg"
+# H-extension virtual-instr trap — runtime, sampled when scause
+# decodes to cause=22 (virtual-instruction). Bins: vi_wfi, vi_sfence,
+# vi_csr, vi_other. Critical for HS/VS-mode boot verification.
+CG_VIRT_INSTR_TRAP = "virtual_instr_trap_cg"
+# Vector vsetvl AVL paths — riscv-isac calls these out as the
+# canonical 4 paths through vsetvl{i}: rd!=x0 rs1!=x0 (normal),
+# rd!=x0 rs1==x0 (set-VLMAX), rd==x0 rs1==x0 (keep-vl preserve),
+# vsetivli (5-bit imm AVL).
+CG_VSETVL_AVL = "vsetvl_avl_path_cg"
+# Vector register-group overlap — for widening/narrowing/segment
+# ops, sample whether the dest fully overlaps src (legal),
+# partially overlaps (illegal except specific cases), or doesn't
+# overlap. Bins: full_overlap, partial_overlap, no_overlap.
+CG_VREG_OVERLAP = "vreg_overlap_cg"
+# Atomic-aligned / misaligned — runtime, sampled when LR/SC/AMO is
+# observed. Bins: aligned_w (.w address %4 == 0), misaligned_w
+# (must trap), aligned_d, misaligned_d.
+CG_ATOMIC_ALIGN = "atomic_alignment_cg"
+# WFI corner — runtime, sampled whenever WFI is retired. Bins:
+# wfi_M_irq_pending, wfi_M_no_irq, wfi_S_tw_set, wfi_S_tw_clear,
+# wfi_U_tw_set. Captures the `mstatus.TW` trap-on-WFI path.
+CG_WFI_CORNER = "wfi_corner_cg"
+
 
 ALL_COVERGROUPS: tuple[str, ...] = (
     CG_OPCODE, CG_FORMAT, CG_CATEGORY, CG_GROUP,
@@ -236,6 +429,24 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_PMP_CFG, CG_MULTI_HART_RACE,
     CG_FP_FFLAGS, CG_TRAP_CAUSE, CG_OP_COMB, CG_EA_ALIGN,
     CG_CSR_READ, CG_FP_DATASET,
+    # Sprint-2 — deep-coverage additions.
+    CG_HAZARD_DIST, CG_LOAD_USE, CG_MC_USE, CG_BRANCH_SHADOW,
+    CG_MEM_ALIAS, CG_BRANCH_PATTERN4, CG_BRANCH_LOOP,
+    CG_RAS, CG_JALR_TARGET,
+    CG_AMO_AQRL, CG_AMO_OP_WIDTH, CG_AMO_OP_X_AQRL,
+    CG_FP_OP, CG_FP_RM_OP_CROSS, CG_FP_PREC_OP,
+    CG_VEC_AVL, CG_VEC_TA_MA, CG_VEC_VSETVL_FLAVOR,
+    CG_MSTATUS_FIELD, CG_XTVEC_MODE, CG_DELEGATION,
+    CG_HPM_ACCESS, CG_MISA,
+    CG_MULDIV_CORNER, CG_BMANIP_OP, CG_C_IMM_CORNER,
+    CG_NESTED_TRAP, CG_DCSR_CAUSE,
+    CG_FP_SRC_CLASS, CG_MIP_FIELD,
+    # Sprint-2 — second wave (research-driven gaps).
+    CG_WALKING_ONES, CG_WALKING_ZEROS, CG_ALTERNATE, CG_LEAD_TRAIL,
+    CG_MXR_SUM_MPRV, CG_FCVT_CORNER, CG_RVC_ILLEGAL,
+    CG_SHAMT_CORNER, CG_VIRT_INSTR_TRAP,
+    CG_VSETVL_AVL, CG_VREG_OVERLAP, CG_ATOMIC_ALIGN,
+    CG_WFI_CORNER,
 )
 
 
@@ -600,6 +811,538 @@ def _fence_pat_bin(imm: int) -> str:
         return f"raw{field:x}"
 
     return f"{_decode(pred)}__{_decode(succ)}"
+
+
+# ---------------------------------------------------------------------------
+# Sprint-2 helpers — pipeline distance, RAS/JALR class, AMO ordering,
+# FP semantic op, vector AVL/policy, M-extension corners, B-extension
+# semantic op classifier, RVC immediate corner classifier.
+# ---------------------------------------------------------------------------
+
+
+def _hazard_dist_bin(distance: int) -> str:
+    """Bin a register-dependency producer→consumer cycle distance.
+
+    The "cycle" here is a generated-instruction count; in real silicon a
+    1-cycle distance is the load-use hazard, 2-3 are typical forwarding
+    paths, 4+ usually doesn't stall. The verification value is showing
+    the spread.
+    """
+    if distance == 1:
+        return "dist_1_load_use"
+    if distance == 2:
+        return "dist_2"
+    if distance == 3:
+        return "dist_3"
+    if distance <= 5:
+        return "dist_4_5"
+    if distance <= 7:
+        return "dist_6_7"
+    return "dist_8_plus"
+
+
+_LOAD_INSTR_NAMES = frozenset({
+    RiscvInstrName.LB, RiscvInstrName.LBU, RiscvInstrName.LH,
+    RiscvInstrName.LHU, RiscvInstrName.LW, RiscvInstrName.LWU,
+    RiscvInstrName.LD,
+    RiscvInstrName.C_LW, RiscvInstrName.C_LWSP,
+    RiscvInstrName.C_LD, RiscvInstrName.C_LDSP,
+    # FP loads count as multi-cycle producers in the FP-use covergroup.
+    RiscvInstrName.FLW, RiscvInstrName.FLD,
+})
+
+
+def _is_multicycle_producer(name: RiscvInstrName) -> bool:
+    """Return True for ops whose result lands ≥2 cycles after issue.
+
+    M-extension (MUL*/DIV*/REM*), F/D-extension divide/sqrt, AMO ops
+    typically take 4-32 cycles. We collapse them into one "multi-cycle"
+    bucket because their consumer-distance distribution is similar from
+    a verification-coverage standpoint.
+    """
+    n = name.name
+    if n.startswith(("MUL", "DIV", "REM")):
+        return True
+    if n in ("FDIV_S", "FDIV_D", "FDIV_H",
+             "FSQRT_S", "FSQRT_D", "FSQRT_H"):
+        return True
+    if n.startswith("AMO") or n.startswith(("LR_", "SC_")):
+        return True
+    return False
+
+
+def _amo_aqrl_bin(aq: bool, rl: bool) -> str:
+    if aq and rl:
+        return "aq_and_rl"
+    if aq:
+        return "aq_only"
+    if rl:
+        return "rl_only"
+    return "neither"
+
+
+_AMO_PRINCIPAL_RE = re.compile(r"^(AMO[A-Z]+|LR|SC)_([WD])$")
+
+
+def _amo_op_width_split(name: RiscvInstrName) -> tuple[str, str] | None:
+    """Split an AMO/LR/SC mnemonic into (op_family, width).
+
+    Returns ``("AMOADD", "W")`` for ``AMOADD_W``, ``("LR", "D")`` for
+    ``LR_D``. Returns None for non-AMO instructions.
+    """
+    m = _AMO_PRINCIPAL_RE.match(name.name)
+    if not m:
+        return None
+    return m.group(1), m.group(2)
+
+
+# FP semantic-op classifier. Maps each FP mnemonic into one of a small
+# set of semantic op classes — far easier to reason about coverage of
+# "every FP-add covered" than enumerating per precision × per rounding
+# mode × per W/L variant.
+def _fp_op_class(name: RiscvInstrName) -> str | None:
+    n = name.name
+    if not (n.startswith("F") and n != "FENCE" and n != "FENCE_I"):
+        return None
+    # Specific groups first.
+    if n.startswith(("FMADD", "FMSUB", "FNMADD", "FNMSUB")):
+        return "fma"
+    if n.startswith("FADD"):
+        return "add"
+    if n.startswith("FSUB"):
+        return "sub"
+    if n.startswith("FMUL"):
+        return "mul"
+    if n.startswith("FDIV"):
+        return "div"
+    if n.startswith("FSQRT"):
+        return "sqrt"
+    if n.startswith(("FMIN", "FMAX")):
+        return "minmax"
+    if n.startswith(("FEQ", "FLT", "FLE", "FGT", "FGE")):
+        return "compare"
+    if n.startswith("FCVT"):
+        return "convert"
+    if n.startswith("FSGN"):
+        return "sign"
+    if n.startswith("FCLASS"):
+        return "classify"
+    if n in ("FMV_W_X", "FMV_X_W", "FMV_D_X", "FMV_X_D",
+             "FMV_H_X", "FMV_X_H"):
+        return "move"
+    if n in ("FLW", "FLD", "FLH"):
+        return "load"
+    if n in ("FSW", "FSD", "FSH"):
+        return "store"
+    return None
+
+
+def _fp_precision(name: RiscvInstrName) -> str | None:
+    """Return ``H``, ``S``, or ``D`` based on the destination precision.
+
+    For FCVT_*_*, RISC-V mnemonic convention is FCVT.<dst>.<src>, so the
+    second underscore segment is the destination.
+    """
+    n = name.name
+    # FCVT_<dst>_<src> — destination is parts[1].
+    if n.startswith("FCVT_"):
+        parts = n.split("_")
+        if len(parts) >= 2 and parts[1] in ("S", "D", "H"):
+            return parts[1]
+    if n.endswith("_S") or n in ("FLW", "FSW"):
+        return "S"
+    if n.endswith("_D") or n in ("FLD", "FSD"):
+        return "D"
+    if n.endswith("_H") or n in ("FLH", "FSH"):
+        return "H"
+    return None
+
+
+# Bitmanip semantic-op classifier. Maps each B-extension mnemonic into
+# one of a small set of op classes.
+def _bitmanip_op_class(name: RiscvInstrName) -> str | None:
+    n = name.name
+    if n.startswith(("ROL", "ROR")):
+        return "rotate"
+    if n.startswith(("CLZ", "CLZW")):
+        return "clz"
+    if n.startswith(("CTZ", "CTZW")):
+        return "ctz"
+    if n.startswith("CPOP"):
+        return "popcount"
+    if n.startswith(("MAX", "MIN")):
+        return "minmax"
+    if n.startswith("CLMUL"):
+        return "clmul"
+    if n.startswith(("BCLR", "BSET", "BEXT", "BINV")):
+        return "single_bit"
+    if n.startswith(("ANDN", "ORN", "XNOR")):
+        return "logic_neg"
+    if n.startswith(("PACK", "PACKH", "PACKW")):
+        return "pack"
+    if n.startswith("ORC"):
+        return "or_combine"
+    if n in ("REV8", "BREV8", "BREV"):
+        return "byte_reverse"
+    if n in ("ZEXT_H", "ZEXT_W", "SEXT_B", "SEXT_H"):
+        return "extend"
+    if n.startswith(("SH1ADD", "SH2ADD", "SH3ADD")):
+        return "shift_add"
+    if n.startswith(("SLLI_UW", "ADD_UW", "ZEXT_UW")):
+        return "uw"
+    if n.startswith("XPERM"):
+        return "xperm"
+    return None
+
+
+def _ras_class(name: RiscvInstrName, rs1: RiscvReg | None,
+               rd: RiscvReg | None) -> str | None:
+    """Classify a JAL/JALR for RAS prediction modeling.
+
+    RISC-V ABI link reg = x1 (ra). x5 (t0) is also pushed/popped by the
+    RAS per priv-arch §2.5.1 ("Standard Calling Convention"). The
+    classification follows the spec rule:
+
+    - ``call``: rd ∈ {x1, x5}, rs1 ≠ {x1, x5}.
+    - ``return``: rs1 ∈ {x1, x5}, rd not in {x1, x5}.
+    - ``coroutine_swap``: rs1 ∈ {x1, x5}, rd ∈ {x1, x5}, rs1 ≠ rd.
+    - ``computed``: JALR with rd, rs1 outside the link-reg pair.
+    - ``other`` for non-link-reg variants (e.g. tail call jal x0, tgt).
+    """
+    if name not in (RiscvInstrName.JAL, RiscvInstrName.JALR,
+                    RiscvInstrName.C_J, getattr(RiscvInstrName, "C_JAL", None),
+                    RiscvInstrName.C_JR, RiscvInstrName.C_JALR):
+        return None
+    link_regs = (RiscvReg.RA, RiscvReg.T0)
+    rd_link = rd in link_regs if rd is not None else False
+    rs1_link = rs1 in link_regs if rs1 is not None else False
+    # JAL / C_JAL / C_J — only rd matters (no rs1).
+    if name in (RiscvInstrName.JAL, getattr(RiscvInstrName, "C_JAL", None)):
+        if rd_link:
+            return "call"
+        if rd == RiscvReg.ZERO:
+            return "tail_call"
+        return "other"
+    if name == RiscvInstrName.C_J:
+        return "tail_call"
+    # JALR / C_JR / C_JALR — both rs1 and rd matter.
+    if name == RiscvInstrName.C_JR:
+        # c.jr rs1 == jalr x0, rs1, 0 — pure indirect jump.
+        return "return" if rs1_link else "computed"
+    if name == RiscvInstrName.C_JALR:
+        # c.jalr rs1 == jalr ra, rs1, 0.
+        return "computed" if not rs1_link else "coroutine_swap"
+    # JALR.
+    if rs1_link and rd_link and rs1 != rd:
+        return "coroutine_swap"
+    if rs1_link and not rd_link:
+        return "return"
+    if rd_link and not rs1_link:
+        return "call"
+    if rd == RiscvReg.ZERO and not rs1_link:
+        return "tail_call"
+    return "computed"
+
+
+_REG_CLASS = {
+    RiscvReg.ZERO: "zero",
+    RiscvReg.RA: "ra",
+    RiscvReg.SP: "sp",
+    RiscvReg.GP: "gp",
+    RiscvReg.TP: "tp",
+}
+for _r in (RiscvReg.T0, RiscvReg.T1, RiscvReg.T2, RiscvReg.T3,
+           RiscvReg.T4, RiscvReg.T5, RiscvReg.T6):
+    _REG_CLASS[_r] = "temporary"
+for _r in (RiscvReg.A0, RiscvReg.A1, RiscvReg.A2, RiscvReg.A3,
+           RiscvReg.A4, RiscvReg.A5, RiscvReg.A6, RiscvReg.A7):
+    _REG_CLASS[_r] = "argument"
+for _r in (RiscvReg.S0, RiscvReg.S1, RiscvReg.S2, RiscvReg.S3,
+           RiscvReg.S4, RiscvReg.S5, RiscvReg.S6, RiscvReg.S7,
+           RiscvReg.S8, RiscvReg.S9, RiscvReg.S10, RiscvReg.S11):
+    _REG_CLASS[_r] = "saved"
+
+
+def _muldiv_corner_bin(name: RiscvInstrName, rs1_val: int | None,
+                       rs2_val: int | None, xlen: int = 64) -> str | None:
+    """Static M-extension corner classifier.
+
+    Returns one of the canonical "interesting" bins:
+
+    - ``div_by_zero``: any DIV/REM with rs2 == 0.
+    - ``signed_overflow``: signed DIV/REM with rs1 == INT_MIN, rs2 == -1.
+    - ``mul_max_pair``: MUL with both operands at max signed magnitude
+      (forces upper bits — useful for MULH coverage).
+    - None for non-M ops or non-corner values.
+    """
+    n = name.name
+    if not n.startswith(("MUL", "DIV", "REM")):
+        return None
+    if rs2_val is None:
+        return None
+    mask = (1 << xlen) - 1
+    rs2 = rs2_val & mask
+    if n.startswith(("DIV", "REM")) and rs2 == 0:
+        return "div_by_zero"
+    if rs1_val is not None:
+        rs1 = rs1_val & mask
+        # Signed-overflow corner: rs1 == 1 << (xlen-1), rs2 == -1.
+        signed_min = 1 << (xlen - 1)
+        signed_neg_one = mask
+        if (rs1 == signed_min and rs2 == signed_neg_one
+                and n.startswith(("DIV_", "DIV", "REM"))
+                and not n.startswith(("DIVU", "REMU"))):
+            return "signed_overflow"
+        if n.startswith("MUL"):
+            # Both operands at signed-max gives a result that exercises
+            # all upper bits in MULH/MULHSU/MULHU.
+            signed_max = signed_min - 1
+            if rs1 == signed_max and rs2 == signed_max:
+                return "mul_max_pair"
+            if rs1 == mask and rs2 == mask:
+                return "mul_neg_one_pair"
+    return None
+
+
+def _c_imm_corner_bin(name: RiscvInstrName, imm: int) -> str | None:
+    """Classify a compressed-instruction immediate for boundary corners.
+
+    Compressed ops have severely-constrained immediates with
+    NZIMM/NZUIMM (must-be-nonzero) requirements. Bins capture whether
+    we exercised the small / max / negative-max corners for each.
+    """
+    n = name.name
+    if not n.startswith("C_"):
+        return None
+    if imm == 0:
+        return f"{n.lower()}_zero_imm"
+    a = abs(imm)
+    if a == 1:
+        return f"{n.lower()}_imm_one"
+    # Common max-imm corners — we can't tell exact field width here
+    # without knowing the C-format, but we can detect "large" imm.
+    if a >= 32:
+        return f"{n.lower()}_imm_large"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Sprint-2 wave 2 — value-class abstract bins, FCVT corners, shamt
+# corners, RVC illegal-imm, vector AVL/overlap, atomic alignment.
+# ---------------------------------------------------------------------------
+
+
+def _walking_ones_bins(value: int, xlen: int = 64) -> tuple[str, ...]:
+    """Return one bin per set bit position of ``value``.
+
+    ``value`` is interpreted as a 2's-complement integer of ``xlen`` bits.
+    Bin name format: ``bit_<i>_set`` for each set bit. Returns
+    ``("no_bits_set",)`` when value == 0.
+    """
+    mask = (1 << xlen) - 1
+    v = value & mask
+    if v == 0:
+        return ("no_bits_set",)
+    bins = []
+    while v:
+        b = (v & -v).bit_length() - 1
+        bins.append(f"bit_{b:02d}_set")
+        v &= v - 1
+    return tuple(bins)
+
+
+def _walking_zeros_bins(value: int, xlen: int = 64) -> tuple[str, ...]:
+    """Return one bin per cleared bit position of ``value`` (within xlen)."""
+    mask = (1 << xlen) - 1
+    v = (~value) & mask
+    if v == 0:
+        return ("all_bits_set",)
+    bins = []
+    while v:
+        b = (v & -v).bit_length() - 1
+        bins.append(f"bit_{b:02d}_clear")
+        v &= v - 1
+    return tuple(bins)
+
+
+def _alternate_bin(value: int, xlen: int = 64) -> str | None:
+    """Return one of {alt_5555, alt_AAAA, alt_byte_A5, alt_byte_5A} or None.
+
+    - ``alt_5555``: bit-alternating 0x5555… (each pair of bits is 01).
+    - ``alt_AAAA``: bit-alternating 0xAAAA… (each pair is 10).
+    - ``alt_byte_A5``: every byte equals 0xA5 — nibble-alternating
+      within each byte. (E.g. 0xA5A5A5A5 in xlen=32.)
+    - ``alt_byte_5A``: every byte equals 0x5A.
+
+    Returns None for non-alternating values.
+    """
+    mask = (1 << xlen) - 1
+    v = value & mask
+    a55 = sum((0x55 << (8 * i)) for i in range(xlen // 8)) & mask
+    aaa = sum((0xAA << (8 * i)) for i in range(xlen // 8)) & mask
+    if v == a55:
+        return "alt_5555"
+    if v == aaa:
+        return "alt_AAAA"
+    bA5 = sum((0xA5 << (8 * i)) for i in range(xlen // 8)) & mask
+    b5A = sum((0x5A << (8 * i)) for i in range(xlen // 8)) & mask
+    if v == bA5:
+        return "alt_byte_A5"
+    if v == b5A:
+        return "alt_byte_5A"
+    return None
+
+
+def _leading_trailing_bins(value: int, xlen: int = 64) -> tuple[str, ...]:
+    """Compute leading-/trailing-ones/zeros buckets for ``value``.
+
+    Bucket boundaries: 0, 1, 2, 4, 8, 16, 32, 64. The bucket label
+    encodes the run-type and the largest bucket whose threshold the run
+    meets — e.g. ``lead0_8`` means at least 8 leading zeros.
+    """
+    mask = (1 << xlen) - 1
+    v = value & mask
+    out = []
+
+    def _bucket(n: int) -> int:
+        for thr in (64, 32, 16, 8, 4, 2, 1):
+            if n >= thr:
+                return thr
+        return 0
+
+    # Leading zeros — count from MSB down to first 1.
+    if v == 0:
+        out.append("lead0_64")
+    else:
+        lz = xlen - v.bit_length()
+        out.append(f"lead0_{_bucket(lz)}")
+    # Trailing zeros.
+    if v == 0:
+        out.append("trail0_64")
+    else:
+        tz = (v & -v).bit_length() - 1
+        out.append(f"trail0_{_bucket(tz)}")
+    # Leading ones — count from MSB.
+    inv = (~v) & mask
+    if inv == 0:
+        out.append("lead1_64")
+    else:
+        lo = xlen - inv.bit_length()
+        if lo > 0:
+            out.append(f"lead1_{_bucket(lo)}")
+    # Trailing ones.
+    if inv == 0:
+        out.append("trail1_64")
+    else:
+        to = (inv & -inv).bit_length() - 1
+        if to > 0:
+            out.append(f"trail1_{_bucket(to)}")
+    return tuple(out)
+
+
+# Shift-instruction shamt-boundary classifier. Captures the corners
+# that off-by-one shifters miss: shamt=0 (identity), shamt=1, shamt=
+# XLEN-1 (full-shift), shamt==XLEN (UB on RV32 / legal mod XLEN on RV64).
+_SHIFT_INSTR_NAMES = frozenset({
+    RiscvInstrName.SLLI, RiscvInstrName.SRLI, RiscvInstrName.SRAI,
+    RiscvInstrName.SLL, RiscvInstrName.SRL, RiscvInstrName.SRA,
+    RiscvInstrName.SLLIW, RiscvInstrName.SRLIW, RiscvInstrName.SRAIW,
+    RiscvInstrName.SLLW, RiscvInstrName.SRLW, RiscvInstrName.SRAW,
+})
+
+
+def _shamt_corner_bin(name: RiscvInstrName, shamt: int,
+                      xlen: int = 64) -> str | None:
+    """Bin a shift-instruction shamt against canonical corners.
+
+    Returns None for non-shift ops or non-corner values.
+    """
+    n = name.name
+    if name not in _SHIFT_INSTR_NAMES and not n.startswith(("ROL", "ROR")):
+        return None
+    if shamt == 0:
+        return f"{n.lower()}_shamt_zero"
+    if shamt == 1:
+        return f"{n.lower()}_shamt_one"
+    if shamt == xlen - 1:
+        return f"{n.lower()}_shamt_max_minus_one"
+    if shamt == xlen:
+        return f"{n.lower()}_shamt_xlen"
+    if shamt > xlen:
+        return f"{n.lower()}_shamt_oob"
+    return None
+
+
+# Vector vsetvl flavor classifier.
+def _vsetvl_flavor(name: RiscvInstrName, rd: RiscvReg | None,
+                   rs1: RiscvReg | None) -> str | None:
+    """Return ``vsetvl`` / ``vsetvli`` / ``vsetivli`` and AVL path bin.
+
+    Returns the path bin (e.g. "vsetvli_set_vlmax") for use with
+    CG_VSETVL_AVL. None if not a vset family.
+    """
+    n = name.name
+    if n not in ("VSETVL", "VSETVLI", "VSETIVLI"):
+        return None
+    flavor = n.lower()
+    # vsetivli always takes an immediate AVL — no rs1 path.
+    if flavor == "vsetivli":
+        return f"{flavor}_imm_avl"
+    is_rd_zero = rd == RiscvReg.ZERO if rd is not None else False
+    is_rs1_zero = rs1 == RiscvReg.ZERO if rs1 is not None else False
+    if not is_rd_zero and not is_rs1_zero:
+        return f"{flavor}_normal"
+    if not is_rd_zero and is_rs1_zero:
+        return f"{flavor}_set_vlmax"
+    if is_rd_zero and is_rs1_zero:
+        return f"{flavor}_keep_vl"
+    return f"{flavor}_other"
+
+
+# FCVT corner bin classifier — runtime helper. Inputs are (op, src_class).
+def _fcvt_corner_bin(name: RiscvInstrName, src_class: str) -> str | None:
+    """Sample a saturation corner for an FCVT instruction with known src.
+
+    ``src_class`` is one of {nan, inf, normal, subnormal, zero}. Returns
+    a bin like ``fcvt_w_s_nan_to_intmax`` only for spec-mandated saturation
+    corners — None otherwise.
+    """
+    n = name.name
+    if not n.startswith("FCVT_"):
+        return None
+    parts = n.split("_")
+    if len(parts) < 3:
+        return None
+    dst = parts[1]
+    src = parts[2]
+    int_dst = dst in ("W", "WU", "L", "LU")
+    if not int_dst:
+        return None  # FP→FP overflows aren't in scope here
+    if src_class == "nan":
+        return f"{n.lower()}_nan_input"
+    if src_class == "inf":
+        return f"{n.lower()}_inf_input"
+    return None
+
+
+# Vector register-group overlap classifier — sampled when a vector op
+# has both vd and at least one vs slot. Returns one of {full_overlap,
+# partial_overlap, no_overlap}.
+def _vreg_overlap_class(vd: int, vs: int, emul: int) -> str:
+    """Classify EMUL-aware vd/vs register-group overlap.
+
+    ``vd``, ``vs`` are vector-register indices [0..31]; ``emul`` is the
+    register-group multiplier (1, 2, 4, 8) — fractional EMUL is treated
+    as 1 for overlap purposes (a single register is the dest group).
+    """
+    g = max(emul, 1)
+    vd_lo, vd_hi = vd, vd + g - 1
+    vs_lo, vs_hi = vs, vs + g - 1
+    if vd == vs:
+        return "full_overlap"
+    if vd_lo <= vs_hi and vs_lo <= vd_hi:
+        return "partial_overlap"
+    return "no_overlap"
 
 
 def new_db() -> CoverageDB:
@@ -1137,6 +1880,91 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
             fimm = 0xFF
         _bump(db, CG_FENCE, _fence_pat_bin(fimm))
 
+    # ---- Sprint-2 static samplers ----
+
+    # AMO ordering bits + per-op cross. AMO/LR/SC instructions carry
+    # ``aq`` and ``rl`` flags from the AMO base class.
+    aq = getattr(instr, "aq", None)
+    rl = getattr(instr, "rl", None)
+    if aq is not None and rl is not None:
+        ordering = _amo_aqrl_bin(bool(aq), bool(rl))
+        _bump(db, CG_AMO_AQRL, ordering)
+        ow = _amo_op_width_split(instr.instr_name)
+        if ow is not None:
+            op_family, width = ow
+            _bump(db, CG_AMO_OP_WIDTH, f"{op_family}_{width}")
+            _bump(db, CG_AMO_OP_X_AQRL, f"{op_family}_{width}__{ordering}")
+
+    # FP semantic-op classes — collapse 100+ FP mnemonics into 13 ops.
+    fp_op = _fp_op_class(instr.instr_name)
+    if fp_op is not None:
+        _bump(db, CG_FP_OP, fp_op)
+        if isinstance(rm, FRoundingMode):
+            _bump(db, CG_FP_RM_OP_CROSS, f"{rm.name}__{fp_op}")
+        prec = _fp_precision(instr.instr_name)
+        if prec is not None:
+            _bump(db, CG_FP_PREC_OP, f"{prec}__{fp_op}")
+
+    # Bitmanip semantic op.
+    bm_op = _bitmanip_op_class(instr.instr_name)
+    if bm_op is not None:
+        _bump(db, CG_BMANIP_OP, bm_op)
+
+    # RAS classification (call / return / coroutine / computed / tail).
+    ras = _ras_class(instr.instr_name, rs1_val if isinstance(rs1_val, RiscvReg) else None,
+                     rd_val if isinstance(rd_val, RiscvReg) else None)
+    if ras is not None:
+        _bump(db, CG_RAS, ras)
+        # JALR target class — record the ABI class of rs1.
+        if instr.instr_name == RiscvInstrName.JALR and isinstance(rs1_val, RiscvReg):
+            _bump(db, CG_JALR_TARGET, _REG_CLASS.get(rs1_val, "other"))
+
+    # Compressed-imm corner.
+    if has_imm and instr.instr_name.name.startswith("C_"):
+        ci = _c_imm_corner_bin(instr.instr_name, int(getattr(instr, "imm", 0)))
+        if ci is not None:
+            _bump(db, CG_C_IMM_CORNER, ci)
+
+    # Shamt-boundary corner (static — for shift / rotate instructions
+    # whose imm is the shift amount).
+    if has_imm and (instr.instr_name in _SHIFT_INSTR_NAMES
+                     or instr.instr_name.name.startswith(("ROLI", "RORI"))):
+        sh = int(getattr(instr, "imm", 0)) & 0x7F
+        sb = _shamt_corner_bin(instr.instr_name, sh, xlen=64)
+        if sb is not None:
+            _bump(db, CG_SHAMT_CORNER, sb)
+
+    # vsetvl flavor + AVL-path classifier (static — sampled when the
+    # generator emits a vsetvl{,i} / vsetivli).
+    if instr.instr_name.name in ("VSETVL", "VSETVLI", "VSETIVLI"):
+        rs1_for = rs1_val if isinstance(rs1_val, RiscvReg) else None
+        rd_for = rd_val if isinstance(rd_val, RiscvReg) else None
+        vf = _vsetvl_flavor(instr.instr_name, rd_for, rs1_for)
+        if vf is not None:
+            _bump(db, CG_VSETVL_AVL, vf)
+
+    # Walking-ones / -zeros / alternating-pattern coverage on the
+    # static immediate field (riscv-isac CGF abstract-bin functions).
+    # Sampled per-imm only for ops whose imm is a value (not a label /
+    # offset). Branches and JAL/JALR carry an offset, not a value, so
+    # we exclude those — but I/U-format ALU ops' imms are values worth
+    # bit-position coverage.
+    if has_imm and instr.instr_name in (
+            RiscvInstrName.ADDI, RiscvInstrName.ANDI, RiscvInstrName.ORI,
+            RiscvInstrName.XORI, RiscvInstrName.SLTI, RiscvInstrName.SLTIU,
+            RiscvInstrName.LUI, RiscvInstrName.AUIPC,
+            RiscvInstrName.ADDIW):
+        imm_value = int(getattr(instr, "imm", 0))
+        for bn in _walking_ones_bins(imm_value, xlen=32):
+            _bump(db, CG_WALKING_ONES, bn)
+        for bn in _walking_zeros_bins(imm_value, xlen=32):
+            _bump(db, CG_WALKING_ZEROS, bn)
+        ap = _alternate_bin(imm_value, xlen=32)
+        if ap is not None:
+            _bump(db, CG_ALTERNATE, ap)
+        for bn in _leading_trailing_bins(imm_value, xlen=32):
+            _bump(db, CG_LEAD_TRAIL, bn)
+
 
 # ---------------------------------------------------------------------------
 # Sequence sampler — hazard detection
@@ -1168,6 +1996,22 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
     intervening_since_lr: int = 0
     seen_lr: bool = False
     seen_sc: bool = False
+    # Sprint-2 — multi-cycle / load producer trackers.
+    # ``producer_at[reg] = (idx, kind)`` where kind ∈ {"load", "mc", "alu"}.
+    producer_at: dict[RiscvReg, tuple[int, str]] = {}
+    # Track which loads / multi-cycle producers have been "consumed" so we
+    # can credit no-use bins at end of sequence.
+    load_consumers: set[int] = set()
+    mc_consumers: set[int] = set()
+    load_emitted: set[int] = set()
+    mc_emitted: set[int] = set()
+    # Branch-shadow tracker — set when previous instr was a branch, so
+    # the next iteration can credit one shadow_<category> bin.
+    prev_was_branch_idx: int | None = None
+    # Static memory-aliasing window: ``mem_window`` records the last few
+    # (base_reg, offset, op_kind) triples; aliasing is sampled when the
+    # current instr's base reg matches a recent entry.
+    mem_window: deque = deque(maxlen=8)
     # vtype transition state. The boot-time vsetvli sets the initial vtype;
     # each subsequent vsetvli observed in the stream becomes a "new vtype"
     # and we sample the (prev → new) transitions.
@@ -1260,6 +2104,15 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
         except AttributeError:
             prev_opcode = None
 
+        # Branch-shadow — the *previous* instr was a branch, so this
+        # instr's category is the branch shadow.
+        if prev_was_branch_idx is not None and prev_was_branch_idx == idx - 1:
+            try:
+                _bump(db, CG_BRANCH_SHADOW, f"shadow_{instr.category.name}")
+            except AttributeError:
+                pass
+            prev_was_branch_idx = None
+
         # Collect the regs this instr reads/writes.
         reads: set[RiscvReg] = set()
         writes: set[RiscvReg] = set()
@@ -1273,6 +2126,71 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
             if isinstance(r, RiscvReg) and r != RiscvReg.ZERO:
                 writes.add(r)
 
+        # Producer / consumer tracking for load-use & multi-cycle-use bins.
+        try:
+            iname2 = instr.instr_name
+        except AttributeError:
+            iname2 = None
+        if iname2 is not None:
+            # Did any of this instr's reads consume a tracked producer?
+            for r in reads:
+                if r in producer_at:
+                    p_idx, kind = producer_at[r]
+                    distance = idx - p_idx
+                    if kind == "load" and distance >= 1:
+                        _bump(db, CG_LOAD_USE, _hazard_dist_bin(distance)
+                              .replace("dist", "load_use"))
+                        load_consumers.add(p_idx)
+                    elif kind == "mc" and distance >= 1:
+                        _bump(db, CG_MC_USE, _hazard_dist_bin(distance)
+                              .replace("dist", "mc_use"))
+                        mc_consumers.add(p_idx)
+            # Tag this instr if it's a producer kind.
+            if iname2 in _LOAD_INSTR_NAMES:
+                for r in writes:
+                    producer_at[r] = (idx, "load")
+                load_emitted.add(idx)
+            elif _is_multicycle_producer(iname2):
+                for r in writes:
+                    producer_at[r] = (idx, "mc")
+                mc_emitted.add(idx)
+            else:
+                # ALU op — refresh producer record so we don't credit
+                # load-use distance against an intermediate ALU result.
+                for r in writes:
+                    producer_at[r] = (idx, "alu")
+            # Branch-shadow flag for next iteration.
+            if iname2 in _BRANCH_INSTR_NAMES or iname2 in (
+                    RiscvInstrName.JAL, RiscvInstrName.JALR,
+                    RiscvInstrName.C_J, getattr(RiscvInstrName, "C_JAL", None),
+                    RiscvInstrName.C_JR, RiscvInstrName.C_JALR):
+                prev_was_branch_idx = idx
+            # Static memory-alias window — sample when the current
+            # instr is a load/store with a base reg.
+            width_bin_seq = _load_store_width_bin(iname2)
+            if width_bin_seq is not None and getattr(instr, "has_rs1", False):
+                base = getattr(instr, "rs1", None)
+                if isinstance(base, RiscvReg):
+                    try:
+                        off_seq = int(getattr(instr, "imm", 0))
+                    except (TypeError, ValueError):
+                        off_seq = 0
+                    op_kind = "load" if iname2 in _LOAD_INSTR_NAMES else "store"
+                    # Detect alias against window.
+                    aliased = False
+                    for prev_base, prev_off, prev_kind in mem_window:
+                        if prev_base == base:
+                            if prev_off == off_seq:
+                                tag = f"{prev_kind}_then_{op_kind}_same_addr"
+                            else:
+                                tag = f"{prev_kind}_then_{op_kind}_same_base_diff_off"
+                            _bump(db, CG_MEM_ALIAS, tag)
+                            aliased = True
+                            break
+                    if not aliased:
+                        _bump(db, CG_MEM_ALIAS, "no_alias_in_window")
+                    mem_window.append((base, off_seq, op_kind))
+
         hazard_found = False
         window_start = idx - HAZARD_WINDOW
         # RAW: one of our reads was recently written.
@@ -1283,6 +2201,8 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
                 w_at = last_writer_at[r]
                 if w_at >= window_start and w_at < idx:
                     _bump(db, CG_HAZARD, "raw")
+                    # Distance bin (cycles between producer and consumer).
+                    _bump(db, CG_HAZARD_DIST, _hazard_dist_bin(idx - w_at))
                     hazard_found = True
                     break
         # WAW: one of our writes was recently written.
@@ -1319,6 +2239,15 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
         _bump(db, CG_LR_SC_PATTERN, "lr_only")
     # If the sequence had only SCs that never paired (all flagged
     # `unpaired_sc` already) the bin is preserved by the per-instr loop.
+
+    # Credit no-use bins for unconsumed producers. Each emitted load /
+    # multi-cycle producer that never had a downstream consumer reads
+    # its result registers a "no_use" bin — quantifies how often the
+    # generator emits dead loads / dead long-latency ops.
+    for p_idx in load_emitted - load_consumers:
+        _bump(db, CG_LOAD_USE, "load_no_use")
+    for p_idx in mc_emitted - mc_consumers:
+        _bump(db, CG_MC_USE, "mc_no_use")
 
 
 HAZARD_WINDOW = 8  # sliding-window size (in instructions) for hazard counting

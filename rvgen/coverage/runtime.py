@@ -34,26 +34,52 @@ from collections import deque
 from pathlib import Path
 
 from rvgen.coverage.collectors import (
+    CG_ALTERNATE,
+    CG_ATOMIC_ALIGN,
     CG_BIT_ACTIVITY,
     CG_BR_PER_MNEM,
     CG_BRANCH_DIR,
+    CG_BRANCH_LOOP,
+    CG_BRANCH_PATTERN4,
     CG_CSR_VAL,
+    CG_DCSR_CAUSE,
+    CG_DELEGATION,
     CG_EA_ALIGN,
     CG_EXCEPTION,
+    CG_FCVT_CORNER,
     CG_FP_DATASET,
     CG_FP_FFLAGS,
+    CG_FP_SRC_CLASS,
+    CG_HPM_ACCESS,
+    CG_LEAD_TRAIL,
+    CG_MIP_FIELD,
+    CG_MISA,
+    CG_MSTATUS_FIELD,
+    CG_MXR_SUM_MPRV,
+    CG_NESTED_TRAP,
     CG_OPCODE,
     CG_PRIV_EVENT,
     CG_PRIV_MODE,
     CG_RS_VAL_CORNER,
     CG_TRAP_CAUSE,
+    CG_VIRT_INSTR_TRAP,
+    CG_WALKING_ONES,
+    CG_WALKING_ZEROS,
+    CG_WFI_CORNER,
+    CG_XTVEC_MODE,
     CoverageDB,
+    _alternate_bin,
     _ea_align_bin,
     _fp_dataset_bin,
     _fp_fflags_bins,
+    _leading_trailing_bins,
     _trap_cause_bin,
     _value_class,
+    _walking_ones_bins,
+    _walking_zeros_bins,
+    _fp_op_class,
 )
+from rvgen.isa.enums import RiscvInstrName as _N
 
 
 # Privileged events we sample as transitions. Each bin reflects a
@@ -77,6 +103,173 @@ _PRIV_EVENT_MNEMS = {
     "cbo.inval": "cbo_inval",
     "cbo.zero": "cbo_zero",
 }
+
+# Sprint-2: MSTATUS field decode. Bits per priv-arch v1.13 §3.1.6.
+def _mstatus_field_bins(value: int) -> tuple[str, ...]:
+    bins: list[str] = []
+    # MIE bit 3, MPIE bit 7, SIE bit 1, SPIE bit 5, UIE bit 0, UPIE bit 4.
+    if value & (1 << 3):
+        bins.append("mie_set")
+    if value & (1 << 7):
+        bins.append("mpie_set")
+    if value & (1 << 1):
+        bins.append("sie_set")
+    if value & (1 << 5):
+        bins.append("spie_set")
+    # MPP[12:11], SPP[8].
+    mpp = (value >> 11) & 0x3
+    bins.append({0: "mpp_U", 1: "mpp_S", 3: "mpp_M"}.get(mpp, "mpp_reserved"))
+    spp = (value >> 8) & 0x1
+    bins.append("spp_S" if spp else "spp_U")
+    if value & (1 << 17):
+        bins.append("mprv_set")
+    if value & (1 << 18):
+        bins.append("sum_set")
+    if value & (1 << 19):
+        bins.append("mxr_set")
+    if value & (1 << 20):
+        bins.append("tvm_set")
+    if value & (1 << 21):
+        bins.append("tw_set")
+    if value & (1 << 22):
+        bins.append("tsr_set")
+    # FS[14:13], VS[10:9].
+    fs = (value >> 13) & 0x3
+    if fs:
+        bins.append({1: "fs_initial", 2: "fs_clean", 3: "fs_dirty"}.get(fs, "fs_off"))
+    vs = (value >> 9) & 0x3
+    if vs:
+        bins.append({1: "vs_initial", 2: "vs_clean", 3: "vs_dirty"}.get(vs, "vs_off"))
+    return tuple(bins) if bins else ("mstatus_zero",)
+
+
+# MIP / MIE field decode. The interesting bits are 1/3/5/7/9/11 (S/M
+# software/timer/external).
+_MIP_BIT_NAMES = {
+    1: "ssip", 3: "msip",
+    5: "stip", 7: "mtip",
+    9: "seip", 11: "meip",
+    # Sscofpmf — counter-overflow.
+    13: "lcofip",
+}
+
+
+def _mip_field_bins(value: int) -> tuple[str, ...]:
+    bins: list[str] = []
+    for bit, n in _MIP_BIT_NAMES.items():
+        if value & (1 << bit):
+            bins.append(f"{n}_pending")
+    if not bins:
+        bins.append("none_pending")
+    else:
+        bins.append("any_pending")
+    return tuple(bins)
+
+
+# MISA letter decode — bit positions are 'A'=0 .. 'Z'=25.
+def _misa_letter_bins(value: int) -> tuple[str, ...]:
+    """Return one bin per set extension letter."""
+    bins = []
+    for i, letter in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+        if value & (1 << i):
+            bins.append(f"misa_{letter}")
+    return tuple(bins)
+
+
+# xTVEC.MODE decode — low 2 bits select DIRECT (00) / VECTORED (01); 10/11 reserved.
+def _xtvec_mode_bin(csr_name: str, value: int) -> str:
+    mode = value & 0x3
+    if csr_name == "MTVEC":
+        return f"mtvec_{'direct' if mode == 0 else 'vectored' if mode == 1 else 'reserved'}"
+    if csr_name == "STVEC":
+        return f"stvec_{'direct' if mode == 0 else 'vectored' if mode == 1 else 'reserved'}"
+    return f"{csr_name.lower()}_unknown"
+
+
+# Trap-delegation decoder. Bit positions of medeleg/mideleg correspond
+# to the cause codes in collectors._EXCEPTION_NAMES / _INTERRUPT_NAMES.
+def _delegation_bins(csr_name: str, value: int) -> tuple[str, ...]:
+    """Return one bin per delegated cause/interrupt bit set."""
+    out = []
+    if csr_name == "MEDELEG":
+        from rvgen.coverage.collectors import _EXCEPTION_NAMES
+        for code, ename in _EXCEPTION_NAMES.items():
+            if value & (1 << code):
+                out.append(f"medeleg_{ename}")
+    elif csr_name == "MIDELEG":
+        from rvgen.coverage.collectors import _INTERRUPT_NAMES
+        for code, iname in _INTERRUPT_NAMES.items():
+            if value & (1 << code):
+                out.append(f"mideleg_{iname}")
+    elif csr_name in ("HEDELEG", "HIDELEG"):
+        out.append(f"{csr_name.lower()}_set")
+    return tuple(out)
+
+
+# DCSR.cause field — bits [8:6] in the DCSR register layout.
+_DCSR_CAUSE_NAMES = {
+    1: "ebreak",
+    2: "trigger",
+    3: "haltreq",
+    4: "step",
+    5: "resethaltreq",
+    6: "group",
+}
+
+
+def _dcsr_cause_bin(value: int) -> str:
+    cause = (value >> 6) & 0x7
+    name = _DCSR_CAUSE_NAMES.get(cause, "unknown")
+    return f"dcsr_cause_{cause}_{name}"
+
+
+def _classify_fp_value(value: int, width: int) -> str | None:
+    """Return a coarse FP-class bin name for a source-operand sample.
+
+    Coarser than fp_dataset_bin: collapses the 15-bin dataset to 5 bins
+    so the source-class covergroup highlights "did we exercise NaN /
+    Inf / subnormal / zero / normal as inputs to FP ops".
+    """
+    bin_name = _fp_dataset_bin(value, width)
+    if bin_name in ("pos_zero", "neg_zero"):
+        return "src_zero"
+    if bin_name in ("pos_inf", "neg_inf"):
+        return "src_inf"
+    if bin_name in ("qnan", "snan"):
+        return "src_nan"
+    if bin_name in ("pos_subnormal", "neg_subnormal"):
+        return "src_subnormal"
+    if bin_name == "generic":
+        return "src_normal"
+    if bin_name.startswith(("pos_", "neg_")):
+        return "src_normal"  # min/max/one are normals
+    return None
+
+
+# HPM counter / event CSR addresses. mhpmcounter3..31 = 0xB03..0xB1F;
+# mhpmcounter3h..31h = 0xB83..0xB9F (RV32 high halves); mhpmevent3..31 =
+# 0x323..0x33F. We compress per-counter bins to keep the bin count
+# manageable: counter_3..31 + event_3..31, plus aggregate any_hpm.
+def _hpm_csr_bin(csr_name: str) -> str | None:
+    """Return an HPM bin name if the CSR name is a perf-counter, else None."""
+    if csr_name.startswith("MHPMCOUNTER"):
+        return f"counter_{csr_name[len('MHPMCOUNTER'):].lstrip('0') or '0'}"
+    if csr_name.startswith("MHPMEVENT"):
+        return f"event_{csr_name[len('MHPMEVENT'):].lstrip('0') or '0'}"
+    if csr_name in ("MCYCLE", "MCYCLEH"):
+        return "mcycle"
+    if csr_name in ("MINSTRET", "MINSTRETH"):
+        return "minstret"
+    if csr_name in ("CYCLE", "CYCLEH"):
+        return "cycle_user"
+    if csr_name in ("INSTRET", "INSTRETH"):
+        return "instret_user"
+    if csr_name in ("TIME", "TIMEH"):
+        return "time"
+    if csr_name == "MCOUNTINHIBIT":
+        return "mcountinhibit"
+    return None
+
 
 # CSR addresses whose *write* bumps a priv_event bin. Keyed by the
 # canonical CSR name uppercase (matches what CSR_WRITE_IN_COMMIT_RE
@@ -244,6 +437,22 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
     # the value the previous writer left there. Spike's --log-commits
     # doesn't print rs1/rs2 reads — this mimics the behavior.
     gpr_state: dict[str, int] = {}
+    # Sprint-2: virtual FP-register-file tracking — used to classify FP
+    # source operands by IEEE-754 class on the next FP instruction.
+    # Maps fpr name → (value, width_bits).
+    fpr_state: dict[str, tuple[int, int]] = {}
+    # Trap-region tracking — flipped True when we cross a `*trap*` /
+    # `mtvec_handler` / `stvec_handler` label and back to False on
+    # mret/sret. Lets nested-trap detection trigger only inside an
+    # actual handler region.
+    in_trap_region: bool = False
+    # Branch-instruction PC tracker for "loop closure" classification.
+    # When we observe a branch's outcome, we have prev_pc (the branch
+    # site) and the current pc (the target if taken).
+    last_branch_pc: int | None = None
+    # Sprint-2: virtual MSTATUS state — tracks MXR/SUM/MPRV bits so
+    # we can cross-sample with each load/store EA.
+    mstatus_state: dict[str, int] = {"mxr": 0, "sum": 0, "mprv": 0, "tw": 0}
 
     def _bump(cg: str, bn: str) -> None:
         bins = db.setdefault(cg, {})
@@ -266,6 +475,11 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                 # If the label is a known trap handler, count as exception-taken.
                 if "trap" in label or "mtvec" in label or "stvec" in label:
                     _bump(CG_EXCEPTION, "trap_entered")
+                    in_trap_region = True
+                # Returning to one of the boot/main labels after a trap
+                # implies we've left the trap-region.
+                if label in ("main", "h0_start", "init", "test_done"):
+                    in_trap_region = False
                 continue
 
             # Commit-line handling first (has the same prefix but includes
@@ -293,6 +507,59 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                     # exception-vs-interrupt; the rest is a 4..6 bit cause code.
                     if csr in ("MCAUSE", "SCAUSE", "VSCAUSE"):
                         _bump(CG_TRAP_CAUSE, _trap_cause_bin(val, 64))
+                        # Nested-trap detection — a trap-cause write while
+                        # we're still inside a trap-handler label region.
+                        if in_trap_region:
+                            mode_now = "M" if csr == "MCAUSE" else "S"
+                            _bump(CG_NESTED_TRAP,
+                                  f"nested_{mode_now}_in_trap")
+                        else:
+                            _bump(CG_NESTED_TRAP, "no_nesting")
+                        # Sprint-2: virtual-instruction trap (H-ext cause=22).
+                        sign_bit = 1 << 63
+                        if (val & ~sign_bit) == 22 and not (val & sign_bit):
+                            # Look at the instruction that triggered it
+                            # (prev_mnem) to bin the offending op family.
+                            origin = (prev_mnem or "other").lower()
+                            if origin == "wfi":
+                                _bump(CG_VIRT_INSTR_TRAP, "vi_wfi")
+                            elif origin.startswith("sfence"):
+                                _bump(CG_VIRT_INSTR_TRAP, "vi_sfence")
+                            elif origin.startswith("csr"):
+                                _bump(CG_VIRT_INSTR_TRAP, "vi_csr")
+                            else:
+                                _bump(CG_VIRT_INSTR_TRAP, "vi_other")
+                    # Sprint-2: MSTATUS field decode.
+                    if csr in ("MSTATUS", "SSTATUS"):
+                        for bn in _mstatus_field_bins(val):
+                            _bump(CG_MSTATUS_FIELD, f"{csr}__{bn}")
+                        # Track field bits for the MXR×SUM×MPRV cross.
+                        mstatus_state["mxr"] = (val >> 19) & 1
+                        mstatus_state["sum"] = (val >> 18) & 1
+                        mstatus_state["mprv"] = (val >> 17) & 1
+                        mstatus_state["tw"] = (val >> 21) & 1
+                    # Sprint-2: xTVEC mode (DIRECT vs VECTORED).
+                    if csr in ("MTVEC", "STVEC"):
+                        _bump(CG_XTVEC_MODE, _xtvec_mode_bin(csr, val))
+                    # Sprint-2: trap delegation (medeleg / mideleg / hedeleg).
+                    if csr in ("MEDELEG", "MIDELEG", "HEDELEG", "HIDELEG"):
+                        for bn in _delegation_bins(csr, val):
+                            _bump(CG_DELEGATION, bn)
+                    # Sprint-2: MIP / MIE pending bits.
+                    if csr in ("MIP", "MIE", "SIP", "SIE"):
+                        for bn in _mip_field_bins(val):
+                            _bump(CG_MIP_FIELD, f"{csr}__{bn}")
+                    # Sprint-2: MISA letter bits.
+                    if csr == "MISA":
+                        for bn in _misa_letter_bins(val):
+                            _bump(CG_MISA, bn)
+                    # Sprint-2: HPM / counter-CSR access.
+                    hpm_bin = _hpm_csr_bin(csr)
+                    if hpm_bin is not None:
+                        _bump(CG_HPM_ACCESS, hpm_bin)
+                    # Sprint-2: DCSR.cause decode.
+                    if csr == "DCSR":
+                        _bump(CG_DCSR_CAUSE, _dcsr_cause_bin(val))
                 # GPR write-values — classify against the canonical corners,
                 # and also bump the bit-activity covergroup for each set bit
                 # (reveals dead bits — if bit_N_set never appears, no
@@ -309,10 +576,23 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                         bit = (v & -v).bit_length() - 1  # lowest set bit
                         _bump(CG_BIT_ACTIVITY, f"bit_{bit:02d}_set")
                         v &= v - 1
+                    # Sprint-2: walking-ones/-zeros + alternating + leading/
+                    # trailing run-length on every observed GPR write value.
+                    # These are riscv-isac CGF abstract-bin functions.
+                    for bn in _walking_ones_bins(val, xlen=64):
+                        _bump(CG_WALKING_ONES, bn)
+                    for bn in _walking_zeros_bins(val, xlen=64):
+                        _bump(CG_WALKING_ZEROS, bn)
+                    ap = _alternate_bin(val, xlen=64)
+                    if ap is not None:
+                        _bump(CG_ALTERNATE, ap)
+                    for bn in _leading_trailing_bins(val, xlen=64):
+                        _bump(CG_LEAD_TRAIL, bn)
                 # Sprint-1: FPR writes feed the FP-corner-value dataset.
                 # The hex width tells us precision; NaN-boxed singles in
                 # 64-bit FPRs ride as 0xFFFFFFFF<32-bit-single>.
                 for fm in _FPR_WRITE_IN_COMMIT_RE.finditer(writes):
+                    reg = fm.group("reg")
                     raw = fm.group("val")
                     val = int(raw, 16)
                     width = 16 if len(raw) <= 4 else (32 if len(raw) <= 8 else 64)
@@ -321,10 +601,35 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                               _fp_dataset_bin(val & 0xFFFFFFFF, 32))
                     else:
                         _bump(CG_FP_DATASET, _fp_dataset_bin(val, width))
+                    # Cache the FP value for the next FP op's source
+                    # classification.
+                    fpr_state[reg] = (val, width)
                 # Sprint-1: effective-address alignment from "mem 0x..." tokens.
                 for em in _MEM_EA_RE.finditer(writes):
                     addr = int(em.group("addr"), 16)
                     _bump(CG_EA_ALIGN, _ea_align_bin(addr))
+                    # Sprint-2: MXR × SUM × MPRV cross at every memory
+                    # access. Captures whether the test exercised every
+                    # MMU-policy combination per access.
+                    pri_now = _PRI_LEVEL_BIN.get(cm.group("pri"), "unknown")
+                    cross_label = (
+                        f"{pri_now}__"
+                        f"mxr{int(mstatus_state.get('mxr', 0))}__"
+                        f"sum{int(mstatus_state.get('sum', 0))}__"
+                        f"mprv{int(mstatus_state.get('mprv', 0))}"
+                    )
+                    _bump(CG_MXR_SUM_MPRV, cross_label)
+                    # Sprint-2: atomic alignment — when the previous
+                    # mnemonic was an LR/SC/AMO and we now see the EA.
+                    if prev_mnem is not None and prev_mnem.startswith(
+                            ("lr.", "sc.", "amo")):
+                        suffix = "w" if prev_mnem.endswith(".w") else (
+                            "d" if prev_mnem.endswith(".d") else "x")
+                        natural = 4 if suffix == "w" else 8 if suffix == "d" else 1
+                        if natural > 1 and addr % natural != 0:
+                            _bump(CG_ATOMIC_ALIGN, f"misaligned_{suffix}")
+                        else:
+                            _bump(CG_ATOMIC_ALIGN, f"aligned_{suffix}")
                 # Sample the priv level observed on retirement.
                 pri_bin = _PRI_LEVEL_BIN.get(cm.group("pri"))
                 if pri_bin:
@@ -371,22 +676,59 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                 if cls1 is not None and cls2 is not None:
                     _bump("rs_val_class_cross_cg", f"{cls1}__{cls2}")
 
+            # Sprint-2: FP source-operand class. When an FP mnemonic
+            # (other than load) appears, classify the source-FPR's last
+            # known value into one of {nan, inf, subnormal, zero, normal}
+            # and bin one entry per source.
+            if mnem.startswith("f") and not mnem.startswith(("fence", "flw", "fld", "flh")):
+                # Operand tail tokens 2..4 are typically the source FPRs.
+                tail = m.group("tail") or ""
+                fp_tokens = re.findall(r"\bf[ast]?\d+\b|\bf[t-z]\d+\b|\bf\d+\b",
+                                       tail)
+                for tok in fp_tokens[1:4]:  # skip the dest fp register
+                    state = fpr_state.get(tok)
+                    if state is None:
+                        continue
+                    fval, width = state
+                    cls = _classify_fp_value(fval, width)
+                    if cls is not None:
+                        _bump(CG_FP_SRC_CLASS, cls)
+
             # Branch direction — the *previous* instruction was the branch;
             # now that we see this PC, we know whether the branch was taken.
             if prev_was_branch and prev_pc is not None and prev_mnem is not None:
                 expected_fall_through = prev_pc + prev_bin_bytes
-                if pc == expected_fall_through:
-                    _bump(CG_BRANCH_DIR, "not_taken")
-                    _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__NT")
-                    branch_history.append("N")
-                else:
+                taken = pc != expected_fall_through
+                if taken:
                     _bump(CG_BRANCH_DIR, "taken")
                     _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__T")
                     branch_history.append("T")
+                else:
+                    _bump(CG_BRANCH_DIR, "not_taken")
+                    _bump(CG_BR_PER_MNEM, f"{prev_mnem.upper()}__NT")
+                    branch_history.append("N")
                 branches += 1
                 if len(branch_history) >= 3:
                     pattern = "".join(list(branch_history)[-3:])
                     _bump("branch_pattern_cg", pattern)
+                # Sprint-2: 4-gram pattern.
+                if len(branch_history) >= 4:
+                    pat4 = "".join(list(branch_history)[-4:])
+                    _bump(CG_BRANCH_PATTERN4, pat4)
+                # Sprint-2: branch loop / skip classification.
+                # fwd vs bwd is determined by the actual taken offset
+                # (taken=True branches always have a delta != 0 from
+                # fall-through PC; not-taken branches do too in spec
+                # terms, but micro-arch-wise the prediction depends on
+                # the *encoded* offset's direction). Use the delta if
+                # taken, the encoded offset if not — but not_taken
+                # branches don't reveal their offset here, so we only
+                # bin direction for taken branches.
+                if taken:
+                    direction = "fwd" if pc > prev_pc else "bwd"
+                    _bump(CG_BRANCH_LOOP, f"{direction}_taken")
+                else:
+                    _bump(CG_BRANCH_LOOP, "fall_through")
 
             prev_pc = pc
             prev_bin_bytes = bin_bytes
@@ -396,6 +738,19 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
             # Privilege-mode transition.
             if mnem in _PRIV_MNEMS:
                 _bump(CG_PRIV_MODE, _PRIV_MNEMS[mnem])
+                # Leaving trap context — the handler is mret/sret-ing.
+                in_trap_region = False
+
+            # Sprint-2: WFI corner — sampled when the wfi mnemonic
+            # is retired. Crosses with the current priv level + the TW
+            # bit of MSTATUS we last saw (proxy for "did the test exercise
+            # the trap-on-WFI semantic for non-M priv?").
+            if mnem == "wfi":
+                # We don't have priv level on plain trace lines; the
+                # commit line alongside the WFI carries it. Approximate
+                # by the most recent priv level seen on a commit line.
+                tw_bit = mstatus_state.get("tw", 0)
+                _bump(CG_WFI_CORNER, f"wfi_tw{int(tw_bit)}")
 
             # Privileged-event sampling — count each occurrence of mret /
             # sret / sfence / cbo.* / etc. independent of the priv mode
