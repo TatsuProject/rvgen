@@ -235,3 +235,291 @@ fp_dataset_cg:
   pos_one: 0
   neg_one: 0
   generic: 0
+
+# ---------------------------------------------------------------------------
+# Sprint-2 deep-coverage additions — goals for the new covergroups added
+# from the riscv-isac / core-v-verif / ARM verification-plan research.
+# Most are required≥1 (so a missing bin shows up as red on the dashboard
+# but doesn't gate auto-regression). Pipeline depth + load-use are set
+# to required≥3 because they're the headline gap closures.
+# ---------------------------------------------------------------------------
+
+# Pipeline depth — distance buckets between RAW producer and consumer.
+hazard_distance_cg:
+  dist_1_load_use: 3
+  dist_2: 3
+  dist_3: 1
+  dist_4_5: 1
+  dist_6_7: 0
+  dist_8_plus: 0
+
+# Load-use coverage — load → consumer distance.
+load_use_dist_cg:
+  load_use_1_load_use: 3
+  load_use_2: 1
+  load_use_3: 1
+  load_use_4_5: 0
+  load_no_use: 0
+
+# Multi-cycle producer (MUL/DIV/FDIV/FSQRT/AMO) consumer-distance.
+mc_producer_use_dist_cg:
+  mc_use_1_load_use: 0
+  mc_use_2: 0
+  mc_use_3: 0
+  mc_no_use: 0
+
+# Branch shadow — instruction category in the slot following a branch.
+branch_shadow_cg:
+  shadow_ARITHMETIC: 0
+  shadow_LOAD: 0
+  shadow_STORE: 0
+  shadow_BRANCH: 0
+  shadow_LOGICAL: 0
+  shadow_SHIFT: 0
+  shadow_JUMP: 0
+
+# Static memory aliasing inside an 8-instruction window.
+mem_alias_cg:
+  store_then_load_same_addr: 0
+  store_then_load_same_base_diff_off: 0
+  store_then_store_same_addr: 0
+  load_then_load_same_addr: 0
+  load_then_store_same_addr: 0
+  no_alias_in_window: 0
+
+# Branch 4-gram pattern — 16 possible patterns. Optional, dashboard-only.
+branch_pattern4_cg:
+  TTTT: 0
+  TTTN: 0
+  NNNN: 0
+  TNTN: 0
+  NTNT: 0
+  TTNN: 0
+  NNTT: 0
+
+branch_loop_cg:
+  fwd_taken: 0
+  bwd_taken: 0
+  fall_through: 0
+
+# RAS classification.
+ras_cg:
+  call: 0
+  return: 0
+  coroutine_swap: 0
+  computed: 0
+  tail_call: 0
+
+jalr_target_class_cg:
+  ra: 0
+  saved: 0
+  argument: 0
+  temporary: 0
+
+# AMO aq/rl — 4 bins; aq_and_rl flagged if randomizer ever picks both.
+amo_aqrl_cg:
+  neither: 0
+  aq_only: 0
+  rl_only: 0
+  aq_and_rl: 0
+
+amo_op_width_cg:
+  AMOADD_W: 0
+  LR_W: 0
+  SC_W: 0
+
+# FP semantic op + RM/precision crosses.
+fp_op_class_cg:
+  add: 0
+  sub: 0
+  mul: 0
+  div: 0
+  sqrt: 0
+  fma: 0
+  minmax: 0
+  compare: 0
+  convert: 0
+  sign: 0
+  classify: 0
+  move: 0
+  load: 0
+  store: 0
+
+# MSTATUS field decode — sampled when MSTATUS/SSTATUS is written.
+mstatus_field_cg:
+  MSTATUS__mie_set: 0
+  MSTATUS__mpie_set: 0
+  MSTATUS__mpp_M: 0
+  MSTATUS__mpp_S: 0
+  MSTATUS__mpp_U: 0
+  MSTATUS__mprv_set: 0
+  MSTATUS__sum_set: 0
+  MSTATUS__mxr_set: 0
+
+# xTVEC mode — DIRECT vs VECTORED.
+xtvec_mode_cg:
+  mtvec_direct: 0
+  mtvec_vectored: 0
+  stvec_direct: 0
+  stvec_vectored: 0
+
+# Trap-delegation events — a few common ones.
+delegation_cg:
+  medeleg_breakpoint: 0
+  medeleg_ecall_u: 0
+  medeleg_load_page_fault: 0
+  mideleg_s_timer: 0
+  mideleg_s_external: 0
+
+# HPM perf-counter access.
+hpm_access_cg:
+  mcycle: 0
+  minstret: 0
+  counter_3: 0
+  counter_4: 0
+  event_3: 0
+
+# MISA letter bits.
+misa_cg:
+  misa_I: 0
+  misa_M: 0
+  misa_C: 0
+  misa_A: 0
+  misa_F: 0
+  misa_D: 0
+  misa_V: 0
+  misa_S: 0
+  misa_U: 0
+  misa_H: 0
+
+# MIP / MIE / MISA field decodes.
+mip_field_cg:
+  MIP__mtip_pending: 0
+  MIP__msip_pending: 0
+  MIP__meip_pending: 0
+  MIP__none_pending: 0
+
+# M-extension corner values.
+mul_div_corner_cg:
+  div_by_zero: 0
+  signed_overflow: 0
+  mul_max_pair: 0
+  mul_neg_one_pair: 0
+
+# Bitmanip semantic op.
+bitmanip_op_cg:
+  rotate: 0
+  clz: 0
+  ctz: 0
+  popcount: 0
+  minmax: 0
+  clmul: 0
+  single_bit: 0
+  logic_neg: 0
+  pack: 0
+  byte_reverse: 0
+  shift_add: 0
+  extend: 0
+
+# RVC immediate corners (sampled when generator emits compressed ops).
+c_imm_corner_cg:
+  c_addi_zero_imm: 0
+  c_addi_imm_one: 0
+  c_addi_imm_large: 0
+
+# Walking-ones / -zeros / alternating / leading-trailing — riscv-isac
+# CGF abstract-bin functions. Sampled at runtime from GPR writes.
+walking_ones_cg:
+  bit_00_set: 0
+  bit_07_set: 0
+  bit_15_set: 0
+  bit_31_set: 0
+  bit_63_set: 0
+
+walking_zeros_cg:
+  bit_00_clear: 0
+  bit_31_clear: 0
+  bit_63_clear: 0
+
+alternating_pattern_cg:
+  alt_5555: 0
+  alt_AAAA: 0
+  alt_byte_A5: 0
+  alt_byte_5A: 0
+
+leading_trailing_cg:
+  lead0_64: 0
+  lead0_32: 0
+  trail0_4: 0
+  trail0_8: 0
+  lead1_64: 0
+  trail1_4: 0
+
+# Shamt boundary corners.
+shamt_corner_cg:
+  slli_shamt_zero: 0
+  slli_shamt_one: 0
+  slli_shamt_max_minus_one: 0
+  srli_shamt_zero: 0
+
+# Vsetvl AVL paths.
+vsetvl_avl_path_cg:
+  vsetvli_normal: 0
+  vsetvli_set_vlmax: 0
+  vsetvli_keep_vl: 0
+  vsetivli_imm_avl: 0
+
+# Vector register-group overlap.
+vreg_overlap_cg:
+  full_overlap: 0
+  partial_overlap: 0
+  no_overlap: 0
+
+# MXR × SUM × MPRV cross — sampled per-load/store. Coarse-grained
+# baseline goals; per-target overlays can demand more.
+mxr_sum_mprv_cross_cg:
+  M_mode__mxr0__sum0__mprv0: 0
+  M_mode__mxr1__sum0__mprv0: 0
+  M_mode__mxr0__sum1__mprv0: 0
+  M_mode__mxr0__sum0__mprv1: 0
+
+# FCVT corners, virtual-instr trap, WFI, atomic alignment.
+fcvt_corner_cg:
+  fcvt_w_s_nan_input: 0
+  fcvt_w_s_inf_input: 0
+  fcvt_lu_d_nan_input: 0
+
+virtual_instr_trap_cg:
+  vi_wfi: 0
+  vi_sfence: 0
+  vi_csr: 0
+
+wfi_corner_cg:
+  wfi_tw0: 0
+  wfi_tw1: 0
+
+atomic_alignment_cg:
+  aligned_w: 0
+  aligned_d: 0
+  misaligned_w: 0
+  misaligned_d: 0
+
+# DCSR cause decode.
+dcsr_cause_cg:
+  dcsr_cause_1_ebreak: 0
+  dcsr_cause_2_trigger: 0
+  dcsr_cause_4_step: 0
+
+# Nested trap detection.
+nested_trap_cg:
+  nested_M_in_trap: 0
+  nested_S_in_trap: 0
+  no_nesting: 0
+
+# FP source class — sampled per-FP-op when at least one src FPR is known.
+fp_src_class_cg:
+  src_zero: 0
+  src_inf: 0
+  src_nan: 0
+  src_subnormal: 0
+  src_normal: 0

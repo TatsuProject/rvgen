@@ -61,6 +61,64 @@ Zihint*, Zimop, Zcmop). Tag + PyPI publish ride a future commit.
   MOP_*, C_MOP_*) appear in the seed list so generated goals cover
   them out of the box.
 
+### Added — Sprint-2 deep-coverage gap closure (~40 new covergroups)
+
+A head-of-verification gap analysis vs riscv-isac CGF, riscvISACOV,
+core-v-verif #575, ARM/Imperas DV plans, and the LLVM-RVV gap notes
+surfaced ~40 covergroups industry tools track that rvgen did not.
+All are now wired into `collectors.py` + `runtime.py`, sampled
+per-instruction and per-spike-trace, with goals in `baseline.yaml`
+and dashboard subsystem mappings:
+
+- **Pipeline depth** — `hazard_distance_cg` (RAW producer-consumer
+  cycle distance bins 1..8+), `load_use_dist_cg`, `mc_producer_use_dist_cg`
+  (multi-cycle MUL/DIV/FDIV/AMO), `branch_shadow_cg` (category in the
+  slot following a branch), `mem_alias_cg` (static store-load aliasing
+  in 8-instr window). Closes Tier-1 task #1.
+- **Branch prediction** — `branch_pattern4_cg` (4-gram T/N pattern),
+  `branch_loop_cg` (fwd/bwd × taken/fall_through), `ras_cg` (call /
+  return / coroutine_swap / computed / tail_call from JAL/JALR rd/rs1),
+  `jalr_target_class_cg` (ABI class of indirect target).
+- **Atomics ordering** — `amo_aqrl_cg` (4 bins), `amo_op_width_cg`,
+  `amo_op_aqrl_cross_cg`, `atomic_alignment_cg` (runtime EA alignment
+  per LR/SC/AMO).
+- **FP semantic** — `fp_op_class_cg` (13 op families), `fp_rm_op_cross_cg`,
+  `fp_precision_op_cross_cg` (H/S/D), `fp_src_class_cg` (runtime nan/
+  inf/subnormal/zero/normal source class), `fcvt_corner_cg` (saturation
+  corners NaN→max+1 etc.).
+- **Vector** — `vsetvl_avl_path_cg` (normal / set_vlmax / keep_vl /
+  vsetivli), `vreg_overlap_cg` (full / partial / no-overlap with EMUL).
+- **Privileged depth** — `mstatus_field_cg` (MIE/MPIE/MPP/MPRV/SUM/MXR/
+  TVM/TW/TSR/FS/VS bit-level decode), `xtvec_mode_cg` (DIRECT/VECTORED),
+  `delegation_cg` (per-cause medeleg/mideleg bit decode), `hpm_access_cg`
+  (mhpmcounterN/mhpmeventN/mcycle/minstret), `misa_cg` (per-letter
+  bits set), `mip_field_cg` (per-bit pending decode),
+  `mxr_sum_mprv_cross_cg` (MMU policy cross at every load/store —
+  catches "supervisor accesses user-page" corner #1 cause of broken
+  ships), `virtual_instr_trap_cg` (H-ext cause=22), `wfi_corner_cg`
+  (WFI × MSTATUS.TW), `nested_trap_cg` (trap during trap handler),
+  `dcsr_cause_cg` (Debug spec §A.4 cause field).
+- **Corner values** — `mul_div_corner_cg` (div_by_zero, signed_overflow,
+  mul_max_pair, mul_neg_one_pair), `shamt_corner_cg` (shamt 0/1/XLEN-1/
+  XLEN), `bitmanip_op_cg` (12 semantic op classes for B-ext),
+  `c_imm_corner_cg` (RVC zero/one/large imm corners), `op_comb_cg`
+  extensions (sp/ra/gp/zero usage as src/dst).
+- **Abstract bins (riscv-isac CGF compatibility)** —
+  `walking_ones_cg` / `walking_zeros_cg` (per-bit-position
+  set/clear coverage), `alternating_pattern_cg` (5555/AAAA/byte_A5/
+  byte_5A), `leading_trailing_cg` (run-length buckets for clz/ctz/
+  cpop coverage). All sampled at runtime from every observed GPR
+  write — adds dozens of bins per seed via the existing online-steering
+  machinery.
+
+Test count: 949 → 982 unit tests passing (+136 in
+`tests/unit/test_coverage_sprint2.py`). Total covergroups: 78 → 116.
+Canonical regression sweep (21/21 phase-A scalar combos) green on
+Spike. The four headline-gap covergroups
+(`hazard_distance_cg`, `load_use_dist_cg`, `mc_producer_use_dist_cg`,
+`branch_shadow_cg`) directly close Tier-1 task #1 from §0.5
+"Next-up queue".
+
 ### Verified
 
 - 490 / 490 unit tests pass.

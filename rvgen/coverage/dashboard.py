@@ -898,36 +898,57 @@ def _classify_cg_to_subsys(cg_name: str) -> str:
     if reused elsewhere). When in doubt, returns ``"Misc"``.
     """
     n = cg_name.lower()
-    if n.startswith("vec_") or n in ("vtype_cg", "vtype_dyn_cg", "vreg_cg"):
+    # Vector — first since "vec_" prefix is unambiguous.
+    if (n.startswith("vec_") or n in ("vtype_cg", "vtype_dyn_cg", "vreg_cg",
+                                       "vsetvl_avl_path_cg", "vreg_overlap_cg")):
         return "Vector"
-    if n.startswith("fp_") or n in ("fp_rm_cg", "fpr_cg", "fp_dataset_cg",
-                                     "fp_fflags_cg"):
+    # Floating-point — fp_ / fcvt_ prefixes plus fpr/fp_rm.
+    if (n.startswith("fp_") or n.startswith("fcvt_")
+            or n in ("fp_rm_cg", "fpr_cg", "fp_dataset_cg", "fp_fflags_cg",
+                     "fp_op_class_cg", "fp_rm_op_cross_cg",
+                     "fp_precision_op_cross_cg", "fp_src_class_cg",
+                     "fcvt_corner_cg")):
         return "Floating point"
-    if n.startswith("csr_") or n in ("priv_event_cg", "privilege_mode_cg",
-                                      "exception_cg", "trap_cause_cg",
-                                      "pmp_cfg_cg"):
+    # Privileged — csr_/priv_/mstatus/xtvec/etc.
+    if (n.startswith(("csr_", "mstatus_", "xtvec_"))
+            or n in ("priv_event_cg", "privilege_mode_cg",
+                     "exception_cg", "trap_cause_cg",
+                     "pmp_cfg_cg", "delegation_cg",
+                     "hpm_access_cg", "misa_cg",
+                     "mip_field_cg", "mxr_sum_mprv_cross_cg",
+                     "virtual_instr_trap_cg", "wfi_corner_cg",
+                     "nested_trap_cg")):
         return "Privileged"
+    if n == "dcsr_cause_cg":
+        return "Debug"
     if n in ("modern_ext_cg",):
         return "Modern checkbox"
     if n == "fence_cg":
         return "Memory ordering"
-    if n == "lr_sc_pattern_cg":
+    if (n in ("lr_sc_pattern_cg", "amo_aqrl_cg", "amo_op_width_cg",
+              "amo_op_aqrl_cross_cg", "atomic_alignment_cg")):
         return "Atomics"
-    if n.startswith("branch_") or n == "branch_direction_cg":
+    if (n.startswith("branch_") or n == "branch_direction_cg"
+            or n in ("ras_cg", "jalr_target_class_cg")):
         return "Control flow"
     if n in ("load_store_width_cg", "load_store_offset_cg",
              "mem_align_cg", "ea_align_cg",
-             "cache_line_cross_cg", "page_cross_cg"):
+             "cache_line_cross_cg", "page_cross_cg",
+             "mem_alias_cg"):
         return "Memory access"
     if n in ("hazard_cg", "category_transition_cg",
-             "opcode_transition_cg"):
+             "opcode_transition_cg",
+             "hazard_distance_cg", "load_use_dist_cg",
+             "mc_producer_use_dist_cg", "branch_shadow_cg"):
         return "Pipeline"
     if n in ("rs1_cg", "rs2_cg", "rd_cg", "rs1_eq_rs2_cg", "rs1_eq_rd_cg",
              "rs1_rs2_cross_cg", "rd_rs1_cross_cg", "op_comb_cg"):
         return "Reg-file"
     if n in ("rs1_val_class_cg", "rs2_val_class_cg", "rd_val_class_cg",
              "rs_val_class_cross_cg", "rs_val_corner_cg",
-             "bit_activity_cg"):
+             "bit_activity_cg",
+             "walking_ones_cg", "walking_zeros_cg",
+             "alternating_pattern_cg", "leading_trailing_cg"):
         return "Value class"
     if n in ("imm_sign_cg", "imm_range_cg"):
         return "Immediates"
@@ -937,8 +958,12 @@ def _classify_cg_to_subsys(cg_name: str) -> str:
         return "Reachability"
     if n == "multi_hart_race_cg":
         return "Multi-hart"
-    if n == "csr_read_cg":
-        return "Privileged"
+    if n == "mul_div_corner_cg":
+        return "RV32M+RV64M"
+    if n == "bitmanip_op_cg" or n == "shamt_corner_cg":
+        return "Bitmanip"
+    if n == "c_imm_corner_cg" or n == "rvc_illegal_corner_cg":
+        return "Compressed"
     if n in ("opcode_cg", "format_cg", "category_cg", "group_cg",
              "fmt_category_cross", "category_group_cross"):
         return "Instruction mix"

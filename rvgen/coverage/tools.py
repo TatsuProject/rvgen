@@ -1555,6 +1555,64 @@ _GROUP_TO_SUBSYS: dict[str, str] = {
     "format_cg": "Misc", "category_cg": "Misc", "group_cg": "Misc",
     "fmt_category_cross": "Misc", "category_group_cross": "Misc",
     "opcode_cg": None,  # multi-subsystem; bin-by-bin classification.
+    # Sprint-2 — pipeline depth / micro-arch.
+    "hazard_distance_cg": "Pipeline",
+    "load_use_dist_cg": "Pipeline",
+    "mc_producer_use_dist_cg": "Pipeline",
+    "branch_shadow_cg": "Pipeline",
+    "mem_alias_cg": "Memory access",
+    # Sprint-2 — branch prediction / control flow.
+    "branch_pattern4_cg": "Control flow",
+    "branch_loop_cg": "Control flow",
+    "ras_cg": "Control flow",
+    "jalr_target_class_cg": "Control flow",
+    # Sprint-2 — atomics ordering.
+    "amo_aqrl_cg": "Atomics",
+    "amo_op_width_cg": "Atomics",
+    "amo_op_aqrl_cross_cg": "Atomics",
+    "atomic_alignment_cg": "Atomics",
+    # Sprint-2 — FP semantic.
+    "fp_op_class_cg": "Floating point",
+    "fp_rm_op_cross_cg": "Floating point",
+    "fp_precision_op_cross_cg": "Floating point",
+    "fp_src_class_cg": "Floating point",
+    "fp_dataset_cg": "Floating point",
+    "fp_fflags_cg": "Floating point",
+    "fcvt_corner_cg": "Floating point",
+    # Sprint-2 — vector.
+    "vec_avl_corner_cg": "Vector",
+    "vec_tail_mask_policy_cg": "Vector",
+    "vec_vsetvl_flavor_cg": "Vector",
+    "vsetvl_avl_path_cg": "Vector",
+    "vreg_overlap_cg": "Vector",
+    # Sprint-2 — privileged.
+    "mstatus_field_cg": "Privileged",
+    "xtvec_mode_cg": "Privileged",
+    "delegation_cg": "Privileged",
+    "hpm_access_cg": "Privileged",
+    "misa_cg": "Privileged",
+    "mip_field_cg": "Privileged",
+    "mxr_sum_mprv_cross_cg": "Privileged",
+    "virtual_instr_trap_cg": "Privileged",
+    "wfi_corner_cg": "Privileged",
+    "nested_trap_cg": "Privileged",
+    "trap_cause_cg": "Privileged",
+    "ea_align_cg": "Memory access",
+    "csr_read_cg": "Privileged",
+    # Sprint-2 — corner-value bins.
+    "mul_div_corner_cg": "RV32M+RV64M",
+    "shamt_corner_cg": "Bitmanip",
+    "bitmanip_op_cg": "Bitmanip",
+    "c_imm_corner_cg": "Compressed",
+    "rvc_illegal_corner_cg": "Compressed",
+    "op_comb_cg": "Reg-file",
+    # Sprint-2 — abstract bins.
+    "walking_ones_cg": "Value class",
+    "walking_zeros_cg": "Value class",
+    "alternating_pattern_cg": "Value class",
+    "leading_trailing_cg": "Value class",
+    # Sprint-2 — debug.
+    "dcsr_cause_cg": "Debug",
 }
 
 
