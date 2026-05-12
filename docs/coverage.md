@@ -492,11 +492,11 @@ injects `riscv_jal_instr` when the bin is missing.
 ### Example 2 — Layered overlays for rv64gcv
 
 ```bash
-python -m rvgen --target rv64gcv \
-    --test riscv_rand_instr_test \
-    --testlist /path/to/riscv-dv/target/rv64imc/testlist.yaml \
-    --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
-    --output out/ex2 --start_seed 100
+rvgen --target rv64gcv \
+      --test riscv_rand_instr_test \
+      --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
+      --output out/ex2 --start_seed 100
+# --testlist omitted → uses the packaged baseline shipped with rvgen
 # --cov_goals omitted → auto-resolves baseline.yaml + rv64gcv.yaml
 ```
 

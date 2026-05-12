@@ -58,24 +58,27 @@ so you can point our CLI directly at riscv-dv's existing testlists.
 ## Running
 
 ```bash
-# Point at your testlist
-python -m rvgen \
-    --target rv32imc --test my_custom_test \
-    --testlist my_testlist.yaml \
-    --steps gen,gcc_compile,iss_sim,cov --iss spike \
-    --output out/ -i 4 --start_seed 100
+# Use the testlist that ships inside the rvgen wheel (no flag needed).
+rvgen --target rv32imc --test riscv_arithmetic_basic_test \
+      --steps gen --output out/
 
-# Or use riscv-dv's bundled testlist (default fallback)
-python -m rvgen \
-    --target rv32imc --test riscv_arithmetic_basic_test \
-    --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
-    --steps gen --output out/
+# Or point at your own testlist
+rvgen --target rv32imc --test my_custom_test \
+      --testlist my_testlist.yaml \
+      --steps gen,gcc_compile,iss_sim,cov --iss spike \
+      --output out/ -i 4 --start_seed 100
 ```
 
-When you omit `--testlist`, the CLI looks up
-`<riscv_dv_root>/target/<target>/testlist.yaml` where `<riscv_dv_root>`
-defaults to `~/Desktop/verif_env_tatsu/riscv-dv` (override via
-`--riscv_dv_root`).
+When you omit `--testlist`, the CLI walks this fallback chain:
+
+1. `<user_dir>/testlists/<target>.yaml` — set `$RVGEN_USER_DIR` or pass `--user_dir`.
+2. `<user_dir>/testlists/base_testlist.yaml`.
+3. `<riscv_dv_root>/target/<target>/testlist.yaml` — `--riscv_dv_root <path>`.
+4. `<riscv_dv_root>/yaml/base_testlist.yaml`.
+5. **`rvgen/testlists/base_testlist.yaml` — packaged inside the wheel.**
+
+The last entry is always present, so `pip install rvgen` is self-contained
+— you only need a custom testlist if you want non-default plusargs.
 
 ## gen_opts plusargs
 

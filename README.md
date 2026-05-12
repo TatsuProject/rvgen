@@ -192,32 +192,34 @@ Toolchain setup guides: [SiFive freedom-tools](https://github.com/sifive/freedom
 
 ## Quick start — 30 seconds
 
-Just generate an assembly file (skip GCC and spike):
+Just generate an assembly file (skip GCC and spike). **No external riscv-dv checkout
+needed — rvgen ships a baseline testlist inside the wheel.**
 
 ```bash
-python -m rvgen \
-    --target rv32imc --test riscv_arithmetic_basic_test \
-    --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
-    --steps gen --output out/ --start_seed 100 -i 1
+pip install rvgen   # or: pipx install rvgen
+
+rvgen --target rv32imc --test riscv_arithmetic_basic_test \
+      --steps gen --output out/ --start_seed 100 -i 1
 ```
 
 Output: `out/asm_test/riscv_arithmetic_basic_test_0.S`. Inspect it, assemble it with your own toolchain, run it where you want.
+
+> Want custom plusargs / per-target tests? Drop a YAML at `<user_dir>/testlists/<target>.yaml` (set `$RVGEN_USER_DIR`) or pass `--testlist <your.yaml>`. Otherwise the packaged baseline is used automatically.
 
 ---
 
 ## Quick start — with coverage (2 minutes)
 
-End-to-end: generate → assemble → simulate → collect static + runtime coverage:
+End-to-end: generate → assemble → simulate → collect static + runtime coverage. The two env vars below point at *your* toolchain — substitute real paths (e.g. `/opt/riscv/bin/riscv64-unknown-elf-gcc`, `/usr/local/bin/spike`). Skip them if the binaries are already on `$PATH`.
 
 ```bash
-export RISCV_GCC=/path/to/riscv64-unknown-elf-gcc
-export SPIKE_PATH=/path/to/spike
+# Optional: only needed if the binaries aren't already on $PATH.
+export RISCV_GCC=$(which riscv64-unknown-elf-gcc)
+export SPIKE_PATH=$(which spike)
 
-python -m rvgen \
-    --target rv32imc --test riscv_rand_instr_test \
-    --testlist /path/to/riscv-dv/target/rv32imc/testlist.yaml \
-    --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
-    --output out/ --start_seed 100 -i 1
+rvgen --target rv32imc --test riscv_rand_instr_test \
+      --steps gen,gcc_compile,iss_sim,cov --iss spike --iss_trace \
+      --output out/ --start_seed 100 -i 1
 ```
 
 Open the report:

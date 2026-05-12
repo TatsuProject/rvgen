@@ -13,8 +13,11 @@ to gate a RISC-V core's sign-off on functional coverage.
 
 ```bash
 pip install -e .                       # install rvgen in-place
-export RISCV_GCC=/path/to/riscv64-unknown-elf-gcc
-export SPIKE_PATH=/path/to/spike       # or spike-vector for RVV
+
+# Only needed if the toolchain isn't already on $PATH. Substitute real
+# paths for your install (e.g. /opt/riscv/bin/riscv64-unknown-elf-gcc).
+export RISCV_GCC=$(which riscv64-unknown-elf-gcc)
+export SPIKE_PATH=$(which spike)       # or spike-vector for RVV
 ```
 
 ---
