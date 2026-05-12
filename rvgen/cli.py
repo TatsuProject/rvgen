@@ -61,8 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--help_targets", action="store_true",
                    help="List every known target (built-in + user area) and exit.")
     p.add_argument("-tl", "--testlist", default="",
-                   help="Path to a regression testlist YAML. "
-                        "Defaults to <riscv_dv_root>/target/<target>/testlist.yaml.")
+                   help="Path to a regression testlist YAML. Optional — if "
+                        "omitted, rvgen falls back to the user-area testlist, "
+                        "then <riscv_dv_root>/target/<target>/testlist.yaml, "
+                        "and finally to the packaged baseline shipped inside "
+                        "rvgen itself (so `pip install rvgen` is self-contained).")
     p.add_argument("-tn", "--test", default="all",
                    help="Comma-separated test names, or 'all'.")
     p.add_argument("-i", "--iterations", type=int, default=0,
@@ -174,6 +177,9 @@ def _infer_testlist_path(target: str, riscv_dv_root: Path) -> Path:
       2. ``<user_dir>/testlists/base_testlist.yaml`` — shared user baseline.
       3. ``<riscv_dv_root>/target/<target>/testlist.yaml`` — riscv-dv default.
       4. ``<riscv_dv_root>/yaml/base_testlist.yaml`` — riscv-dv common base.
+      5. Packaged builtin ``rvgen/testlists/base_testlist.yaml`` — ships
+         inside the rvgen wheel so ``pip install rvgen`` works without
+         needing an external riscv-dv clone.
     """
     user_dir = resolve_user_dir()
     if user_dir is not None:
@@ -186,7 +192,11 @@ def _infer_testlist_path(target: str, riscv_dv_root: Path) -> Path:
     rd_per_target = riscv_dv_root / "target" / target / "testlist.yaml"
     if rd_per_target.exists():
         return rd_per_target
-    return riscv_dv_root / "yaml" / "base_testlist.yaml"
+    rd_base = riscv_dv_root / "yaml" / "base_testlist.yaml"
+    if rd_base.exists():
+        return rd_base
+    # Final fallback — the testlist shipped inside the rvgen package.
+    return Path(__file__).parent / "testlists" / "base_testlist.yaml"
 
 
 def _infer_output(out: str) -> Path:
@@ -226,7 +236,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     riscv_dv_root = Path(args.riscv_dv_root)
-    if not riscv_dv_root.exists():
+    # Only warn when the *user explicitly* asked for a non-default
+    # riscv-dv root that doesn't exist. Silent fallthrough is correct
+    # when the user is just relying on the packaged testlist — they
+    # don't need riscv-dv installed at all.
+    if not riscv_dv_root.exists() and args.riscv_dv_root != str(_DEFAULT_RISCV_DV_ROOT):
         _LOG.warning("riscv_dv_root %s does not exist; testlist imports may fail", riscv_dv_root)
 
     # Resolve the target. --target_config wins if given; otherwise
@@ -239,6 +253,20 @@ def main(argv: list[str] | None = None) -> int:
     args.target = target_cfg.name
 
     testlist_path = Path(args.testlist) if args.testlist else _infer_testlist_path(args.target, riscv_dv_root)
+    # Up-front check so the user sees a useful hint instead of a raw
+    # FileNotFoundError deep inside load_testlist.
+    if not testlist_path.exists():
+        builtin = Path(__file__).parent / "testlists" / "base_testlist.yaml"
+        _LOG.error("Testlist YAML not found: %s", testlist_path)
+        if args.testlist:
+            _LOG.error("You passed --testlist %r explicitly. Either fix the path, "
+                       "or omit the flag entirely — rvgen ships a baseline testlist "
+                       "at %s.", args.testlist, builtin)
+        else:
+            _LOG.error("rvgen tried to auto-resolve a testlist but none of the "
+                       "fallback locations exist. Pass --testlist <path> or set "
+                       "$RVGEN_USER_DIR to a directory containing testlists/.")
+        return 1
     output_dir = _infer_output(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     asm_dir = output_dir / "asm_test"

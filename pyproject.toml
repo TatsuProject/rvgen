@@ -74,6 +74,7 @@ exclude = ["tests*", "research*", "scripts*", "docs*"]
 [tool.setuptools.package-data]
 "rvgen" = [
     "coverage/goals/*.yaml",
+    "testlists/*.yaml",
 ]
 
 [tool.pytest.ini_options]
