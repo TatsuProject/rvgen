@@ -222,16 +222,17 @@ rvgen --target rv32imc --test riscv_rand_instr_test \
       --output out/ --start_seed 100 -i 1
 ```
 
-Open the report:
+Open the report. The `cov` step writes three artifacts:
+
+| File | Description |
+|------|------|
+| `out/coverage_dashboard.html` | **SOTA Codecov-style sunburst dashboard** — per-subsystem scorecard, drill-into-covergroup, missing-bins ranking, light/dark themes. The headline view. |
+| `out/coverage_report.txt` | Terminal-friendly text report. |
+| `out/coverage.json` | Raw coverage DB — feeds merge / diff / dashboard / scorecard tools. |
 
 ```bash
-# text (terminal-friendly)
-less out/coverage_report.txt
-
-# or self-contained HTML
-python -m rvgen.coverage.tools export out/coverage.json \
-    --html out/coverage.html
-xdg-open out/coverage.html
+xdg-open out/coverage_dashboard.html   # the main view
+less out/coverage_report.txt           # text fallback
 ```
 
 See **[`docs/verification-guide.md`](docs/verification-guide.md)** for the complete tutorial.

@@ -488,6 +488,54 @@ def main(argv: list[str] | None = None) -> int:
         report_path.write_text(report + "\n")
         _LOG.info("Coverage report: %s", report_path)
 
+        # The HTML dashboard is the moat feature — codecov-style sunburst
+        # + per-subsystem scorecard + per-covergroup drill-in. Auto-emit
+        # it alongside the text report so the user doesn't need to know
+        # about a separate `coverage.tools dashboard` invocation.
+        try:
+            from rvgen.coverage.dashboard import write_dashboard
+            from rvgen.coverage.tools import _subsys_for_bin
+            # Build a per-subsystem scorecard so the dashboard's bar
+            # chart matches `coverage.tools scorecard` output.
+            scorecard = None
+            if goals:
+                by_subsys: dict[str, dict[str, int]] = {}
+                for cg, bin_goals in goals.data.items():
+                    observed = existing.get(cg, {})
+                    for bn, required in bin_goals.items():
+                        if required <= 0:
+                            continue
+                        subsys = _subsys_for_bin(cg, bn)
+                        slot = by_subsys.setdefault(subsys, {
+                            "required": 0, "met": 0, "missing": 0, "extra": 0,
+                        })
+                        slot["required"] += 1
+                        if observed.get(bn, 0) >= required:
+                            slot["met"] += 1
+                        else:
+                            slot["missing"] += 1
+                scorecard = [
+                    {
+                        "subsystem": s,
+                        "required": d["required"],
+                        "met": d["met"],
+                        "missing": d["missing"],
+                        "extra": d["extra"],
+                        "percent": (100.0 * d["met"] / d["required"])
+                                   if d["required"] else 0.0,
+                    }
+                    for s, d in sorted(by_subsys.items())
+                ]
+            dashboard_path = output_dir / "coverage_dashboard.html"
+            write_dashboard(
+                existing, dashboard_path,
+                goals=goals, scorecard=scorecard,
+                title=f"rvgen Coverage Dashboard — {args.target} / {args.test}",
+            )
+            _LOG.info("Coverage dashboard: %s", dashboard_path)
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            _LOG.warning("Could not write coverage dashboard: %s", exc)
+
         # Optional CI trend tracking: append one JSONL record per run.
         if args.cov_history:
             try:
