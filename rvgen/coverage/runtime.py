@@ -413,7 +413,13 @@ def _value_bucket(val: int, xlen: int = 64) -> str:
 CG_OPCODE_DYN_SUFFIX = "__dyn"
 
 
-def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_000_000) -> dict:
+def sample_trace_file(
+    db: CoverageDB,
+    trace_path: Path,
+    *,
+    max_lines: int = 2_000_000,
+    sample_handler_workload: bool = False,
+) -> dict:
     """Parse ``trace_path`` and merge runtime bins into ``db``.
 
     Returns a small metadata dict: ``{lines_parsed, pc_reach_labels,
@@ -564,12 +570,21 @@ def sample_trace_file(db: CoverageDB, trace_path: Path, *, max_lines: int = 2_00
                 # and also bump the bit-activity covergroup for each set bit
                 # (reveals dead bits — if bit_N_set never appears, no
                 # instruction ever computed a value with bit N set).
+                #
+                # All bins here classify *test-workload* behavior — so we
+                # skip them when we're inside a trap-handler region. The
+                # handler's GPR push/pop is mandatory boot infrastructure
+                # and pollutes coverage with noise the user didn't ask for.
+                # ``sample_handler_workload=True`` overrides this filter.
+                filter_workload = in_trap_region and not sample_handler_workload
                 for wm in _GPR_WRITE_IN_COMMIT_RE.finditer(writes):
                     reg = wm.group("reg")
                     val = int(wm.group("val"), 16)
-                    _bump(CG_RS_VAL_CORNER, _corner_bucket(val))
-                    _bump("rd_val_class_cg", _value_class(val, 64))
                     gpr_state[reg] = val
+                    if filter_workload:
+                        continue
+                    _bump(CG_RS_VAL_CORNER, _corner_bucket(val))
+                    _bump(CG_RD_VAL_CLASS := "rd_val_class_cg", _value_class(val, 64))
                     # Cap at 64 bits; bin name = "bit_N_set".
                     v = val & 0xFFFF_FFFF_FFFF_FFFF
                     while v:
