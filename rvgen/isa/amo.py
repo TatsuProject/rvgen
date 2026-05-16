@@ -63,11 +63,20 @@ class AmoInstr(Instr):
         self.rl: bool = False
 
     def randomize_imm(self, rng, xlen: int) -> None:
-        """AMO has no immediate. Also coin-flip ``aq`` / ``rl`` (mutually exclusive)."""
+        """AMO has no immediate. Independently coin-flip ``aq`` / ``rl``.
+
+        All four spec-legal ordering combinations are emitted:
+          0 (neither / relaxed), 1 (aq), 2 (rl), 3 (aqrl / SC-strong).
+
+        Bug fix (Sprint-2): previously the randomizer picked one of
+        {neither, aq, rl}, so ``.aqrl`` was never emitted — defeating
+        ``amo_aqrl_cg.aq_and_rl`` coverage and skipping the strongest
+        ordering bin that ARM/Imperas test plans require.
+        """
         super().randomize_imm(rng, xlen)  # no-op for AMO (imm_len=0 after set_imm_len)
-        r = rng.randint(0, 2)  # 0 = neither, 1 = aq, 2 = rl
-        self.aq = r == 1
-        self.rl = r == 2
+        r = rng.randint(0, 3)
+        self.aq = bool(r & 0b01)
+        self.rl = bool(r & 0b10)
 
     def set_imm_len(self) -> None:
         # AMO ops use R_FORMAT (no immediate).
@@ -93,6 +102,11 @@ class AmoInstr(Instr):
             base = name[:-2] + ".d"
         else:
             base = name
+        # Ordering suffix: aqrl > aq > rl > none. The .aqrl variant must
+        # come first — otherwise an aq=True && rl=True instruction would
+        # incorrectly emit just .aq.
+        if self.aq and self.rl:
+            return f"{base.lower()}.aqrl"
         if self.aq:
             return f"{base.lower()}.aq"
         if self.rl:
@@ -101,6 +115,13 @@ class AmoInstr(Instr):
 
     def convert2asm(self, prefix: str = "") -> str:
         mnemonic = format_string(self.get_instr_name(), MAX_INSTR_STR_LEN)
+        # Guarantee whitespace between mnemonic and the first operand.
+        # ``format_string`` returns the input as-is when len ≥ width, so
+        # a 14-char mnemonic like ``amoswap.d.aqrl`` would otherwise emit
+        # ``amoswap.d.aqrls10, …`` (no separating space) and gas would
+        # fail with "unrecognized opcode".
+        if not mnemonic.endswith(" "):
+            mnemonic += " "
         if self.instr_name in _LR_INSTRS:
             asm_str = f"{mnemonic}{self.rd.name}, ({self.rs1.name})"
         else:

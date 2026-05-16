@@ -24,28 +24,40 @@ class LrScInstrStream(DirectedInstrStream):
             self.num_mixed_instr = self.rng.randint(0, 10)
 
         xlen = self.cfg.target.xlen
-        # Pick LR/SC pair based on XLEN + supported ISA.
+        # Pick LR/SC width first, then derive matched LR+SC mnemonics.
+        # Bug fix (Sprint-2): picking lr_name and sc_name independently
+        # produced ``lr.w … ; sc.d …`` (and vice versa) ~48% of the time
+        # on targets with both RV32A and RV64A. Per RISC-V Unprivileged
+        # §9.1 the SC reservation must cover the LR's access size — a
+        # mismatched pair can never succeed, so every such block was
+        # dead code that defeated LR/SC coverage.
         has_rv32a = RiscvInstrGroup.RV32A in self.cfg.target.supported_isa
         has_rv64a = RiscvInstrGroup.RV64A in self.cfg.target.supported_isa and xlen >= 64
-        lr_choices = []
-        sc_choices = []
+        widths: list[str] = []
         if has_rv32a:
-            lr_choices.append(RiscvInstrName.LR_W)
-            sc_choices.append(RiscvInstrName.SC_W)
+            widths.append("W")
         if has_rv64a:
-            lr_choices.append(RiscvInstrName.LR_D)
-            sc_choices.append(RiscvInstrName.SC_D)
-        if not lr_choices:
+            widths.append("D")
+        if not widths:
             return  # No atomic support on this target.
-        lr_name = self.rng.choice(lr_choices)
-        sc_name = self.rng.choice(sc_choices)
+        width = self.rng.choice(widths)
+        lr_name = RiscvInstrName.LR_W if width == "W" else RiscvInstrName.LR_D
+        sc_name = RiscvInstrName.SC_W if width == "W" else RiscvInstrName.SC_D
 
         reserved = set(self.cfg.reserved_regs)
         pool = [r for r in RiscvReg if r not in reserved and r != RiscvReg.ZERO]
+        # Bug fix (Sprint-2): pick ``base`` first, then draw the other
+        # regs from ``pool - {base}``. The constrained-LR/SC sequence
+        # rule (priv-arch §9.1) requires SC's rd to not alias its rs1;
+        # otherwise a retry loop loses the base address and forfeits
+        # forward-progress. Same rule for LR's rd vs rs1.
         base = self.rng.choice(pool)
-        data = self.rng.choice(pool)
-        dest = self.rng.choice(pool)
-        status = self.rng.choice(pool)
+        other_pool = [r for r in pool if r != base]
+        if not other_pool:
+            return  # Pool exhausted — skip rather than emit aliased regs.
+        data = self.rng.choice(other_pool)
+        dest = self.rng.choice(other_pool)
+        status = self.rng.choice(other_pool)
 
         la = _LaPseudo()
         la.rd = base
