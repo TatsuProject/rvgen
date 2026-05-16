@@ -413,12 +413,50 @@ def _value_bucket(val: int, xlen: int = 64) -> str:
 CG_OPCODE_DYN_SUFFIX = "__dyn"
 
 
+def _resolve_workload_pc_range(elf_path: Path) -> tuple[int, int] | None:
+    """Read main/test_done addresses from the ELF's symbol table.
+
+    Uses ``riscv64-unknown-elf-nm`` if available, else returns None and
+    the caller falls back to label-marker gating. Symbol lookup is
+    pinned to ``main`` and ``test_done`` (declared ``.globl`` +
+    ``.type @function`` by ``asm_program_gen``).
+    """
+    import shutil
+    import subprocess
+    nm = shutil.which("riscv64-unknown-elf-nm") or shutil.which("nm")
+    if nm is None or not elf_path.exists():
+        return None
+    try:
+        out = subprocess.check_output([nm, str(elf_path)],
+                                       text=True, timeout=5)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    main_pc: int | None = None
+    end_pc: int | None = None
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[2] == "main":
+            try:
+                main_pc = int(parts[0], 16)
+            except ValueError:
+                pass
+        elif len(parts) >= 3 and parts[2] == "test_done":
+            try:
+                end_pc = int(parts[0], 16)
+            except ValueError:
+                pass
+    if main_pc is None or end_pc is None or end_pc <= main_pc:
+        return None
+    return main_pc, end_pc
+
+
 def sample_trace_file(
     db: CoverageDB,
     trace_path: Path,
     *,
     max_lines: int = 2_000_000,
     sample_handler_workload: bool = False,
+    elf_path: Path | None = None,
 ) -> dict:
     """Parse ``trace_path`` and merge runtime bins into ``db``.
 
@@ -452,6 +490,21 @@ def sample_trace_file(
     # mret/sret. Lets nested-trap detection trigger only inside an
     # actual handler region.
     in_trap_region: bool = False
+    # Workload-region tracking — derived from the *current PC* against
+    # the ELF symbol table when ``elf_path`` is provided (the robust
+    # path), otherwise from spike's `>>>>` label markers (fallback).
+    #
+    # Why the PC-range approach is preferred: spike's `--log` only
+    # prints `>>>>` markers on traps + mret/sret, not on regular
+    # jal/branch targets. ``main:`` is reached by fall-through from
+    # ``init:`` so it never gets a `>>>>` line. Reading the ELF symbol
+    # table and gating on ``main_pc <= pc < test_done_pc`` is robust to
+    # spike's output formatting.
+    workload_range = _resolve_workload_pc_range(elf_path) if elf_path else None
+    # Default: filter-off (`in_workload=False`) until proven we're in
+    # the workload region. Either the ELF PC-range or the `>>>> main`
+    # label flips it on; `>>>> test_done` flips it off again.
+    in_workload: bool = False
     # Branch-instruction PC tracker for "loop closure" classification.
     # When we observe a branch's outcome, we have prev_pc (the branch
     # site) and the current pc (the target if taken).
@@ -486,6 +539,16 @@ def sample_trace_file(
                 # implies we've left the trap-region.
                 if label in ("main", "h0_start", "init", "test_done"):
                     in_trap_region = False
+                # Workload-region tracking — sample test-workload bins
+                # only while we're between main: and test_done:. The
+                # boot prologue (h0_start: → init: → main:) writes
+                # MSTATUS / MTVEC / SATP / etc.; if we sampled there,
+                # an arithmetic-only test on an arithmetic-only core
+                # would falsely show CSR / privileged bins populated.
+                if label == "main":
+                    in_workload = True
+                elif label == "test_done":
+                    in_workload = False
                 continue
 
             # Commit-line handling first (has the same prefix but includes
@@ -493,9 +556,50 @@ def sample_trace_file(
             cm = _COMMIT_RE.match(line)
             if cm:
                 writes = cm.group("writes") or ""
+                # PC-range workload detection — commit lines carry a PC
+                # too, so the gate can re-evaluate even before we see
+                # the matching trace line. Falls back to label-driven
+                # ``in_workload`` when no ELF was provided.
+                if workload_range is not None:
+                    try:
+                        commit_pc = int(cm.group("pc"), 16)
+                        main_pc, end_pc = workload_range
+                        in_workload = (main_pc <= commit_pc < end_pc)
+                    except (ValueError, TypeError):
+                        pass
+                # Workload-region gating: per-instruction bins that
+                # classify *test workload* (CSR writes, MMU bits, FP
+                # results, walking-ones value class, etc.) should NOT
+                # count infrastructure-code retirements. The boot
+                # prologue writes MSTATUS / MTVEC and we'd otherwise
+                # show those bins populated even for an arithmetic-only
+                # test on an arithmetic-only core.
+                count_this = in_workload or sample_handler_workload
+                # Always-on bins (test-caused events meaningful even when
+                # measured inside a handler): trap_cause, priv_event,
+                # priv_mode, exception, nested_trap. We still sample
+                # priv_mode below from cm.group("pri").
                 for wm in _CSR_WRITE_IN_COMMIT_RE.finditer(writes):
                     csr = wm.group("csr").upper()
                     val = int(wm.group("val"), 16)
+                    if not count_this:
+                        # Skip CSR-write sampling outside the workload
+                        # region — these are boot/handler config writes,
+                        # not what the test exercised. Trap-cause writes
+                        # are tracked separately below.
+                        if csr in ("MCAUSE", "SCAUSE", "VSCAUSE"):
+                            _bump(CG_TRAP_CAUSE, _trap_cause_bin(val, 64))
+                            if in_trap_region:
+                                mode_now = "M" if csr == "MCAUSE" else "S"
+                                _bump(CG_NESTED_TRAP, f"nested_{mode_now}_in_trap")
+                        # Track MSTATUS state internally for the MXR cross
+                        # without bumping any bins.
+                        if csr in ("MSTATUS", "SSTATUS"):
+                            mstatus_state["mxr"] = (val >> 19) & 1
+                            mstatus_state["sum"] = (val >> 18) & 1
+                            mstatus_state["mprv"] = (val >> 17) & 1
+                            mstatus_state["tw"] = (val >> 21) & 1
+                        continue
                     _bump(CG_CSR_VAL, f"{csr}__{_value_bucket(val, 64)}")
                     # Privileged-event sampling: certain CSR writes are
                     # interesting events in their own right (SATP write
@@ -572,16 +676,17 @@ def sample_trace_file(
                 # instruction ever computed a value with bit N set).
                 #
                 # All bins here classify *test-workload* behavior — so we
-                # skip them when we're inside a trap-handler region. The
-                # handler's GPR push/pop is mandatory boot infrastructure
-                # and pollutes coverage with noise the user didn't ask for.
+                # skip them when execution is outside the main: → test_done:
+                # region OR inside a trap handler. The boot prologue's GPR
+                # init writes and the handler's GPR push/pop are
+                # infrastructure that pollutes coverage with bins the test
+                # didn't actually exercise.
                 # ``sample_handler_workload=True`` overrides this filter.
-                filter_workload = in_trap_region and not sample_handler_workload
                 for wm in _GPR_WRITE_IN_COMMIT_RE.finditer(writes):
                     reg = wm.group("reg")
                     val = int(wm.group("val"), 16)
                     gpr_state[reg] = val
-                    if filter_workload:
+                    if not count_this:
                         continue
                     _bump(CG_RS_VAL_CORNER, _corner_bucket(val))
                     _bump(CG_RD_VAL_CLASS := "rd_val_class_cg", _value_class(val, 64))
@@ -606,21 +711,29 @@ def sample_trace_file(
                 # Sprint-1: FPR writes feed the FP-corner-value dataset.
                 # The hex width tells us precision; NaN-boxed singles in
                 # 64-bit FPRs ride as 0xFFFFFFFF<32-bit-single>.
+                # Workload-gated: boot may init f0..f31 via FMV.W.X —
+                # those are framework, not test exercise.
                 for fm in _FPR_WRITE_IN_COMMIT_RE.finditer(writes):
                     reg = fm.group("reg")
                     raw = fm.group("val")
                     val = int(raw, 16)
                     width = 16 if len(raw) <= 4 else (32 if len(raw) <= 8 else 64)
+                    # Cache the FP value for the next FP op's source
+                    # classification (always, even outside workload —
+                    # the next workload FP op may read this register).
+                    fpr_state[reg] = (val, width)
+                    if not count_this:
+                        continue
                     if width == 64 and (val >> 32) == 0xFFFFFFFF:
                         _bump(CG_FP_DATASET,
                               _fp_dataset_bin(val & 0xFFFFFFFF, 32))
                     else:
                         _bump(CG_FP_DATASET, _fp_dataset_bin(val, width))
-                    # Cache the FP value for the next FP op's source
-                    # classification.
-                    fpr_state[reg] = (val, width)
                 # Sprint-1: effective-address alignment from "mem 0x..." tokens.
+                # Workload-gated: handler push/pop is mandatory infra.
                 for em in _MEM_EA_RE.finditer(writes):
+                    if not count_this:
+                        continue
                     addr = int(em.group("addr"), 16)
                     _bump(CG_EA_ALIGN, _ea_align_bin(addr))
                     # Sprint-2: MXR × SUM × MPRV cross at every memory
@@ -662,9 +775,23 @@ def sample_trace_file(
             pc = int(pc_hex, 16)
             bin_bytes = 2 if len(bin_hex) == 4 else 4
 
+            # PC-range workload detection (preferred over label-based —
+            # spike doesn't emit `>>>> main` for fall-through entry).
+            if workload_range is not None:
+                main_pc, end_pc = workload_range
+                in_workload = (main_pc <= pc < end_pc)
+
+            # Workload-gating for trace-line samplers — same principle
+            # as the commit-line gate above. ``count_trace`` is True iff
+            # this retired instruction belongs to the random workload
+            # (between main: and test_done:) or the user opted into
+            # handler sampling.
+            count_trace = in_workload or sample_handler_workload
+
             # Dynamic opcode sample (canonicalize: "c.add" and "add" are
             # distinct bins — valuable signal).
-            _bump(CG_OPCODE, mnem.upper() + CG_OPCODE_DYN_SUFFIX)
+            if count_trace:
+                _bump(CG_OPCODE, mnem.upper() + CG_OPCODE_DYN_SUFFIX)
 
             # rs1/rs2 value-class sampling — parse the operand tail. For
             # most R/I/S/B-format scalar ops, position 1 is rd and 2/3
@@ -674,7 +801,7 @@ def sample_trace_file(
             # registers, sample the tracked value, and skip otherwise.
             tail = m.group("tail") or ""
             tokens = _OPERAND_TOKEN_RE.findall(tail)
-            if len(tokens) >= 2:
+            if count_trace and len(tokens) >= 2:
                 cls1: str | None = None
                 cls2: str | None = None
                 tok2 = tokens[1].lower()
@@ -695,7 +822,7 @@ def sample_trace_file(
             # (other than load) appears, classify the source-FPR's last
             # known value into one of {nan, inf, subnormal, zero, normal}
             # and bin one entry per source.
-            if mnem.startswith("f") and not mnem.startswith(("fence", "flw", "fld", "flh")):
+            if count_trace and mnem.startswith("f") and not mnem.startswith(("fence", "flw", "fld", "flh")):
                 # Operand tail tokens 2..4 are typically the source FPRs.
                 tail = m.group("tail") or ""
                 fp_tokens = re.findall(r"\bf[ast]?\d+\b|\bf[t-z]\d+\b|\bf\d+\b",
@@ -711,7 +838,8 @@ def sample_trace_file(
 
             # Branch direction — the *previous* instruction was the branch;
             # now that we see this PC, we know whether the branch was taken.
-            if prev_was_branch and prev_pc is not None and prev_mnem is not None:
+            # Workload-gated: handler dispatch branches are infrastructure.
+            if count_trace and prev_was_branch and prev_pc is not None and prev_mnem is not None:
                 expected_fall_through = prev_pc + prev_bin_bytes
                 taken = pc != expected_fall_through
                 if taken:
@@ -731,14 +859,6 @@ def sample_trace_file(
                     pat4 = "".join(list(branch_history)[-4:])
                     _bump(CG_BRANCH_PATTERN4, pat4)
                 # Sprint-2: branch loop / skip classification.
-                # fwd vs bwd is determined by the actual taken offset
-                # (taken=True branches always have a delta != 0 from
-                # fall-through PC; not-taken branches do too in spec
-                # terms, but micro-arch-wise the prediction depends on
-                # the *encoded* offset's direction). Use the delta if
-                # taken, the encoded offset if not — but not_taken
-                # branches don't reveal their offset here, so we only
-                # bin direction for taken branches.
                 if taken:
                     direction = "fwd" if pc > prev_pc else "bwd"
                     _bump(CG_BRANCH_LOOP, f"{direction}_taken")

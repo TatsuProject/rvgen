@@ -184,6 +184,19 @@ class AsmProgramGen:
         """Port of SV ``gen_program_header`` (riscv_asm_program_gen.sv:522)."""
         self.instr_stream.append('.include "user_define.h"')
         self.instr_stream.append(".globl _start")
+        # Expose main / test_done as global *function* symbols so spike's
+        # auto-symbolisation emits `>>>> main` / `>>>> test_done` markers
+        # in the `-l` trace. The runtime coverage parser uses those
+        # labels to gate per-workload bins (per CLAUDE.md / coverage.md);
+        # without these declarations an arithmetic-only test would
+        # falsely show MSTATUS / mem_align bins populated from boot.
+        # spike's symbolizer prints labels for ELF symbols whose type is
+        # STT_FUNC — the `.type ..., @function` directive is what
+        # tells gas to emit that, not just `.globl`.
+        self.instr_stream.append(".globl main")
+        self.instr_stream.append(".type main, @function")
+        self.instr_stream.append(".globl test_done")
+        self.instr_stream.append(".type test_done, @function")
         self.instr_stream.append(".section .text")
         if self.cfg.disable_compressed_instr:
             self.instr_stream.append(".option norvc;")

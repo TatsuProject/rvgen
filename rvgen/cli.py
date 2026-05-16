@@ -444,7 +444,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.iss_trace and iss_results:
             for r in iss_results:
                 if r.trace_path and r.returncode == 0:
-                    meta = sample_trace_file(run_cov, r.trace_path)
+                    # Pass the ELF so the runtime parser can read the
+                    # symbol table and gate per-workload bins by PC
+                    # range (main_pc <= pc < test_done_pc). Without
+                    # this, boot/handler retirements would pollute the
+                    # test-workload coverage view.
+                    elf_path = getattr(r, "elf_path", None)
+                    meta = sample_trace_file(
+                        run_cov, r.trace_path,
+                        elf_path=elf_path,
+                    )
                     _LOG.info(
                         "runtime cov: %s -> %d lines, %d labels, %d branches",
                         r.test_id, meta["lines_parsed"],

@@ -417,7 +417,7 @@ def test_runtime_trace_parse_branch_direction(tmp_path: Path):
         "core   0: 0x80000014 (0x00000013) addi    x0, x0, 0\n"   # fell through +4 → not_taken
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert db[CG_BRANCH_DIR].get("taken", 0) == 1
     assert db[CG_BRANCH_DIR].get("not_taken", 0) == 1
 
@@ -434,7 +434,7 @@ def test_runtime_trace_parse_pc_reach(tmp_path: Path):
         "core   0: 0x80000100 (0x30200073) mret\n"
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert db[CG_PC_REACH].get("init", 0) == 1
     assert db[CG_PC_REACH].get("mtvec_handler", 0) == 1
     # Exception covergroup bumped because mtvec is a trap label.
@@ -450,7 +450,7 @@ def test_runtime_trace_privilege_mret(tmp_path: Path):
         "core   0: 0x80000000 (0x30200073) mret\n"
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     # M_entered always bumped at start + M_return for the mret.
     assert db[CG_PRIV_MODE].get("M_return", 0) == 1
     assert db[CG_PRIV_MODE].get("M_entered", 0) == 1
@@ -676,7 +676,7 @@ def test_runtime_trace_csr_value_bin(tmp_path: Path):
         "core   0: 3 0x80000004 (0x30029073) c768_mstatus 0x0\n"
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert db[CG_CSR_VAL].get("MISA__large", 0) == 1
     assert db[CG_CSR_VAL].get("MSTATUS__zero", 0) == 1
 
@@ -693,7 +693,7 @@ def test_runtime_gpr_write_corners(tmp_path: Path):
         "core   0: 3 0x80000004 (0x00000013) x6  0xffffffff\n"
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert db[CG_RS_VAL_CORNER].get("zero", 0) == 1
     assert db[CG_RS_VAL_CORNER].get("all_ones_32", 0) == 1
 
@@ -710,7 +710,7 @@ def test_bit_activity_from_gpr_write(tmp_path: Path):
         "core   0: 3 0x80000004 (0x00000013) x6  0x80000000\n"
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert db[CG_BIT_ACTIVITY].get("bit_00_set", 0) == 1
     assert db[CG_BIT_ACTIVITY].get("bit_02_set", 0) == 1
     assert db[CG_BIT_ACTIVITY].get("bit_31_set", 0) == 1
@@ -906,7 +906,7 @@ def test_runtime_trace_priv_mode_from_commit(tmp_path: Path):
         "core   0: 0 0x80000004 (0x00000013)\n"  # priv=0 → U_mode
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert db[CG_PRIV_MODE].get("M_mode", 0) == 1
     assert db[CG_PRIV_MODE].get("U_mode", 0) == 1
 
@@ -1033,7 +1033,7 @@ def test_runtime_branch_per_mnem(tmp_path: Path):
         "core   0: 0x8000000c (0x00000013) addi    x0, x0, 0\n"  # taken
     )
     db = new_db()
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert db[CG_BR_PER_MNEM].get("BEQ__T", 0) == 1
 
 

@@ -520,7 +520,7 @@ def test_runtime_ingest_decodes_sprint2_covergroups(tmp_path):
         "core   0: 3 0x80000020 (0x12345678) c7b0_dcsr 0x0000000040000100\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert any(b.startswith("MSTATUS__") for b in db[CG_MSTATUS_FIELD])
     assert "mtvec_vectored" in db[CG_XTVEC_MODE]
     assert "stvec_direct" in db[CG_XTVEC_MODE]
@@ -555,7 +555,7 @@ def test_runtime_branch_pattern4_and_loop(tmp_path):
     trace = tmp_path / "br.log"
     trace.write_text("".join(lines))
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert sum(db[CG_BRANCH_PATTERN4].values()) >= 1
     # Loop classification: at least one taken branch should produce a
     # fwd_taken or bwd_taken bin.
@@ -572,7 +572,7 @@ def test_nested_trap_detection(tmp_path):
         "core   0: 3 0x80000020 (0x12345678) c342_mcause 0x0000000000000003\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert any("nested" in b for b in db[CG_NESTED_TRAP])
 
 
@@ -778,7 +778,7 @@ def test_runtime_walking_ones_alternating_lead_trail(tmp_path):
         "core   0: 3 0x80000020 (0x12345678) x11 0x00000000ff000000\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     # walking_ones — at least bit 1 should appear (0xAA has bits 1,3,5,7 set).
     assert any(k.startswith("bit_") for k in db[CG_WALKING_ONES])
     # alternating — 0xAAAAAAAA in 64-bit context is not the canonical
@@ -799,7 +799,7 @@ def test_runtime_mxr_sum_mprv_cross(tmp_path):
         "core   0: 3 0x80000020 (0x00000023) mem 0x80001000\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert any("mxr1" in k and "sum1" in k for k in db[CG_MXR_SUM_MPRV])
 
 
@@ -812,7 +812,7 @@ def test_runtime_atomic_alignment(tmp_path):
         "core   0: 3 0x80000010 (0x080530af) mem 0x80001004\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert "aligned_w" in db[CG_ATOMIC_ALIGN]
 
 
@@ -823,7 +823,7 @@ def test_runtime_atomic_misaligned(tmp_path):
         "core   0: 3 0x80000010 (0x080530af) mem 0x80001003\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert "misaligned_w" in db[CG_ATOMIC_ALIGN]
 
 
@@ -836,8 +836,75 @@ def test_runtime_virtual_instr_trap(tmp_path):
         "core   0: 1 0x80000010 (0x10500073) c142_scause 0x0000000000000016\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert "vi_wfi" in db[CG_VIRT_INSTR_TRAP]
+
+
+def test_runtime_workload_region_filter_default(tmp_path):
+    """Without main: label, bins that classify *test workload* must NOT sample.
+
+    Captures the head-of-verification rule: an arithmetic-only test on an
+    arithmetic-only core must NOT show MSTATUS / mem_align / walking_ones
+    bins populated just because the boot prologue runs CSR writes and GPR
+    init code. Without ``sample_handler_workload=True`` and without a
+    ``main:`` label, the runtime sampler is in the "infrastructure" region.
+    """
+    from rvgen.coverage.collectors import (
+        CG_BIT_ACTIVITY, CG_MSTATUS_FIELD, CG_WALKING_ONES,
+    )
+    trace = tmp_path / "boot_only.log"
+    trace.write_text(
+        # No main: label — we're still in boot/init context.
+        "core   0: >>>>  h0_start\n"
+        # Boot MSTATUS write — must NOT bump mstatus_field_cg.
+        "core   0: 3 0x80000010 (0x12345678) c300_mstatus 0x0000000000001800\n"
+        # Boot GPR init writes — must NOT bump walking_ones / bit_activity.
+        "core   0: 3 0x80000020 (0x12345678) x10 0x00000000aaaaaaaa\n"
+    )
+    db = {}
+    sample_trace_file(db, trace)
+    assert db.get(CG_MSTATUS_FIELD, {}) == {}
+    assert db.get(CG_WALKING_ONES, {}) == {}
+    assert db.get(CG_BIT_ACTIVITY, {}) == {}
+
+
+def test_runtime_workload_region_filter_opt_in_with_main_label(tmp_path):
+    """After main:, the same writes now DO sample test-workload bins."""
+    from rvgen.coverage.collectors import (
+        CG_MSTATUS_FIELD, CG_WALKING_ONES,
+    )
+    trace = tmp_path / "with_main.log"
+    trace.write_text(
+        "core   0: >>>>  h0_start\n"
+        # This boot write should still be filtered.
+        "core   0: 3 0x80000010 (0x12345678) c300_mstatus 0x0000000000001800\n"
+        "core   0: >>>>  main\n"
+        # Now we're in workload — these must sample.
+        "core   0: 3 0x80000020 (0x12345678) c300_mstatus 0x0000000000040000\n"
+        "core   0: 3 0x80000030 (0x12345678) x10 0x00000000aaaaaaaa\n"
+        "core   0: >>>>  test_done\n"
+        # After test_done — filtered again.
+        "core   0: 3 0x80000040 (0x12345678) c300_mstatus 0x0000000000080000\n"
+    )
+    db = {}
+    sample_trace_file(db, trace)
+    mfs = db.get(CG_MSTATUS_FIELD, {})
+    # The mid-workload SUM-set write should be the only mstatus_field hit.
+    assert any("sum_set" in k for k in mfs), f"expected sum_set; got {mfs}"
+    # walking_ones populated from the workload GPR write.
+    assert db.get(CG_WALKING_ONES, {}), "walking_ones should be populated"
+
+
+def test_runtime_workload_handler_override(tmp_path):
+    """sample_handler_workload=True disables the filter."""
+    from rvgen.coverage.collectors import CG_MSTATUS_FIELD
+    trace = tmp_path / "no_main.log"
+    trace.write_text(
+        "core   0: 3 0x80000010 (0x12345678) c300_mstatus 0x0000000000040000\n"
+    )
+    db = {}
+    sample_trace_file(db, trace, sample_handler_workload=True)
+    assert any("sum_set" in k for k in db.get(CG_MSTATUS_FIELD, {}))
 
 
 def test_runtime_wfi_corner(tmp_path):
@@ -849,5 +916,5 @@ def test_runtime_wfi_corner(tmp_path):
         "core   0: 0x80000020 (0x10500073) wfi\n"
     )
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
     assert "wfi_tw1" in db[CG_WFI_CORNER]

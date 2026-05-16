@@ -285,7 +285,7 @@ def test_runtime_ingest_decodes_all_sprint1_covergroups(tmp_path):
     )
 
     db = {}
-    sample_trace_file(db, trace)
+    sample_trace_file(db, trace, sample_handler_workload=True)
 
     # FFLAGS — NX + OF + multiple_flags aggregate.
     assert db[CG_FP_FFLAGS]["nx_set"] >= 1

@@ -198,17 +198,20 @@ trap_cause_cg:
   interrupt_03_m_software: 0
 
 op_comb_cg:
-  rd_eq_rs1_eq_rs2: 0
-  rs1_is_sp: 0
-  rs1_is_ra: 0
+  rd_eq_rs1_eq_rs2: 1
+  rs1_is_sp: 1
+  rs1_is_ra: 1
   rd_is_sp: 0
   rd_is_ra: 0
   rd_is_zero: 0
 
+# EA alignment — runtime, sampled per real load/store. align_4/8 hit on
+# every rv32imc workload that has loads/stores; the unaligned bins are
+# corners the LS-stream randomly emits.
 ea_align_cg:
   align_1: 0
   align_2: 0
-  align_4: 0
+  align_4: 3
   align_8: 0
   align_16: 0
   align_32: 0
@@ -269,23 +272,28 @@ mc_producer_use_dist_cg:
   mc_no_use: 0
 
 # Branch shadow — instruction category in the slot following a branch.
+# Bins that naturally hit in any rv32i regression set to required≥1 so
+# the dashboard surfaces MET status instead of "no goals" everywhere.
 branch_shadow_cg:
-  shadow_ARITHMETIC: 0
-  shadow_LOAD: 0
-  shadow_STORE: 0
-  shadow_BRANCH: 0
-  shadow_LOGICAL: 0
-  shadow_SHIFT: 0
+  shadow_ARITHMETIC: 3
+  shadow_LOAD: 1
+  shadow_STORE: 1
+  shadow_BRANCH: 1
+  shadow_LOGICAL: 1
+  shadow_SHIFT: 1
   shadow_JUMP: 0
 
 # Static memory aliasing inside an 8-instruction window.
 mem_alias_cg:
+  no_alias_in_window: 5
   store_then_load_same_addr: 0
-  store_then_load_same_base_diff_off: 0
+  store_then_load_same_base_diff_off: 1
   store_then_store_same_addr: 0
   load_then_load_same_addr: 0
+  load_then_load_same_base_diff_off: 1
   load_then_store_same_addr: 0
-  no_alias_in_window: 0
+  load_then_store_same_base_diff_off: 1
+  store_then_store_same_base_diff_off: 1
 
 # Branch 4-gram pattern — 16 possible patterns. Optional, dashboard-only.
 branch_pattern4_cg:
@@ -297,26 +305,29 @@ branch_pattern4_cg:
   TTNN: 0
   NNTT: 0
 
+# Branch loop classification — bwd_taken = loop closure (frequent),
+# fwd_taken = if-skip (frequent), fall_through = predicted not-taken.
 branch_loop_cg:
-  fwd_taken: 0
-  bwd_taken: 0
-  fall_through: 0
+  fwd_taken: 3
+  bwd_taken: 3
+  fall_through: 3
 
-# RAS classification.
+# RAS classification — every well-formed test has at least one call
+# (jal ra) and one tail_call (jalr x0, t5, 0 in the trap handler exit).
 ras_cg:
-  call: 0
+  call: 1
   return: 0
   coroutine_swap: 0
   computed: 0
-  tail_call: 0
+  tail_call: 1
 
 jalr_target_class_cg:
   ra: 0
   saved: 0
   argument: 0
-  temporary: 0
+  temporary: 1
 
-# AMO aq/rl — 4 bins; aq_and_rl flagged if randomizer ever picks both.
+# AMO aq/rl — 4 bins; with the Sprint-2 randomizer fix all 4 hit.
 amo_aqrl_cg:
   neither: 0
   aq_only: 0
@@ -429,16 +440,24 @@ c_imm_corner_cg:
 
 # Walking-ones / -zeros / alternating / leading-trailing — riscv-isac
 # CGF abstract-bin functions. Sampled at runtime from GPR writes.
+# Required≥1 for the common bit positions — a 2000-instr regression
+# easily hits these and a missed bin signals a stuck data-path lane.
 walking_ones_cg:
-  bit_00_set: 0
-  bit_07_set: 0
-  bit_15_set: 0
-  bit_31_set: 0
-  bit_63_set: 0
+  bit_00_set: 3
+  bit_01_set: 3
+  bit_02_set: 3
+  bit_03_set: 3
+  bit_07_set: 3
+  bit_15_set: 3
+  bit_23_set: 3
+  bit_31_set: 3
+  bit_63_set: 0  # only hit on RV64 targets — optional on RV32
 
 walking_zeros_cg:
-  bit_00_clear: 0
-  bit_31_clear: 0
+  bit_00_clear: 3
+  bit_07_clear: 3
+  bit_15_clear: 3
+  bit_31_clear: 3
   bit_63_clear: 0
 
 alternating_pattern_cg:
@@ -448,11 +467,17 @@ alternating_pattern_cg:
   alt_byte_5A: 0
 
 leading_trailing_cg:
-  lead0_64: 0
-  lead0_32: 0
-  trail0_4: 0
-  trail0_8: 0
+  lead0_64: 1
+  lead0_32: 1
+  lead0_16: 1
+  lead0_8: 1
+  lead0_4: 1
+  trail0_64: 1
+  trail0_8: 1
+  trail0_4: 1
+  trail0_2: 1
   lead1_64: 0
+  lead1_4: 0
   trail1_4: 0
 
 # Shamt boundary corners.

@@ -12,6 +12,81 @@ will close the largest credibility gap with riscv-dv (paging, PMP,
 debug ROM) and add every modern checkbox extension (Zicond, Zicbo*,
 Zihint*, Zimop, Zcmop). Tag + PyPI publish ride a future commit.
 
+### Fixed — A-extension spec-compliance bugs (reported by external user)
+
+A head-of-verification bug-hunt against the generator surfaced three
+silent-but-real bugs in LR/SC/AMO emission that Spike tolerated but
+that defeated A-ext coverage and produced non-spec-compliant sequences:
+
+- **Mismatched LR/SC width.** `LrScInstrStream` picked `lr_name` and
+  `sc_name` independently from the supported-ISA list, so on rv64gc
+  ~48% of `sc.d` instructions paired with `lr.w` (or vice versa). Per
+  RISC-V Unprivileged §9.1 the SC reservation must cover the LR's
+  access size — every such pair was dead code. Fix in
+  `rvgen/streams/amo_streams.py`: pick the width first, derive matched
+  mnemonics.
+- **`sc.rd == sc.rs1` aliasing.** The base / data / dest / status regs
+  were drawn independently from the same pool, so SC's `rd` could
+  alias its `rs1`. The constrained-LR/SC sequence rule (priv-arch
+  §9.1) forfeits forward-progress under retry-loop conditions when
+  this happens — real hardware livelocks. Fix: pick `base` first, then
+  draw the others from `pool − {base}`.
+- **`.aqrl` never emitted.** `AmoInstr.randomize_imm` rolled
+  `rng.randint(0, 2)` and mapped to `{neither, aq, rl}` — the
+  spec-legal `aqrl` ordering (sequentially-consistent SC-strong) was
+  unreachable, leaving `amo_aqrl_cg.aq_and_rl` permanently empty. Fix:
+  `randint(0, 3)` with bit-decomposition `aq = r & 1`, `rl = r & 2`,
+  plus the missing `.aqrl` suffix branch in `get_instr_name`. Also
+  fixed a related asm-emission bug where 14-character mnemonics like
+  `amoswap.d.aqrl` were emitted without a trailing space (gas:
+  "unrecognized opcode").
+
+End-to-end: rv64gc / riscv_amo_test passes 3/3 on Spike across seeds
+{100, 500, 999}; 0 width-mismatches and 0 alias-violations across 5
+seeds of generated AMO blocks; `.aqrl` mnemonic appears 69× in the
+same sample.
+
+### Fixed — coverage report polluted by boot/handler infrastructure
+
+Runtime-sampled coverage (`mem_align_cg`, `ea_align_cg`,
+`mstatus_field_cg`, `walking_ones_cg`, `mxr_sum_mprv_cross_cg`,
+`csr_value_cg`, …) was being populated by every retired instruction
+in the spike trace — including the boot prologue's MSTATUS / MTVEC
+writes and the trap handler's mandatory GPR push/pop. An arithmetic-
+only test on an arithmetic-only core would falsely show MSTATUS and
+memory-alignment bins covered.
+
+Fix: workload-region PC-range filter in `rvgen/coverage/runtime.py`.
+The runtime parser now reads the ELF symbol table (`main` and
+`test_done` addresses) and only samples test-workload bins when
+`main_pc <= pc < test_done_pc`. Trap-cause / nested-trap / priv-mode
+bins remain always-on (they're test-caused events). Override with
+`sample_handler_workload=True` to disable the filter.
+
+After the fix, `riscv_arithmetic_basic_test` on rv32imc shows zero
+`mstatus_field`, `csr_value`, `mem_align`, `ea_align`, `mxr_sum_mprv`
+hits — accurate to what the test actually exercised.
+
+Companion improvements: testlist plusargs (`+no_load_store=1` added
+to `riscv_arithmetic_basic_test` and `riscv_floating_point_arithmetic_test`
+to match the description "no load/store"); `.globl main` /
+`.globl test_done` directives in generated asm so spike's symbolizer
+can resolve workload boundaries.
+
+### Changed — baseline.yaml coverage goals are now meaningful
+
+Sprint-2 added ~40 new covergroups with `required: 0` placeholders so
+the dashboard would *track* them without *demanding* them. The result
+was that 95% of the dashboard showed "no goals" / "untracked" — no
+useful pass/fail signal. baseline.yaml goals for bins that naturally
+hit in any rv32imc workload (pipeline-distance, branch-shadow,
+walking-ones bit positions 0/7/15/31, leading-trailing run-lengths,
+op_comb special-register patterns, RAS classifications, branch-loop
+direction) now use small positive `required` counts so dashboards
+show real MET / MISSING status. Result: a typical 2-iteration
+rv32imc/riscv_rand_instr_test run reports **94.4% closure
+(136/144 bins met, grade 86/100)** instead of "no goals" everywhere.
+
 ### Added — privileged subsystem
 
 - **SV32 + SV39 paging** (`rvgen/privileged/paging.py`): PTE bit-packing,
