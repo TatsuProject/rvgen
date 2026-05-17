@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rvgen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pure-Python RISC-V random instruction generator with built-in functional coverage, auto-regression, and CI-ready dashboards."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -58,11 +58,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/LogicX-Tatsu/rvgen"
-Repository = "https://github.com/LogicX-Tatsu/rvgen"
-Issues = "https://github.com/LogicX-Tatsu/rvgen/issues"
-Changelog = "https://github.com/LogicX-Tatsu/rvgen/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/LogicX-Tatsu/rvgen/tree/main/docs"
+Homepage = "https://github.com/TatsuProject/rvgen"
+Repository = "https://github.com/TatsuProject/rvgen"
+Issues = "https://github.com/TatsuProject/rvgen/issues"
+Changelog = "https://github.com/TatsuProject/rvgen/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/TatsuProject/rvgen/tree/main/docs"
 
 [project.scripts]
 rvgen = "rvgen.cli:main"

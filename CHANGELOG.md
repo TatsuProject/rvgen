@@ -5,12 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — staging area for v0.2.0
+## [Unreleased]
 
-This is the staging area for the upcoming v0.2.0 release. The release
-will close the largest credibility gap with riscv-dv (paging, PMP,
-debug ROM) and add every modern checkbox extension (Zicond, Zicbo*,
-Zihint*, Zimop, Zcmop). Tag + PyPI publish ride a future commit.
+(nothing yet — work after v0.2.0 lands here.)
+
+## [0.2.0] — 2026-05-13
+
+Second public release. Closes the largest credibility gap with
+riscv-dv (paging, PMP, debug ROM), adds every modern checkbox
+extension (Zicond, Zicbo*, Zihint*, Zimop, Zcmop), ships ~40 new
+covergroups closing the riscv-isac / core-v-verif / ARM-DV gap
+analysis, lands real bug fixes in the A-extension stream, and
+makes the install self-contained (no external riscv-dv clone
+required). Now published under the **Tatsu** GitHub organization
+at https://github.com/TatsuProject/rvgen.
 
 ### Fixed — A-extension spec-compliance bugs (reported by external user)
 
@@ -310,5 +318,6 @@ broader use.
 - 1 integration-regression test (golden-coverage floor) anchoring
   the fixed-seed rv32imc run.
 
-[0.1.0]: https://github.com/LogicX-Tatsu/rvgen/releases/tag/v0.1.0
-[Unreleased]: https://github.com/LogicX-Tatsu/rvgen/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/TatsuProject/rvgen/releases/tag/v0.2.0
+[0.1.0]: https://github.com/TatsuProject/rvgen/releases/tag/v0.1.0
+[Unreleased]: https://github.com/TatsuProject/rvgen/compare/v0.2.0...HEAD

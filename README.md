@@ -172,7 +172,7 @@ python3 -m venv ~/rvgen-env
 For development (clone + editable install with test extras):
 
 ```bash
-git clone https://github.com/LogicX-Tatsu/rvgen.git
+git clone https://github.com/TatsuProject/rvgen.git
 cd rvgen
 pip install -e ".[test]"
 ```
