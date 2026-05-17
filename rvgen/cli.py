@@ -60,6 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "exists → disabled.")
     p.add_argument("--help_targets", action="store_true",
                    help="List every known target (built-in + user area) and exit.")
+    p.add_argument("--help_streams", action="store_true",
+                   help="List every registered directed stream (the names that "
+                        "go in +directed_instr_N=<name>,<cnt>) and exit. "
+                        "Includes both built-in and user-area streams.")
     p.add_argument("--validate_target", default="",
                    help="Parse a target YAML, report unknown keys / bad enum "
                         "names / unparseable sizes, preview the effective "
@@ -466,6 +470,28 @@ def main(argv: list[str] | None = None) -> int:
             print("User-area targets:")
             for n in user_only:
                 print(f"  {n}")
+        return 0
+
+    if args.help_streams:
+        from rvgen.streams import STREAM_REGISTRY
+        print("Registered directed streams "
+              f"(reference as +directed_instr_N=<name>,<cnt>):")
+        print()
+        builtin = []
+        user = []
+        for name in sorted(STREAM_REGISTRY):
+            mod = STREAM_REGISTRY[name].__module__
+            if mod.startswith("rvgen_user_streams."):
+                user.append((name, mod))
+            else:
+                builtin.append((name, mod))
+        for name, mod in builtin:
+            print(f"  {name:<48s}  {mod}")
+        if user:
+            print()
+            print("User-area streams:")
+            for name, mod in user:
+                print(f"  {name:<48s}  {mod}")
         return 0
 
     if args.validate_target:
