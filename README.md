@@ -29,6 +29,7 @@ That's it — no riscv-dv clone needed, no `--testlist`, no `$RISCV_DV_ROOT`. To
 <p align="center">
   <a href="docs/verification-guide.md"><b>Verification Guide</b></a> •
   <a href="docs/coverage.md"><b>Coverage Reference</b></a> •
+  <a href="docs/regression-runner.md"><b>Nightly Regression</b></a> •
   <a href="docs/architecture.md"><b>Architecture</b></a> •
   <a href="docs/testlist.md"><b>Testlist Reference</b></a> •
   <a href="docs/user-area.md"><b>Add Your Own Core</b></a>

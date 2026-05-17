@@ -228,10 +228,12 @@ When running under GitHub Actions, the `cov` step writes:
 
 ---
 
-## 7 — Scaling up
+## 7 — Scaling up — nightly regression
 
 Use the shipped parallel runner — it handles matrix execution, merging,
-summarisation, and HTML export in one command:
+summarisation, and HTML export in one command. **See
+[`regression-runner.md`](regression-runner.md) for the full reference
+including a copy-pasteable GitHub Actions workflow.**
 
 ```bash
 ./scripts/regression.py \
