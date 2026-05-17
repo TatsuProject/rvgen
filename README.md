@@ -6,11 +6,23 @@
   <strong>Pure-Python RISC-V instruction generator with built-in functional coverage, auto-regression, and CI-ready dashboards.</strong>
 </p>
 
+## 60-second start
+
+```bash
+pip install rvgen                                # or: pipx install rvgen
+rvgen --target rv32imc --test riscv_arithmetic_basic_test \
+      --steps gen --output out/ --seed 42
+# → out/asm_test/riscv_arithmetic_basic_test_0.S
+```
+
+That's it — no riscv-dv clone needed, no `--testlist`, no `$RISCV_DV_ROOT`. To add Spike + GCC and get a coverage dashboard, see [Quick start — with coverage](#quick-start--with-coverage-2-minutes) below.
+
 <p align="center">
   <a href="#install"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0"></a>
-  <a href="#validation"><img src="https://img.shields.io/badge/tests-332%20passing-brightgreen" alt="332 tests"></a>
-  <a href="#validation"><img src="https://img.shields.io/badge/spike-51%2F51%20%2B%2018%2F18%20%2B%205%2F5-brightgreen" alt="Spike regression"></a>
+  <a href="#validation"><img src="https://img.shields.io/badge/tests-995%20passing-brightgreen" alt="995 tests"></a>
+  <a href="#validation"><img src="https://img.shields.io/badge/spike-213%2F213-brightgreen" alt="Spike regression"></a>
+  <a href="https://pypi.org/project/rvgen/"><img src="https://img.shields.io/pypi/v/rvgen.svg" alt="PyPI"></a>
   <a href="docs/verification-guide.md"><img src="https://img.shields.io/badge/docs-verification%20guide-blueviolet" alt="Verification guide"></a>
 </p>
 
@@ -19,11 +31,7 @@
   <a href="docs/coverage.md"><b>Coverage Reference</b></a> •
   <a href="docs/architecture.md"><b>Architecture</b></a> •
   <a href="docs/testlist.md"><b>Testlist Reference</b></a> •
-  <a href="docs/examples/coverage-report.html"><b>Sample HTML Report</b></a>
-</p>
-
-<p align="center">
-  <b>Install:</b> <code>pipx install rvgen</code> &nbsp;or&nbsp; <code>pip install rvgen</code> in a venv — see <a href="#install">Install</a> for details.
+  <a href="docs/user-area.md"><b>Add Your Own Core</b></a>
 </p>
 
 ---

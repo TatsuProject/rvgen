@@ -22,8 +22,34 @@ from rvgen.streams.base import DirectedInstrStream
 STREAM_REGISTRY: dict[str, Type[DirectedInstrStream]] = {}
 
 
-def register_stream(name: str, cls: Type[DirectedInstrStream]) -> None:
-    STREAM_REGISTRY[name] = cls
+def register_stream(name: str, cls: Type[DirectedInstrStream] | None = None):
+    """Register a directed-instruction stream by name.
+
+    Two equivalent forms:
+
+    .. code-block:: python
+
+        # Function-call form (back-compat, used by every built-in stream)
+        register_stream("my_stream", MyStream)
+
+        # Decorator-factory form (more Pythonic, easier for new users)
+        @register_stream("my_stream")
+        @dataclass
+        class MyStream(DirectedInstrStream):
+            def build(self): ...
+
+    Returns the class unchanged when used as a decorator, so it can be
+    stacked with ``@dataclass`` and friends in any order.
+    """
+    if cls is not None:
+        STREAM_REGISTRY[name] = cls
+        return cls
+
+    def _decorator(c: Type[DirectedInstrStream]) -> Type[DirectedInstrStream]:
+        STREAM_REGISTRY[name] = c
+        return c
+
+    return _decorator
 
 
 def get_stream(name: str) -> Type[DirectedInstrStream]:

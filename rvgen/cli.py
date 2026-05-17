@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "exists → disabled.")
     p.add_argument("--help_targets", action="store_true",
                    help="List every known target (built-in + user area) and exit.")
+    p.add_argument("--validate_target", default="",
+                   help="Parse a target YAML, report unknown keys / bad enum "
+                        "names / unparseable sizes, preview the effective "
+                        "DMEM and IMEM caps, and exit 0/1. Useful before "
+                        "committing a new core's target file.")
     p.add_argument("-tl", "--testlist", default="",
                    help="Path to a regression testlist YAML. Optional — if "
                         "omitted, rvgen falls back to the user-area testlist, "
@@ -269,6 +274,156 @@ def _enforce_imem_budget(cfg, test_name: str) -> None:
     cfg.main_program_instr_cnt = max_instrs
 
 
+_KNOWN_TARGET_KEYS = frozenset({
+    "name", "xlen", "supported_isa", "supported_privileged_mode",
+    "satp_mode", "support_sfence", "support_unaligned_load_store",
+    "num_harts", "clint", "isa_string", "mabi", "unsupported_instr",
+    "implemented_csr", "implemented_interrupt", "implemented_exception",
+    "custom_csr", "data_section_size_bytes", "text_section_size_bytes",
+})
+
+
+def _validate_target_yaml(path: Path) -> int:
+    """Parse-and-check a target YAML; print findings; return 0/1.
+
+    Catches the most common new-user mistakes:
+      * unknown top-level keys (typo / wrong schema version)
+      * unknown enum names in supported_isa / supported_privileged_mode
+        / satp_mode / unsupported_instr
+      * size-string parse failures on data_/text_section_size_bytes
+      * missing mandatory fields (name / xlen / supported_isa)
+
+    On success, previews the effective DMEM/IMEM caps so the user can
+    spot a copy-paste mismatch (e.g. 16K typed as 16 = 16 bytes).
+    """
+    import yaml
+    if not path.exists():
+        print(f"FAIL: {path} does not exist", file=sys.stderr)
+        return 1
+    try:
+        with path.open() as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        print(f"FAIL: YAML parse error in {path}: {exc}", file=sys.stderr)
+        return 1
+    if not isinstance(data, dict):
+        print(f"FAIL: {path} top-level must be a mapping; got "
+              f"{type(data).__name__}", file=sys.stderr)
+        return 1
+
+    problems: list[str] = []
+    info: list[str] = []
+
+    # Unknown keys.
+    for key in data:
+        if key not in _KNOWN_TARGET_KEYS:
+            problems.append(f"  - unknown top-level key: {key!r} "
+                            f"(did you mean one of {sorted(_KNOWN_TARGET_KEYS)[:3]} …?)")
+
+    # Required fields.
+    for required in ("name", "xlen", "supported_isa"):
+        if required not in data:
+            problems.append(f"  - missing required field: {required!r}")
+
+    # Enum validation.
+    try:
+        from rvgen.isa.enums import (
+            RiscvInstrGroup, RiscvInstrName, PrivilegedMode, SatpMode,
+        )
+    except ImportError as exc:
+        problems.append(f"  - couldn't import enums to validate: {exc}")
+        RiscvInstrGroup = RiscvInstrName = PrivilegedMode = SatpMode = None  # type: ignore
+
+    def _check_enum(field: str, enum_cls, values):
+        if enum_cls is None or values is None:
+            return
+        if isinstance(values, str):
+            values = [values]
+        valid = {e.name for e in enum_cls}
+        for v in values:
+            if v not in valid:
+                problems.append(
+                    f"  - {field}: {v!r} is not a valid "
+                    f"{enum_cls.__name__} name. Valid: "
+                    f"{sorted(valid)[:5]} … ({len(valid)} total)"
+                )
+
+    _check_enum("supported_isa", RiscvInstrGroup, data.get("supported_isa"))
+    _check_enum("supported_privileged_mode", PrivilegedMode,
+                data.get("supported_privileged_mode"))
+    _check_enum("satp_mode", SatpMode, data.get("satp_mode"))
+    _check_enum("unsupported_instr", RiscvInstrName,
+                data.get("unsupported_instr"))
+
+    # Size-string parsing.
+    from rvgen.targets.loader import _parse_size
+    for size_field in ("data_section_size_bytes", "text_section_size_bytes"):
+        raw = data.get(size_field)
+        try:
+            parsed = _parse_size(raw)
+            if parsed is not None:
+                info.append(f"  - {size_field}: {raw!r} → {parsed:,} bytes")
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"  - {size_field}: failed to parse {raw!r}: {exc}")
+
+    # Output.
+    print(f"Validating: {path}")
+    if info:
+        print()
+        print("Resolved sizes:")
+        for line in info:
+            print(line)
+    if problems:
+        print()
+        print(f"FAIL: {len(problems)} issue(s):")
+        for line in problems:
+            print(line)
+        print()
+        return 1
+    print("OK: target YAML looks valid.")
+    return 0
+
+
+def _auto_import_user_streams(user_dir: Path | None) -> None:
+    """Import every ``<user_dir>/streams/*.py`` so @register_stream fires.
+
+    Without this, a user who writes ``user/streams/my_burst.py`` and
+    then runs ``rvgen --gen_opts "+directed_instr_1=my_burst_stream,5"``
+    would silently get zero stream insertions because the module was
+    never imported — the stream registry never saw it. Auto-import on
+    CLI startup makes the "drop a .py file and reference it" flow
+    just work.
+
+    Robustness: each module is imported in a try/except so one broken
+    file doesn't disable the whole CLI. Failures are logged at WARNING
+    so the user sees them but the run continues.
+    """
+    if user_dir is None:
+        return
+    streams_dir = user_dir / "streams"
+    if not streams_dir.is_dir():
+        return
+    import importlib.util
+    import sys as _sys
+    for path in sorted(streams_dir.glob("*.py")):
+        if path.name.startswith("_") or path.name == "README.md":
+            continue
+        mod_name = f"rvgen_user_streams.{path.stem}"
+        if mod_name in _sys.modules:
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(mod_name, path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = module
+            spec.loader.exec_module(module)
+            _LOG.debug("Auto-imported user stream: %s", path)
+        except Exception as exc:  # noqa: BLE001 — keep CLI alive
+            _LOG.warning("Failed to auto-import user stream %s: %s",
+                         path, exc)
+
+
 def _infer_output(out: str) -> Path:
     if out:
         return Path(out)
@@ -291,6 +446,14 @@ def main(argv: list[str] | None = None) -> int:
         set_user_dir(Path(args.user_dir))
     user_dir = resolve_user_dir()
 
+    # Auto-import every Python module under ``<user_dir>/streams/*.py``
+    # so a user's custom directed streams register themselves via
+    # ``@register_stream`` without the user having to remember to
+    # ``import my_stream`` before invoking the CLI. This closes the
+    # most common pre-existing friction (``+directed_instr_N=my_stream``
+    # silently does nothing because the module was never imported).
+    _auto_import_user_streams(user_dir)
+
     if args.help_targets:
         print(f"User area: {user_dir or '(none — set $RVGEN_USER_DIR or --user_dir)'}")
         print()
@@ -304,6 +467,9 @@ def main(argv: list[str] | None = None) -> int:
             for n in user_only:
                 print(f"  {n}")
         return 0
+
+    if args.validate_target:
+        return _validate_target_yaml(Path(args.validate_target))
 
     riscv_dv_root = Path(args.riscv_dv_root)
     # Only warn when the *user explicitly* asked for a non-default

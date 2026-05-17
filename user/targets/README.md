@@ -7,6 +7,15 @@ That way you can rename freely without touching imports.
 See `../README.md` for how rvgen discovers this directory
 (`--user_dir` / `$RVGEN_USER_DIR` / `./user`).
 
+> **Tip — list valid enum members:**
+> `python -c "from rvgen.isa.enums import RiscvInstrGroup as G; [print(g.name) for g in G]"`
+> Same trick works for `PrivilegedMode`, `SATP_MODE`, etc.
+
+> **Tip — validate before running:**
+> `rvgen --validate_target user/targets/my_core.yaml` parses the YAML,
+> reports unknown keys / bad enum names / size-string parse failures,
+> previews the effective DMEM/IMEM caps, and exits 0/1.
+
 ## Schema
 
 ```yaml
@@ -21,6 +30,19 @@ satp_mode: BARE
 support_sfence: false
 support_unaligned_load_store: true
 num_harts: 1
+
+# Memory layout — used by load/store stream offset clamping AND the
+# CLI's IMEM-fit estimator. Default ``null`` keeps SV-parity (no cap).
+# Accept human-friendly sizes: ``32KiB``, ``16K``, ``0x8000``, ``8192``.
+data_section_size_bytes: 32KiB       # total DMEM budget per target.
+                                     # When set, per-region defaults are
+                                     # scaled down so MMU stress streams
+                                     # don't escape DUT DMEM.
+text_section_size_bytes: 64KiB       # total IMEM budget. When set, the
+                                     # CLI scales ``instr_cnt`` down to
+                                     # fit and emits a WARNING. Required
+                                     # for embedded DUTs (e.g. a 16 KiB-
+                                     # IMEM IoT MCU) running large tests.
 
 # Implementation-defined CLINT memory map. Defaults match SiFive CLINT
 # (Spike / QEMU virt). Override when your DUT puts the timer elsewhere.

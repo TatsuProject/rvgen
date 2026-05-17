@@ -1,0 +1,173 @@
+"""Auto-import of user-area directed streams.
+
+When a user drops ``user/streams/my_burst.py`` into their user area and
+runs ``rvgen --gen_opts +directed_instr_1=my_burst_stream,5``, the
+CLI must auto-import that module so its ``@register_stream`` side
+effect fires. Without this test the path is fragile — a user could
+write a perfectly valid stream and silently get zero insertions in the
+generated `.S`.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+import textwrap
+
+import pytest
+
+from rvgen.cli import _auto_import_user_streams
+from rvgen.streams import STREAM_REGISTRY
+
+
+_STREAM_TEMPLATE = textwrap.dedent("""
+    \"\"\"Test stream registered for autoimport coverage.\"\"\"
+    from dataclasses import dataclass
+    from rvgen.streams import register_stream
+    from rvgen.streams.base import DirectedInstrStream
+    from rvgen.isa.factory import get_instr
+    from rvgen.isa.enums import RiscvInstrName, RiscvReg
+
+
+    @register_stream("{stream_name}")
+    @dataclass
+    class _Stream(DirectedInstrStream):
+        def build(self) -> None:
+            i = get_instr(RiscvInstrName.ADD)
+            i.rd = i.rs1 = i.rs2 = RiscvReg.A0
+            self.instr_list.append(i)
+""").strip()
+
+
+def test_autoimport_registers_stream_from_user_dir(tmp_path):
+    streams_dir = tmp_path / "streams"
+    streams_dir.mkdir()
+    name = "rvgen_autoimport_smoke_stream"
+    (streams_dir / "smoke.py").write_text(
+        _STREAM_TEMPLATE.format(stream_name=name)
+    )
+    # Sanity — the stream isn't registered yet.
+    assert name not in STREAM_REGISTRY
+
+    _auto_import_user_streams(tmp_path)
+
+    assert name in STREAM_REGISTRY
+
+
+def test_autoimport_skips_underscore_files(tmp_path):
+    streams_dir = tmp_path / "streams"
+    streams_dir.mkdir()
+    skipped = "rvgen_autoimport_skipped_stream"
+    (streams_dir / "_private.py").write_text(
+        _STREAM_TEMPLATE.format(stream_name=skipped)
+    )
+    _auto_import_user_streams(tmp_path)
+    assert skipped not in STREAM_REGISTRY
+
+
+def test_autoimport_tolerates_broken_module(tmp_path, caplog):
+    import logging
+    streams_dir = tmp_path / "streams"
+    streams_dir.mkdir()
+    (streams_dir / "broken.py").write_text(
+        "import nonexistent_package_xyzzy\n"
+    )
+    # Mustn't raise — the CLI should keep running.
+    with caplog.at_level(logging.WARNING, logger="rvgen.cli"):
+        _auto_import_user_streams(tmp_path)
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "Failed to auto-import" in msgs
+
+
+def test_autoimport_noop_for_missing_dir(tmp_path):
+    # streams/ subdir doesn't exist — must not raise.
+    _auto_import_user_streams(tmp_path)
+
+
+def test_autoimport_noop_for_none_user_dir():
+    _auto_import_user_streams(None)
+
+
+# ---------------------------------------------------------------------------
+# Target validator
+# ---------------------------------------------------------------------------
+
+
+def test_validate_target_good_yaml(tmp_path, capsys):
+    from rvgen.cli import _validate_target_yaml
+    yaml_path = tmp_path / "good.yaml"
+    yaml_path.write_text(textwrap.dedent("""
+        name: my_core
+        xlen: 32
+        supported_isa: [RV32I, RV32M, RV32C]
+        data_section_size_bytes: 8KiB
+        text_section_size_bytes: 16KiB
+    """).strip())
+    rc = _validate_target_yaml(yaml_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "OK" in out
+    assert "8,192 bytes" in out
+    assert "16,384 bytes" in out
+
+
+def test_validate_target_unknown_key(tmp_path, capsys):
+    from rvgen.cli import _validate_target_yaml
+    yaml_path = tmp_path / "typo.yaml"
+    yaml_path.write_text(textwrap.dedent("""
+        name: t
+        xlen: 32
+        supported_isa: [RV32I]
+        not_a_real_key: 42
+    """).strip())
+    rc = _validate_target_yaml(yaml_path)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "not_a_real_key" in out
+
+
+def test_validate_target_bad_enum(tmp_path, capsys):
+    from rvgen.cli import _validate_target_yaml
+    yaml_path = tmp_path / "bad_enum.yaml"
+    yaml_path.write_text(textwrap.dedent("""
+        name: t
+        xlen: 32
+        supported_isa: [RV32X_BOGUS]
+    """).strip())
+    rc = _validate_target_yaml(yaml_path)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "RV32X_BOGUS" in out
+    assert "RiscvInstrGroup" in out
+
+
+def test_validate_target_bad_size_string(tmp_path, capsys):
+    from rvgen.cli import _validate_target_yaml
+    yaml_path = tmp_path / "bad_size.yaml"
+    yaml_path.write_text(textwrap.dedent("""
+        name: t
+        xlen: 32
+        supported_isa: [RV32I]
+        text_section_size_bytes: "totally_invalid"
+    """).strip())
+    rc = _validate_target_yaml(yaml_path)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "text_section_size_bytes" in out
+
+
+def test_validate_target_missing_required(tmp_path, capsys):
+    from rvgen.cli import _validate_target_yaml
+    yaml_path = tmp_path / "missing.yaml"
+    yaml_path.write_text("xlen: 32\n")
+    rc = _validate_target_yaml(yaml_path)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "missing required field" in out
+
+
+def test_validate_target_nonexistent_file(tmp_path, capsys):
+    from rvgen.cli import _validate_target_yaml
+    rc = _validate_target_yaml(tmp_path / "nope.yaml")
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "does not exist" in err
