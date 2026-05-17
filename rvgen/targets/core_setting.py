@@ -115,3 +115,12 @@ class TargetCfg:
     # the user/kernel stacks, AMO region and any tohost padding).
     # Default ``None`` keeps SV-parity (two 3000-byte regions = 6 KiB).
     data_section_size_bytes: int | None = None
+    # ``text_section_size_bytes`` is the budget for the generated ``.text``
+    # (boot + init + main random sequence + sub-programs + directed
+    # streams + handler ROM). When set, the CLI estimates the generated
+    # ``.text`` byte size before emission and, if it exceeds the cap,
+    # warns the user and scales ``instr_cnt`` down to fit. Lets tests
+    # for small embedded DUTs (e.g. an IMEM = 64 KiB IoT MCU) stay
+    # within their actual silicon limits regardless of the testlist's
+    # ``+instr_cnt=`` plusarg. Default ``None`` = no cap (SV-parity).
+    text_section_size_bytes: int | None = None

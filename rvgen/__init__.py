@@ -14,7 +14,7 @@ Library API entry points (preferred for embedding rvgen in another tool)::
     result = p.run(steps=["gen", "gcc_compile", "iss_sim"])
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from rvgen.api import GeneratedAsm, Generator, Pipeline, PipelineResult
 

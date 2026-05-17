@@ -207,6 +207,9 @@ def load_target_yaml(path: Path | str) -> TargetCfg:
         "data_section_size_bytes": _parse_size(
             data.get("data_section_size_bytes")
         ),
+        "text_section_size_bytes": _parse_size(
+            data.get("text_section_size_bytes")
+        ),
     }
     return TargetCfg(**kwargs)
 
@@ -232,7 +235,7 @@ def _parse_size(value: Any) -> int | None:
                 break
         return int(float(s) * mult)
     raise TypeError(
-        f"data_section_size_bytes must be int, str, or null; got "
+        f"size value must be int, str, or null; got "
         f"{type(value).__name__}: {value!r}"
     )
 

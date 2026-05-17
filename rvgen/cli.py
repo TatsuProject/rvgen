@@ -199,6 +199,76 @@ def _infer_testlist_path(target: str, riscv_dv_root: Path) -> Path:
     return Path(__file__).parent / "testlists" / "base_testlist.yaml"
 
 
+# Empirical worst-case byte overhead per generated test for boot +
+# init + trap-handler ROM + signature stubs + page-table stubs.
+# Measured on rv32imc / rv64gc / rv64gc_aia targets: largest observed
+# is ~7 KB; 8 KB headroom covers Sv48 + debug + multi-hart variants.
+_TEXT_FIXED_OVERHEAD_BYTES = 8 * 1024
+
+# Worst-case per-instruction footprint. RVC ops are 2 bytes and pure
+# RV32I/RV64I are 4 bytes; we use 4 unconditionally for the budget
+# estimator so a target with compressed off (e.g. rv32i) is sized
+# correctly. Targets that enable RVC simply have headroom.
+_TEXT_BYTES_PER_INSTR = 4
+
+# Average byte cost per sub-program (label + a handful of ALU ops +
+# return jump). Conservative.
+_TEXT_BYTES_PER_SUBPROG = 256
+
+
+def _estimate_text_bytes(cfg) -> int:
+    """Rough upper bound on the generated `.text` byte size.
+
+    Used by :func:`_enforce_imem_budget` to decide whether the
+    requested ``instr_cnt`` will fit in the target's declared IMEM.
+    The estimate intentionally over-counts (no RVC discount) so that a
+    test that passes this gate is guaranteed to fit on silicon.
+    """
+    instr_bytes = int(cfg.main_program_instr_cnt or cfg.instr_cnt) * _TEXT_BYTES_PER_INSTR
+    subprog_bytes = int(cfg.num_of_sub_program) * _TEXT_BYTES_PER_SUBPROG
+    return _TEXT_FIXED_OVERHEAD_BYTES + instr_bytes + subprog_bytes
+
+
+def _enforce_imem_budget(cfg, test_name: str) -> None:
+    """Cap ``cfg.instr_cnt`` to fit within ``target.text_section_size_bytes``.
+
+    No-op when the target leaves the cap unset (default). When the
+    estimated `.text` size exceeds the budget, emits an `WARNING` log
+    line naming both the budget and the new instr count, then mutates
+    ``cfg`` in place. The estimator is conservative — actual emission
+    is always under the budget by at least the RVC discount.
+    """
+    budget = getattr(cfg.target, "text_section_size_bytes", None)
+    if budget is None or budget <= 0:
+        return
+    estimated = _estimate_text_bytes(cfg)
+    if estimated <= budget:
+        return
+    # Compute the largest instr_cnt that fits.
+    overhead = _TEXT_FIXED_OVERHEAD_BYTES + int(cfg.num_of_sub_program) * _TEXT_BYTES_PER_SUBPROG
+    if overhead >= budget:
+        _LOG.error(
+            "Test %r cannot fit: target.text_section_size_bytes=%d B is "
+            "smaller than the boot + handler + sub-program overhead "
+            "(%d B). Reduce num_of_sub_program or raise the IMEM cap "
+            "in the target YAML.",
+            test_name, budget, overhead,
+        )
+        return
+    max_instrs = max(8, (budget - overhead) // _TEXT_BYTES_PER_INSTR)
+    original = int(cfg.main_program_instr_cnt or cfg.instr_cnt)
+    _LOG.warning(
+        "Test %r requested instr_cnt=%d but the target's IMEM budget "
+        "(text_section_size_bytes=%d B) only fits ~%d instructions. "
+        "Scaling instr_cnt down to %d to stay within the configured "
+        "memory map. Raise target.text_section_size_bytes if you need "
+        "the larger test.",
+        test_name, original, budget, max_instrs, max_instrs,
+    )
+    cfg.instr_cnt = max_instrs
+    cfg.main_program_instr_cnt = max_instrs
+
+
 def _infer_output(out: str) -> Path:
     if out:
         return Path(out)
@@ -342,6 +412,15 @@ def main(argv: list[str] | None = None) -> int:
                 merged_gen_opts = (te.gen_opts or "") + " " + (args.gen_opts or "")
                 cfg = make_config(target_cfg, gen_opts=merged_gen_opts)
                 cfg.seed = seed
+                # IMEM-fit check — when the target declares a finite
+                # text-section budget, estimate the generated .text byte
+                # size and scale instr_cnt down to fit if needed. Lets
+                # tests for small embedded DUTs (e.g. 64 KiB IMEM IoT
+                # MCU) stay within actual silicon limits regardless of
+                # the testlist's +instr_cnt= plusarg. The cap is
+                # advisory when text_section_size_bytes is None (the
+                # default — SV-parity).
+                _enforce_imem_budget(cfg, te.test)
                 # Online coverage steering — only enabled when both the
                 # flag and the goals files were supplied. Fall back to
                 # standard random walk when either is missing.
