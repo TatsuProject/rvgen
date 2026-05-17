@@ -77,7 +77,7 @@ Call either or both; both write into the same CoverageDB.
 
 ## 3 — Covergroup catalogue
 
-32 covergroups in total (18 static + 10 runtime + 4 crosses).
+116 covergroups in total — static + runtime + crosses + sprint-2 deep-coverage additions. See `python -m rvgen.coverage.tools cov-explain --list-covergroups` for the live list.
 
 ### Static (sampled from the generator's instr list)
 

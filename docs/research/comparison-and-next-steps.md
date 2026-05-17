@@ -160,7 +160,7 @@ currently stand out most visibly.
 
 ### rvgen's approach
 
-- **Built-in, simulator-agnostic coverage** — 32 covergroups sampled
+- **Built-in, simulator-agnostic coverage** — 116 covergroups sampled
   in pure Python:
   - 18 **static** groups (from the generator's own instr list — no
     simulator needed).

@@ -20,7 +20,7 @@ That's it — no riscv-dv clone needed, no `--testlist`, no `$RISCV_DV_ROOT`. To
 <p align="center">
   <a href="#install"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0"></a>
-  <a href="#validation"><img src="https://img.shields.io/badge/tests-995%20passing-brightgreen" alt="995 tests"></a>
+  <a href="#validation"><img src="https://img.shields.io/badge/tests-1006%20passing-brightgreen" alt="1006 tests"></a>
   <a href="#validation"><img src="https://img.shields.io/badge/spike-213%2F213-brightgreen" alt="Spike regression"></a>
   <a href="https://pypi.org/project/rvgen/"><img src="https://img.shields.io/pypi/v/rvgen.svg" alt="PyPI"></a>
   <a href="docs/verification-guide.md"><img src="https://img.shields.io/badge/docs-verification%20guide-blueviolet" alt="Verification guide"></a>
@@ -110,7 +110,7 @@ See a real rendered example at **[`docs/examples/coverage-report.html`](docs/exa
 ## Highlights
 
 - **486 instructions** across RV32I/M/A/C/F/FC/D/DC, RV64 counterparts, Zba/Zbb/Zbc/Zbs, draft RV32B, ratified crypto (Zbkb/Zbkc/Zbkx/Zknd/Zkne/Zknh/Zksh/Zksed), and **RVV 1.0 (184 vector opcodes)**.
-- **27 targets** — rv32i through rv64gcv, plus bare `rv32ui`, 4 crypto variants, and **5 Zve\* embedded-vector profiles including Google's Coral NPU** (`rv32imf_zve32x_zbb`).
+- **36 targets** — rv32i through rv64gcv, plus bare `rv32ui`, 4 crypto variants, and **5 Zve\* embedded-vector profiles including Google's Coral NPU** (`rv32imf_zve32x_zbb`).
 - **16 directed-stream classes** — corner-value init, JAL chain, JALR pairs, loops, LR/SC, AMO, plus an SV-faithful scalar load/store family with locality / hazard / multi-page variants.
 - **32 functional-coverage groups** — opcode, format, category, group, operand registers, immediates, hazards (RAW/WAR/WAW), CSR access, FP rounding, vtype, memory alignment, category and opcode transitions, register crosses, plus runtime bins (branch direction, privilege mode, CSR values, bit-activity).
 - **CGF-style YAML goals** with layered overlays (baseline + per-target + per-test). 12 goal files shipped.
@@ -259,7 +259,7 @@ Every stage is optional via `--steps`. Coverage accumulates across runs when you
 
 ![coverage-model](docs/images/coverage-model.svg)
 
-32 covergroups sampled from two sources:
+116 covergroups sampled from two sources:
 
 - **Static** (at generation): opcode / format / category / group / rs1 / rs2 / rd / imm_sign / imm_range / hazard / csr / csr_access / fp_rm / vreg / vtype / mem_align / load_store_width / load_store_offset / category_transition / opcode_transition / rs1==rs2 / rs1==rd / directed_stream + 2 crosses.
 - **Runtime** (from spike `-l --log-commits`): branch_direction + branch×mnemonic / exception / privilege_mode / pc_reach / csr_value / rs_val_corner / bit_activity + `opcode_cg.*__dyn`.
@@ -448,7 +448,7 @@ rvgen/            # main package
 ├── sections/                     # data pages, signature, stack
 ├── gcc.py, iss.py                # external-tool wrappers (GCC + spike)
 ├── coverage/                     # functional-coverage subsystem
-│   ├── collectors.py              # 32 covergroups + sample_*
+│   ├── collectors.py              # 116 covergroups + sample_*
 │   ├── runtime.py                 # spike-trace parser
 │   ├── cgf.py                     # goals YAML loader
 │   ├── directed.py                # auto-regress perturbation table

@@ -16,7 +16,7 @@ All source under `rvgen/`:
 | `cli.py` | argparse entry point (`python -m rvgen ...`). Orchestrates the `gen,gcc_compile,iss_sim,cov` steps and wires `--auto_regress` to the dedicated driver. |
 | `auto_regress.py` | The `--auto_regress` loop: seed-bumping, coverage-directed perturbation, convergence tracking, plateau detection, per-seed asm archival. |
 | `config.py` | `Config` dataclass — every riscv-dv plusarg knob, plus our extensions. Parses `+key=value` strings. Stamps `VectorConfig` when the target advertises a vector profile. |
-| `targets/__init__.py` | Declarative `TargetCfg` table — 27 targets covering rv32i through rv64gcv plus Zve*/coralnpu embedded profiles. |
+| `targets/__init__.py` | Declarative `TargetCfg` table — 36 targets covering rv32i through rv64gcv plus Zve*/coralnpu embedded profiles. |
 | `testlist.py` | riscv-dv-format YAML loader with `<riscv_dv_root>` substitution + recursive `import:` support. |
 | `seeding.py` | `SeedGen` — fixed / start / rerun / random modes. |
 | `isa/` | Per-extension instruction modules (rv32i, rv32m, rv32f, bitmanip, crypto, rv32v, ...). Each calls `define_instr(name, format, category, group)` to register into the global `INSTR_REGISTRY`. |
