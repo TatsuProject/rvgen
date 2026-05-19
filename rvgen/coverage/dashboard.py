@@ -934,7 +934,7 @@ def _classify_cg_to_subsys(cg_name: str) -> str:
     if n in ("load_store_width_cg", "load_store_offset_cg",
              "mem_align_cg", "ea_align_cg",
              "cache_line_cross_cg", "page_cross_cg",
-             "mem_alias_cg"):
+             "mem_alias_cg", "cache_conflict_cg"):
         return "Memory access"
     if n in ("hazard_cg", "category_transition_cg",
              "opcode_transition_cg",

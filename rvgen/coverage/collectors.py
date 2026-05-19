@@ -398,6 +398,15 @@ CG_ATOMIC_ALIGN = "atomic_alignment_cg"
 # wfi_M_irq_pending, wfi_M_no_irq, wfi_S_tw_set, wfi_S_tw_clear,
 # wfi_U_tw_set. Captures the `mstatus.TW` trap-on-WFI path.
 CG_WFI_CORNER = "wfi_corner_cg"
+# Cache-conflict pressure — sampled from accesses stamped by
+# CacheConflictInstrStream. Bins capture how deep into a single
+# set-associative conflict group the access was: way_pressure_1..way_pressure_8
+# cover normal fills, eviction covers accesses beyond the cache's way count
+# (i.e. guaranteed to force a replacement on a `ways`-way set-associative
+# cache). single_set / multi_set capture whether the stream targeted one
+# set vs. several. Drives Tier-1 coverage of cache replacement / replay
+# logic; without this group, way-pressure stress is invisible to bin reports.
+CG_CACHE_CONFLICT = "cache_conflict_cg"
 
 
 ALL_COVERGROUPS: tuple[str, ...] = (
@@ -446,7 +455,7 @@ ALL_COVERGROUPS: tuple[str, ...] = (
     CG_MXR_SUM_MPRV, CG_FCVT_CORNER, CG_RVC_ILLEGAL,
     CG_SHAMT_CORNER, CG_VIRT_INSTR_TRAP,
     CG_VSETVL_AVL, CG_VREG_OVERLAP, CG_ATOMIC_ALIGN,
-    CG_WFI_CORNER,
+    CG_WFI_CORNER, CG_CACHE_CONFLICT,
 )
 
 
@@ -1807,6 +1816,22 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
     comment = getattr(instr, "comment", "") or ""
     if comment.startswith("Start "):
         _bump(db, CG_STREAM, comment[len("Start "):].strip() or "unknown")
+
+    # Cache-conflict pressure — CacheConflictInstrStream stamps
+    # _cache_conflict_set / _cache_conflict_pressure / _cache_conflict_ways on
+    # every load/store it emits. Bin by 1-indexed access depth into the set
+    # (capped at 8), aggregate as `eviction` once we pass the cache's way
+    # count, and add a per-set bin so reports show which sets were touched.
+    pressure = getattr(instr, "_cache_conflict_pressure", None)
+    if isinstance(pressure, int) and pressure > 0:
+        ways = int(getattr(instr, "_cache_conflict_ways", 8))
+        if pressure > ways:
+            _bump(db, CG_CACHE_CONFLICT, "eviction")
+        else:
+            _bump(db, CG_CACHE_CONFLICT, f"way_pressure_{min(pressure, 8)}")
+        set_idx = getattr(instr, "_cache_conflict_set", None)
+        if isinstance(set_idx, int):
+            _bump(db, CG_CACHE_CONFLICT, f"set_{set_idx}")
 
     # FP rounding mode — FloatingPointInstr carries .rm.
     rm = getattr(instr, "rm", None)

@@ -174,6 +174,16 @@ _PERTURBATIONS: tuple[tuple[str, Perturbation], ...] = (
      Perturbation(re.compile(r"\+gen_debug_section=\S+"),
                   "+gen_debug_section=1",
                   "dcsr_write empty → enable +gen_debug_section")),
+    # Cache-conflict pressure — inject CacheConflictInstrStream when set-conflict
+    # depth bins (eviction / deep way_pressure) are empty.
+    ("cache_conflict_cg.eviction",
+     Perturbation(None,
+                  "+directed_instr_24=riscv_cache_conflict_instr_stream,2",
+                  "cache_conflict eviction empty → inject riscv_cache_conflict_instr_stream")),
+    ("cache_conflict_cg.way_pressure_8",
+     Perturbation(None,
+                  "+directed_instr_24=riscv_cache_conflict_instr_stream,2",
+                  "cache_conflict way_pressure_8 empty → inject riscv_cache_conflict_instr_stream")),
     # Modern-extension cluster bins: only a target-switch fix.
     ("modern_ext_cg.zicond_czero_eqz",
      Perturbation(None, "",

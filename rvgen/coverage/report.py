@@ -32,7 +32,7 @@ _TIER_ORDER: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Memory / load-store", (
         "load_store_width_cg", "mem_align_cg", "load_store_offset_cg",
-        "cache_line_cross_cg", "page_cross_cg",
+        "cache_line_cross_cg", "page_cross_cg", "cache_conflict_cg",
     )),
     ("Branches", (
         "branch_direction_cg", "branch_taken_per_mnem_cg",

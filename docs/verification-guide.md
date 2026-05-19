@@ -80,7 +80,7 @@ Key signals:
 
 ## 3 — Understand what got sampled
 
-The generator collects 116 covergroups (use `python -m rvgen.coverage.tools cov-explain --list-covergroups` for the live list):
+The generator collects 117 covergroups (use `python -m rvgen.coverage.tools cov-explain --list-covergroups` for the live list):
 
 ### Static (sampled at generation time)
 

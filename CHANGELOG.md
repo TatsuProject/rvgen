@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(nothing yet — work after v0.2.0 lands here.)
+### Added — Cache-conflict directed stream + `cache_conflict_cg` (Tier-1 deep-coverage)
+
+- New `CacheConflictInstrStream` (`rvgen/streams/load_store.py`,
+  registered as `riscv_cache_conflict_instr_stream`). Generates loads
+  and stores whose offsets share the cache-set bits modulo a tunable
+  geometry (default 256 B / 4-way / 16 B-line, fitting in the default
+  ~3 KB `region_0`), so a set-associative L1/L2 sees forced
+  way-pressure and eviction patterns. Round-robins through `num_sets`
+  distinct sets and pushes `ways + extra_per_set` accesses into each,
+  guaranteeing at least `extra_per_set` evictions per set.
+- New `cache_conflict_cg` covergroup with `way_pressure_1..way_pressure_8`,
+  `eviction`, and `set_<N>` bins. Sampled per-instr from
+  `_cache_conflict_pressure` / `_cache_conflict_set` attributes the
+  stream stamps on each ld/st. Wired through the static collector,
+  baseline goals, scorecard / dashboard / `report` subsystem grouping
+  (Memory access).
+- Steering perturbation: `cache_conflict_cg.eviction` and
+  `way_pressure_8` empty bins trigger injection of
+  `riscv_cache_conflict_instr_stream` via the auto-regress driver.
+- 4 new unit tests in `tests/unit/test_streams.py` covering offset
+  congruence, eviction-pressure guarantee, base-register pinning, and
+  end-to-end coverage sampling.
 
 ## [0.2.0] — 2026-05-13
 

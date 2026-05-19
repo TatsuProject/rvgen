@@ -23,6 +23,10 @@ Provides the full SV class hierarchy:
   cores without PMP permissive mapping; useful for exception-injection
   testing).
 - :class:`LoadStoreSharedMemStream` — shared-region access (for multi-hart).
+- :class:`CacheConflictInstrStream` — generates load/store offsets that
+  share the same cache *set bits* (modulo a configurable geometry) so a
+  set-associative L1/L2 sees forced way-pressure / eviction patterns.
+  rvgen-only (no SV reference) — Tier-1 coverage extension.
 
 Every subclass produces a faithful atomic `instr_list` that the main
 sequence ``insert_instr_stream`` then splices into the randomized stream.
@@ -591,6 +595,106 @@ class LoadStoreRandAddrInstrStream(LoadStoreBaseInstrStream):
 
 
 @dataclass
+class CacheConflictInstrStream(LoadStoreBaseInstrStream):
+    """Forces a stream of accesses onto a small number of cache *sets*.
+
+    Set-associative caches index a line by ``(addr / line) % num_sets``. Two
+    addresses share a set iff they agree on those bits; once more than
+    ``ways`` addresses land in the same set, the cache must evict a line.
+    This stream synthesises offsets ``set_off + k * stride`` (with
+    ``stride = num_sets * line_bytes``) inside a single data region so the
+    chosen offsets are guaranteed-congruent regardless of the linker-assigned
+    region base — every access pins to the same physical set + line-offset
+    pair (modulo the region's own alignment), driving way-pressure /
+    replacement / replay paths.
+
+    Defaults model a tiny 256 B / 4-way / 16 B-line cache so an entire
+    pressure sequence (``ways + extra_per_set`` × ``num_sets``) fits
+    comfortably in the default 3 KB ``region_0`` (no region resize needed).
+    Override ``cache_line_bytes`` / ``cache_ways`` / ``num_sets`` to model
+    a different geometry.
+
+    The stream stamps each emitted load/store with ``_cache_conflict_set``
+    and ``_cache_conflict_pressure`` (1-indexed nth access into that set);
+    the static coverage collector reads those to populate ``cache_conflict_cg``.
+    """
+
+    cache_line_bytes: int = 16
+    cache_ways: int = 4
+    num_sets: int = 4
+    extra_per_set: int = 2
+
+    _num_ld_st_range: ClassVar[tuple[int, int]] = (0, 0)
+    _num_mix_range: ClassVar[tuple[int, int]] = (5, 12)
+
+    def _randomize_offsets(self, region_size: int) -> None:
+        line = max(1, self.cache_line_bytes)
+        ways = max(1, self.cache_ways)
+        nsets = max(1, self.num_sets)
+        accesses_per_set = ways + max(0, self.extra_per_set)
+        stride = nsets * line
+        footprint = (accesses_per_set - 1) * stride + line
+
+        # If the region is too small for the requested footprint, scale
+        # geometry down rather than fall back to random offsets.
+        while footprint > region_size and line > 1 and ways > 1:
+            if ways > 2:
+                ways -= 1
+            else:
+                nsets = max(1, nsets // 2)
+            accesses_per_set = ways + max(0, self.extra_per_set)
+            stride = nsets * line
+            footprint = (accesses_per_set - 1) * stride + line
+        # Save the geometry actually used so tests / coverage can inspect.
+        self.cache_ways = ways
+        self.num_sets = nsets
+
+        self.base = 0
+        self._offsets = []
+        self._addrs = []
+        self._set_indices: list[int] = []
+        self._pressure: list[int] = []
+
+        # Round-robin through target sets so a single sequence touches the
+        # full set of conflict groups; per-set the accesses are emitted in
+        # order of pressure (1, 2, ..., accesses_per_set).
+        per_set_emitted = [0] * nsets
+        # Interleave set-touches so adjacent accesses tend to map to
+        # different sets — exposes set-predictor coverage instead of just
+        # banged-on-one-set replay. We still emit accesses_per_set per set
+        # total.
+        order: list[int] = []
+        for _ in range(accesses_per_set):
+            order.extend(range(nsets))
+
+        for set_idx in order:
+            k = per_set_emitted[set_idx]
+            per_set_emitted[set_idx] += 1
+            off = set_idx * line + k * stride
+            # Pin to 0..region_size-1; the stride loop guarantees this when
+            # footprint <= region_size, but guard for tiny regions.
+            if off + line > region_size:
+                off %= max(line, region_size - line)
+            self._offsets.append(off)
+            self._addrs.append(off)
+            self._set_indices.append(set_idx)
+            self._pressure.append(k + 1)
+        self.num_load_store = len(self._offsets)
+
+    def _gen_load_store_instr(self, base_locked: set[RiscvReg]) -> list[Instr]:
+        out = super()._gen_load_store_instr(base_locked)
+        # Tag each emitted ld/st with the (set, pressure) it represents so
+        # the static coverage sampler can attribute bins.
+        for instr, set_idx, pressure in zip(
+            out, self._set_indices, self._pressure
+        ):
+            instr._cache_conflict_set = set_idx  # type: ignore[attr-defined]
+            instr._cache_conflict_pressure = pressure  # type: ignore[attr-defined]
+            instr._cache_conflict_ways = self.cache_ways  # type: ignore[attr-defined]
+        return out
+
+
+@dataclass
 class LoadStoreSharedMemStream(LoadStoreStressInstrStream):
     """Shared-memory load/store stream (SV:243).
 
@@ -630,3 +734,4 @@ register_stream("riscv_multi_page_load_store_instr_stream", MultiPageLoadStoreIn
 register_stream("riscv_mem_region_stress_test", MemRegionStressTest)
 register_stream("riscv_load_store_rand_addr_instr_stream", LoadStoreRandAddrInstrStream)
 register_stream("riscv_load_store_shared_mem_stream", LoadStoreSharedMemStream)
+register_stream("riscv_cache_conflict_instr_stream", CacheConflictInstrStream)

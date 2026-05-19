@@ -20,7 +20,7 @@ That's it — no riscv-dv clone needed, no `--testlist`, no `$RISCV_DV_ROOT`. To
 <p align="center">
   <a href="#install"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0"></a>
-  <a href="#validation"><img src="https://img.shields.io/badge/tests-1006%20passing-brightgreen" alt="1006 tests"></a>
+  <a href="#validation"><img src="https://img.shields.io/badge/tests-1012%20passing-brightgreen" alt="1012 tests"></a>
   <a href="#validation"><img src="https://img.shields.io/badge/spike-213%2F213-brightgreen" alt="Spike regression"></a>
   <a href="https://pypi.org/project/rvgen/"><img src="https://img.shields.io/pypi/v/rvgen.svg" alt="PyPI"></a>
   <a href="docs/verification-guide.md"><img src="https://img.shields.io/badge/docs-verification%20guide-blueviolet" alt="Verification guide"></a>
@@ -260,7 +260,7 @@ Every stage is optional via `--steps`. Coverage accumulates across runs when you
 
 ![coverage-model](docs/images/coverage-model.svg)
 
-116 covergroups sampled from two sources:
+117 covergroups sampled from two sources:
 
 - **Static** (at generation): opcode / format / category / group / rs1 / rs2 / rd / imm_sign / imm_range / hazard / csr / csr_access / fp_rm / vreg / vtype / mem_align / load_store_width / load_store_offset / category_transition / opcode_transition / rs1==rs2 / rs1==rd / directed_stream + 2 crosses.
 - **Runtime** (from spike `-l --log-commits`): branch_direction + branch×mnemonic / exception / privilege_mode / pc_reach / csr_value / rs_val_corner / bit_activity + `opcode_cg.*__dyn`.
@@ -449,7 +449,7 @@ rvgen/            # main package
 ├── sections/                     # data pages, signature, stack
 ├── gcc.py, iss.py                # external-tool wrappers (GCC + spike)
 ├── coverage/                     # functional-coverage subsystem
-│   ├── collectors.py              # 116 covergroups + sample_*
+│   ├── collectors.py              # 117 covergroups + sample_*
 │   ├── runtime.py                 # spike-trace parser
 │   ├── cgf.py                     # goals YAML loader
 │   ├── directed.py                # auto-regress perturbation table

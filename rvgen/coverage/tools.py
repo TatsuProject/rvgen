@@ -1613,6 +1613,8 @@ _GROUP_TO_SUBSYS: dict[str, str] = {
     "leading_trailing_cg": "Value class",
     # Sprint-2 — debug.
     "dcsr_cause_cg": "Debug",
+    # Cache-conflict pressure (Tier-1 follow-up).
+    "cache_conflict_cg": "Memory access",
 }
 
 

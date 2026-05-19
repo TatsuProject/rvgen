@@ -548,3 +548,17 @@ fp_src_class_cg:
   src_nan: 0
   src_subnormal: 0
   src_normal: 0
+
+# Cache-conflict pressure — populated by CacheConflictInstrStream. way_pressure_N
+# captures the nth access into a single set; `eviction` covers anything past the
+# cache's way count. set_<N> show which set indices the stream targeted.
+cache_conflict_cg:
+  way_pressure_1: 0
+  way_pressure_2: 0
+  way_pressure_3: 0
+  way_pressure_4: 0
+  way_pressure_5: 0
+  way_pressure_6: 0
+  way_pressure_7: 0
+  way_pressure_8: 0
+  eviction: 0
