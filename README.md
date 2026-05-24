@@ -20,7 +20,7 @@ That's it — no riscv-dv clone needed, no `--testlist`, no `$RISCV_DV_ROOT`. To
 <p align="center">
   <a href="#install"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0"></a>
-  <a href="#validation"><img src="https://img.shields.io/badge/tests-1012%20passing-brightgreen" alt="1012 tests"></a>
+  <a href="#validation"><img src="https://img.shields.io/badge/tests-1014%20passing-brightgreen" alt="1014 tests"></a>
   <a href="#validation"><img src="https://img.shields.io/badge/spike-213%2F213-brightgreen" alt="Spike regression"></a>
   <a href="https://pypi.org/project/rvgen/"><img src="https://img.shields.io/pypi/v/rvgen.svg" alt="PyPI"></a>
   <a href="docs/verification-guide.md"><img src="https://img.shields.io/badge/docs-verification%20guide-blueviolet" alt="Verification guide"></a>

@@ -207,3 +207,38 @@ def test_help_streams_shows_user_streams(tmp_path, capsys, monkeypatch):
     assert rc == 0
     assert "User-area streams" in out
     assert name in out
+
+
+# ---------------------------------------------------------------------------
+# --help_tests flag — completes the discoverability trio with --help_targets
+# / --help_streams. Closes the #1 onboarding question: "what tests can I
+# actually run on this target?"
+# ---------------------------------------------------------------------------
+
+
+def test_help_tests_lists_tests_for_target(capsys):
+    from rvgen.cli import main
+    rc = main(["--target", "rv32imc", "--help_tests"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    # Header lines.
+    assert "Testlist:" in out
+    assert "Target:" in out and "rv32imc" in out
+    # Column header + at least one canonical riscv-dv test entry.
+    assert "TEST" in out and "ITER" in out and "DESCRIPTION" in out
+    assert "riscv_rand_instr_test" in out
+    # The footer counts the tests and shows a runnable command.
+    assert "tests available" in out
+    assert "rvgen --target rv32imc --test" in out
+
+
+def test_help_tests_dedups_imported_entries(capsys):
+    """Per-target testlists `import` base_testlist.yaml; the same test name
+    can appear twice. The list output must de-duplicate."""
+    from rvgen.cli import main
+    rc = main(["--target", "rv32imc", "--help_tests"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    # riscv_rand_instr_test exists in both per-target and base lists;
+    # output must show it exactly once.
+    assert out.count("  riscv_rand_instr_test ") == 1

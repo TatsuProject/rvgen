@@ -64,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="List every registered directed stream (the names that "
                         "go in +directed_instr_N=<name>,<cnt>) and exit. "
                         "Includes both built-in and user-area streams.")
+    p.add_argument("--help_tests", action="store_true",
+                   help="List every test in the resolved testlist for "
+                        "--target (or --testlist if given) with iterations "
+                        "and description, then exit. Mirror of --help_targets "
+                        "/ --help_streams — answers 'what tests can I "
+                        "actually run on this target?'")
     p.add_argument("--validate_target", default="",
                    help="Parse a target YAML, report unknown keys / bad enum "
                         "names / unparseable sizes, preview the effective "
@@ -388,6 +394,64 @@ def _validate_target_yaml(path: Path) -> int:
     return 0
 
 
+def _print_help_tests(args, riscv_dv_root: Path) -> int:
+    """List every test in the resolved testlist with description + iterations.
+
+    Mirror of ``--help_targets`` / ``--help_streams`` — closes the
+    discoverability trio. Verif engineers running ``pip install rvgen``
+    for the first time need to know which tests are available without
+    grepping yaml/. Resolution is the same as the gen step:
+
+    1. ``--testlist`` if explicitly given
+    2. else the target-inferred testlist (per-target → base → packaged)
+    """
+    from rvgen.testlist import load_testlist
+
+    testlist_path = (
+        Path(args.testlist) if args.testlist
+        else _infer_testlist_path(args.target, riscv_dv_root)
+    )
+    if not testlist_path.exists():
+        print(f"Testlist not found: {testlist_path}", file=sys.stderr)
+        return 1
+    try:
+        entries = load_testlist(
+            testlist_path, riscv_dv_root=riscv_dv_root,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Failed to load testlist {testlist_path}: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Testlist: {testlist_path}")
+    print(f"Target:   {args.target}")
+    print()
+    if not entries:
+        print("(no tests with iterations > 0 — nothing to run)")
+        return 0
+    # Per-target testlists `import` base_testlist.yaml so the same test name
+    # can appear twice (per-target override + base). First occurrence wins —
+    # that's also what `load_testlist` resolution prefers downstream.
+    seen: set[str] = set()
+    unique: list = []
+    for e in entries:
+        if e.test in seen:
+            continue
+        seen.add(e.test)
+        unique.append(e)
+    name_w = min(48, max(len(e.test) for e in unique))
+    print(f"  {'TEST':<{name_w}s}  ITER  DESCRIPTION")
+    print(f"  {'-' * name_w}  ----  -----------")
+    for e in unique:
+        desc = (e.description or "").replace("\n", " ").strip()
+        if len(desc) > 60:
+            desc = desc[:57] + "..."
+        print(f"  {e.test:<{name_w}s}  {e.iterations:>4d}  {desc}")
+    print()
+    print(f"{len(unique)} tests available.  "
+          f"Run any with:  rvgen --target {args.target} --test <TEST>")
+    return 0
+
+
 def _auto_import_user_streams(user_dir: Path | None) -> None:
     """Import every ``<user_dir>/streams/*.py`` so @register_stream fires.
 
@@ -493,6 +557,9 @@ def main(argv: list[str] | None = None) -> int:
             for name, mod in user:
                 print(f"  {name:<48s}  {mod}")
         return 0
+
+    if args.help_tests:
+        return _print_help_tests(args, Path(args.riscv_dv_root))
 
     if args.validate_target:
         return _validate_target_yaml(Path(args.validate_target))

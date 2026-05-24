@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `--help_tests` CLI flag (discoverability trio)
+
+- New `rvgen --target <T> --help_tests` lists every test in the resolved
+  testlist (per-target overlay → packaged baseline) with iterations and
+  description, plus a runnable example command. Completes the
+  discoverability trio alongside `--help_targets` and `--help_streams`.
+  Closes the #1 onboarding question — "what tests can I run on this
+  target?" — without grepping `yaml/`.
+- Dedups imported entries (per-target testlists `import`
+  `base_testlist.yaml` so the same test name often appears twice).
+- 2 new unit tests cover output structure + dedup behaviour.
+
 ### Added — Cache-conflict directed stream + `cache_conflict_cg` (Tier-1 deep-coverage)
 
 - New `CacheConflictInstrStream` (`rvgen/streams/load_store.py`,
