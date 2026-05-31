@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from rvgen.isa.base import Instr
 from rvgen.isa.enums import RiscvInstrName, RiscvReg
@@ -23,6 +24,9 @@ class LoopInstr(DirectedInstrStream):
         addi <cnt>, <cnt>, -1
         bne <cnt>, zero, 0b
     """
+
+    # The back-edge is a BNE — the stream cannot exist without it.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_branch_jump",)
 
     num_of_instr_in_loop: int = 0
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from typing import ClassVar
 
 from rvgen.isa.base import Instr
 from rvgen.streams import register_stream
@@ -65,6 +66,9 @@ class VstartCornerInstrStream(DirectedInstrStream):
     The corner values are picked from {0, 1, 2, 4, 8, 16}. After each
     pair, vstart auto-resets to 0 on hardware (we don't need to clean up).
     """
+
+    # The stream is a CSR-write stress test; honor the user's no_csr_instr.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_csr_instr",)
 
     num_pairs: int = 0
 

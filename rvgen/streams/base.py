@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from rvgen.config import Config
 from rvgen.isa.base import Instr
@@ -21,6 +22,14 @@ from rvgen.isa.filtering import AvailableInstrs
 @dataclass
 class DirectedInstrStream:
     """Base class for atomic directed instruction streams."""
+
+    # Knobs on ``cfg`` that, when truthy, drop this stream entirely.
+    # The splicer (asm_program_gen.py) consults this BEFORE building so
+    # ``+no_branch_jump=1 +directed_instr_1=riscv_loop_instr,N`` honors the
+    # user's knob instead of silently emitting branches.
+    # ClassVar tells dataclass this is a class attribute, not a field;
+    # subclasses override with a plain class-level assignment.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ()
 
     cfg: Config
     avail: AvailableInstrs
@@ -34,6 +43,20 @@ class DirectedInstrStream:
     hart: int = 0
     #: The built instruction list.
     instr_list: list[Instr] = field(default_factory=list)
+
+    @classmethod
+    def is_banned_by(cls, cfg: Config) -> str | None:
+        """Return the first ``cfg.no_*`` knob name that vetoes this stream,
+        or None if the stream is allowed under the current config.
+
+        Used by the splicer to drop a directed-stream request without
+        building it — the user's knob wins over the directed_instr
+        plusarg.
+        """
+        for knob in cls.BANNED_BY:
+            if getattr(cfg, knob, False):
+                return knob
+        return None
 
     def build(self) -> None:
         """Populate :attr:`instr_list`. Subclasses override."""

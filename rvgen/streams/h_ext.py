@@ -20,6 +20,7 @@ the privilege-level effect.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from rvgen.isa.enums import RiscvInstrName, RiscvReg
 from rvgen.isa.factory import INSTR_REGISTRY, get_instr
@@ -36,6 +37,11 @@ from rvgen.streams.directed import _LaPseudo
 @dataclass
 class HypervisorInstrStream(DirectedInstrStream):
     """Emit a small mix of H-ext loads, stores, and TLB-flushes."""
+
+    # The stream's signature output is HFENCE; drop the whole stream when
+    # the user forbids fences. (HLV/HSV could be retained under no_fence
+    # alone, but the simpler contract is "no_fence ⇒ no H-ext stream".)
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_fence",)
 
     num_of_h_instr: int = 0
 

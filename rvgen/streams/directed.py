@@ -6,6 +6,7 @@ Port of key streams from ``src/riscv_directed_instr_lib.sv``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from rvgen.isa.base import Instr
 from rvgen.isa.enums import (
@@ -182,6 +183,9 @@ class JalInstr(DirectedInstrStream):
     an infinite loop when it entered the cycle that didn't include the end.
     """
 
+    # JAL is the entire point of this stream — honor the user's no_branch_jump.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_branch_jump",)
+
     num_of_jump_instr: int = 0
 
     def build(self) -> None:
@@ -337,6 +341,9 @@ class JalrInstr(DirectedInstrStream):
     point is to ensure the JALR opcode appears in the emitted stream so
     functional-coverage collectors see it.
     """
+
+    # JALR is the entire point of this stream — honor the user's no_branch_jump.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_branch_jump",)
 
     num_of_jalr: int = 0
 
