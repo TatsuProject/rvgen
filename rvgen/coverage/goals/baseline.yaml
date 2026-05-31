@@ -552,13 +552,28 @@ fp_src_class_cg:
 # Cache-conflict pressure — populated by CacheConflictInstrStream. way_pressure_N
 # captures the nth access into a single set; `eviction` covers anything past the
 # cache's way count. set_<N> show which set indices the stream targeted.
+#
+# IMPORTANT: bins must match the stream's reachable output range under
+# default parameters. The default geometry is cache_ways=4, extra_per_set=2,
+# so total pressure tops out at ways + extra = 6 — and anything >ways is
+# collapsed into ``eviction`` by the sampler. way_pressure_5..8 are
+# therefore UNREACHABLE with shipped defaults; declaring them as goals
+# would create permanently-failing regressions. If you raise the
+# stream's cache_ways knob, extend this list to match.
 cache_conflict_cg:
   way_pressure_1: 0
   way_pressure_2: 0
   way_pressure_3: 0
   way_pressure_4: 0
-  way_pressure_5: 0
-  way_pressure_6: 0
-  way_pressure_7: 0
-  way_pressure_8: 0
   eviction: 0
+
+# RVC HINT / reserved-encoding watchdog. These bins are NEGATIVE goals —
+# they should stay at 0 forever. rvgen/isa/compressed.py constrains every
+# random C-format generation to avoid the reserved/HINT immediates. If
+# any of these bins ever increments, the constraint logic regressed.
+rvc_illegal_corner_cg:
+  c_lui_nzimm_zero: 0
+  c_addi16sp_nzimm_zero: 0
+  c_addiw_rd_zero: 0
+  c_slli_shamt_zero: 0
+  c_addi_nzimm_zero: 0

@@ -1833,6 +1833,33 @@ def sample_instr(db: CoverageDB, instr: Instr, *, vector_cfg=None) -> None:
         if isinstance(set_idx, int):
             _bump(db, CG_CACHE_CONFLICT, f"set_{set_idx}")
 
+    # RVC HINT / reserved-encoding watchdog. The compressed encoding has
+    # several immediate values that are reserved as HINTs (spec C.1) or
+    # outright illegal. rvgen/isa/compressed.py constrains every random
+    # generation to AVOID these — so under healthy generation these bins
+    # never increment. If any do, the constraint logic regressed.
+    # Reservations checked here (from the RISC-V C extension spec):
+    #   * C.LUI       — nzimm=0 reserved
+    #   * C.ADDI16SP  — nzimm=0 reserved
+    #   * C.ADDIW     — rd=x0 reserved (RV64-only encoding)
+    #   * C.SLLI      — shamt=0 HINT (reserved hint space)
+    #   * C.ADDI      — nzimm=0 HINT
+    iname = getattr(instr, "instr_name", None)
+    if iname is not None and iname.name.startswith("C_"):
+        imm = getattr(instr, "imm", None)
+        rd = getattr(instr, "rd", None)
+        rd_idx = getattr(rd, "value", None) if rd is not None else None
+        if iname == RiscvInstrName.C_LUI and imm == 0:
+            _bump(db, CG_RVC_ILLEGAL, "c_lui_nzimm_zero")
+        elif iname == RiscvInstrName.C_ADDI16SP and imm == 0:
+            _bump(db, CG_RVC_ILLEGAL, "c_addi16sp_nzimm_zero")
+        elif iname == RiscvInstrName.C_ADDIW and rd_idx == 0:
+            _bump(db, CG_RVC_ILLEGAL, "c_addiw_rd_zero")
+        elif iname == RiscvInstrName.C_SLLI and imm == 0:
+            _bump(db, CG_RVC_ILLEGAL, "c_slli_shamt_zero")
+        elif iname == RiscvInstrName.C_ADDI and imm == 0:
+            _bump(db, CG_RVC_ILLEGAL, "c_addi_nzimm_zero")
+
     # FP rounding mode — FloatingPointInstr carries .rm.
     rm = getattr(instr, "rm", None)
     if isinstance(rm, FRoundingMode):
