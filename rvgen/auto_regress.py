@@ -32,6 +32,7 @@ import argparse
 import json
 import logging
 import random
+import zlib
 from pathlib import Path
 from typing import Iterable
 
@@ -209,7 +210,13 @@ def run_auto_regression(
             cfg = make_config(target_cfg, gen_opts=merged_gen_opts)
             cfg.seed = seed
             avail = create_instr_list(cfg)
-            rng_i = random.Random(seed ^ hash(te.test) & 0xFFFF_FFFF)
+            # Mix the test name into the per-test sub-seed so two different
+            # tests in the same seed don't generate identical .S. Use
+            # zlib.crc32 — stable across Python processes, machines, and
+            # versions. ``hash(str)`` would NOT be stable: CPython
+            # randomizes string hashes per process (PYTHONHASHSEED),
+            # which silently broke seed_archive replay.
+            rng_i = random.Random((seed ^ zlib.crc32(te.test.encode())) & 0xFFFF_FFFF)
 
             gen = AsmProgramGen(cfg=cfg, avail=avail, rng=rng_i)
             lines = gen.gen_program()
