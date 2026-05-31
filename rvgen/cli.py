@@ -699,17 +699,25 @@ def main(argv: list[str] | None = None) -> int:
                 _LOG.info("Generated %s (seed=%d, %d lines)",
                           asm_path, seed, len(lines))
 
-                # Sample the main sequence into both the per-test + run DB.
+                # Sample every hart's main sequence into the per-test + run DB.
                 # Fresh DB per test_id — caller can ask "which test closed
                 # which bin" by inspecting per_test_cov afterwards. Forward
                 # the active vector_cfg so vtype_dyn_cg gets populated.
-                if gen.main_sequence is not None and gen.main_sequence.instr_stream is not None:
+                # NOTE: iterate gen.hart_sequences (not just gen.main_sequence)
+                # so multi-hart targets don't drop bins for harts 0..N-2.
+                hart_seqs = gen.hart_sequences or (
+                    [gen.main_sequence] if gen.main_sequence is not None else []
+                )
+                if hart_seqs:
                     per_test = new_cov_db()
-                    cov_sample_sequence(
-                        per_test,
-                        gen.main_sequence.instr_stream.instr_list,
-                        vector_cfg=cfg.vector_cfg,
-                    )
+                    for seq in hart_seqs:
+                        if seq is None or seq.instr_stream is None:
+                            continue
+                        cov_sample_sequence(
+                            per_test,
+                            seq.instr_stream.instr_list,
+                            vector_cfg=cfg.vector_cfg,
+                        )
                     # Sample any PMP regions the boot path emitted —
                     # pmp_cfg_cg bins capture the (A × L × XWR) shape.
                     pmp_regions = getattr(cfg, "_emitted_pmp_regions", None)

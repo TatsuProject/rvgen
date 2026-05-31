@@ -156,8 +156,13 @@ class AsmProgramGen:
     # Output bucket: the final list of ``.S`` lines.
     instr_stream: list[str] = field(default_factory=list)
 
-    # Per-hart sequences (Phase 1 MVP: single hart only).
+    # Per-hart sequences. ``main_sequence`` holds the LAST hart's sequence
+    # (back-compat for callers that assumed one hart). ``hart_sequences``
+    # holds every hart's sequence in hart order — coverage sampling iterates
+    # this list so multi-hart targets don't silently drop N-1 harts' worth
+    # of bins.
     main_sequence: InstrSequence | None = None
+    hart_sequences: list[InstrSequence] = field(default_factory=list)
 
     # Symbol names bound in :meth:`gen_program`.
     hart: int = 0
@@ -165,6 +170,7 @@ class AsmProgramGen:
     def gen_program(self) -> list[str]:
         """Assemble the full ``.S`` line list (M-mode, DIRECT, no paging)."""
         self.instr_stream = []
+        self.hart_sequences = []
         self._gen_program_header()
         for hart in range(self.cfg.num_of_harts):
             self.hart = hart
@@ -264,6 +270,10 @@ class AsmProgramGen:
             label_name=main_label,
             instr_cnt=self.cfg.main_program_instr_cnt,
         )
+        # Track every hart's sequence so the coverage step in cli.py can
+        # sample all of them — overwriting self.main_sequence alone would
+        # silently drop bins for harts 0..N-2.
+        self.hart_sequences.append(self.main_sequence)
         # Build directed-stream instances from cfg.directed_instr = {idx: (name, cnt)}.
         # Label uniqueness: use a stream-name-keyed global counter so that
         # two directive entries naming the same stream (e.g. testlist has
@@ -303,6 +313,28 @@ class AsmProgramGen:
                 stream_cls = get_stream(name)
             except KeyError:
                 # Unknown streams are skipped silently for Phase 1 forward-compat.
+                continue
+            # BANNED_BY guard: if any cfg.no_* knob declared on the stream
+            # class is set, the user has explicitly forbidden the
+            # category — drop the stream rather than emit forbidden
+            # mnemonics. The user's knob wins over the
+            # +directed_instr_N plusarg. See audit H3-H5 in
+            # research/12_qa_audit_2026-05-31.md for the rationale.
+            banned_by = getattr(stream_cls, "is_banned_by", lambda _c: None)(self.cfg)
+            if banned_by:
+                # WARNING (not INFO) — the verif engineer wrote BOTH
+                # ``+no_X=1`` and ``+directed_instr_N=<X-emitting-stream>``
+                # in the same run. They probably forgot the conflict; loud
+                # log so they notice in CI output. Knob wins for now.
+                # Future work (per user feedback 2026-05-31): consider
+                # per-stream OVERRIDE_KNOBS so streams whose entire purpose
+                # is the banned class warn-and-override instead of drop.
+                import logging as _logging
+                _logging.getLogger("rvgen.cli").warning(
+                    "directed stream %s dropped: cfg.%s is set "
+                    "(use a different stream or clear the knob)",
+                    name, banned_by,
+                )
                 continue
             for _ in range(max(count, 1)):
                 i = stream_counter.get(name, 0)
