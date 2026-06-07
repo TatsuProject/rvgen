@@ -132,6 +132,11 @@ def _width_allowed(
 class LoadStoreBaseInstrStream(DirectedInstrStream):
     """Per-region locality-aware load/store stream (SV line 20)."""
 
+    # Load/store IS the entire payload — honor the user's no_load_store
+    # knob. Subclasses (Stress, Rand, Hazard, RandAddr, CacheConflict,
+    # SharedMem, MemRegionStress) inherit this declaration.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_load_store",)
+
     # Tuning knobs — subclasses can override class-level or per-instance.
     num_load_store: int = 0
     num_mixed_instr: int = 0
@@ -481,6 +486,10 @@ class MultiPageLoadStoreInstrStream(DirectedInstrStream):
     then shuffles their instr_lists together so the dynamic access pattern
     churns across regions — exercises TLB / data-prefetcher logic.
     """
+
+    # Subclasses (MemRegionStressTest) inherit. Same rationale as
+    # LoadStoreBaseInstrStream: LS is the entire payload.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_load_store",)
 
     num_of_instr_stream: int = 0
     _NUM_RANGE: ClassVar[tuple[int, int]] = (2, 8)

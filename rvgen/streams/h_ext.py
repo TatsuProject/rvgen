@@ -38,10 +38,11 @@ from rvgen.streams.directed import _LaPseudo
 class HypervisorInstrStream(DirectedInstrStream):
     """Emit a small mix of H-ext loads, stores, and TLB-flushes."""
 
-    # The stream's signature output is HFENCE; drop the whole stream when
-    # the user forbids fences. (HLV/HSV could be retained under no_fence
-    # alone, but the simpler contract is "no_fence ⇒ no H-ext stream".)
-    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_fence",)
+    # The stream mixes HFENCE (fence-category) with HLV/HSV
+    # (load/store-category). Either knob alone is enough to drop the
+    # whole stream — there's no useful subset to emit under either
+    # restriction.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_fence", "no_load_store")
 
     num_of_h_instr: int = 0
 

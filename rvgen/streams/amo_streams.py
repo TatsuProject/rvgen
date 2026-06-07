@@ -9,6 +9,8 @@ from rvgen.isa.enums import RiscvInstrGroup, RiscvInstrName, RiscvReg
 from rvgen.isa.factory import get_instr
 from rvgen.isa.filtering import get_rand_instr, randomize_gpr_operands
 from rvgen.streams.base import DirectedInstrStream
+from typing import ClassVar
+
 from rvgen.streams import register_stream
 from rvgen.streams.directed import _LaPseudo
 
@@ -16,6 +18,9 @@ from rvgen.streams.directed import _LaPseudo
 @dataclass
 class LrScInstrStream(DirectedInstrStream):
     """Single LR/SC pair (SV: ``riscv_lr_sc_instr_stream``, src/riscv_amo_instr_lib.sv:138)."""
+
+    # LR / SC are loads / stores. Honor the user's no_load_store knob.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_load_store",)
 
     num_mixed_instr: int = 0
 
@@ -99,6 +104,9 @@ class LrScInstrStream(DirectedInstrStream):
 @dataclass
 class AmoInstrStream(DirectedInstrStream):
     """Back-to-back AMO instructions (SV: ``riscv_amo_instr_stream``, src/riscv_amo_instr_lib.sv:215)."""
+
+    # AMOs are memory ops (read-modify-write). Honor no_load_store.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_load_store",)
 
     num_amo: int = 0
 

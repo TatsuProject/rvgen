@@ -95,6 +95,10 @@ _VECTOR_AMO_NAMES = (
 class VectorLoadStoreInstrStream(DirectedInstrStream):
     """Vector load/store stream (SV: ``riscv_vector_load_store_instr_stream``)."""
 
+    # Vector LS is the entire payload. Subclasses (VectorAmoInstrStream)
+    # inherit. Honor the user's no_load_store knob.
+    BANNED_BY: ClassVar[tuple[str, ...]] = ("no_load_store",)
+
     num_mixed_instr: int = 0
     address_mode: AddressMode | None = None
     eew: int = 0

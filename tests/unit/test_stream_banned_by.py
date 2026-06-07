@@ -42,7 +42,9 @@ from rvgen.targets import get_target
     ("riscv_loop_instr",                   ("no_branch_jump",)),
     ("riscv_jal_instr",                    ("no_branch_jump",)),
     ("riscv_jalr_instr",                   ("no_branch_jump",)),
-    ("riscv_hypervisor_instr",             ("no_fence",)),
+    # Hypervisor stream mixes HFENCE (fence) with HLV/HSV (load/store);
+    # extended to list both knobs as part of the M9 closure cycle.
+    ("riscv_hypervisor_instr",             ("no_fence", "no_load_store")),
     ("riscv_vstart_corner_instr_stream",   ("no_csr_instr",)),
 ])
 def test_known_leaky_streams_declare_banned_by(stream_name, expected_banned_by):
