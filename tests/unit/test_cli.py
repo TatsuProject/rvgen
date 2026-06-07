@@ -86,8 +86,10 @@ def test_cli_writes_seed_yaml(tmp_path):
     assert seed_yaml.exists()
     import yaml
     data = yaml.safe_load(seed_yaml.read_text())
-    assert data["riscv_arithmetic_basic_test_0"] == 7
-    assert data["riscv_arithmetic_basic_test_1"] == 8
+    # test_id format: f"{test_name}_{entry_idx}_{iteration}". Single
+    # test entry → entry_idx=0; iterations=2 → it ∈ {0, 1}.
+    assert data["riscv_arithmetic_basic_test_0_0"] == 7
+    assert data["riscv_arithmetic_basic_test_0_1"] == 8
 
 
 def test_cli_rejects_unknown_target(tmp_path):

@@ -662,9 +662,13 @@ def main(argv: list[str] | None = None) -> int:
 
     seen_seeds: dict[str, int] = {}
     if "gen" in steps:
-        for te in tests:
+        for entry_idx, te in enumerate(tests):
             for it in range(te.iterations):
-                test_id = f"{te.test}_{it}"
+                # Include entry_idx so two testlist entries with the same
+                # test name + same iteration index don't collide in
+                # per_test_cov / seen_seeds. Previously ``f"{te.test}_{it}"``
+                # let the second entry overwrite the first.
+                test_id = f"{te.test}_{entry_idx}_{it}"
                 seed = seed_gen.get(test_id, it)
                 seen_seeds[test_id] = seed
 

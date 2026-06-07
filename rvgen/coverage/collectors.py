@@ -2104,6 +2104,10 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
             intervening_since_lr += 1
 
         # vstart-corner pseudo carries _vstart_value — bin it.
+        # Bin namespace (matches CG_VEC_VSTART docstring): zero / one /
+        # small / mid / max. The previous "high" name didn't match the
+        # documented namespace and the stream's corner set never reached
+        # it anyway — both fixed together.
         if hasattr(instr, "_vstart_value"):
             v = int(instr._vstart_value)
             if v == 0:
@@ -2115,7 +2119,7 @@ def sample_sequence(db: CoverageDB, seq: Iterable[Instr], *, vector_cfg=None) ->
             elif v <= 16:
                 bin_name = "mid"
             else:
-                bin_name = "high"
+                bin_name = "max"
             _bump(db, CG_VEC_VSTART, bin_name)
 
         # vsetvli emitted by the vsetvli-stress stream carries the new

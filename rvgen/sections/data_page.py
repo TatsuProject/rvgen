@@ -85,7 +85,15 @@ def gen_data_page(
     Port of SV ``gen_data_page`` (riscv_data_page_gen.sv:49). AMO regions are
     not hart-prefixed (shared across harts).
     """
-    rng = rng or random.Random()
+    # Fail loudly on missing rng. The previous ``rng or random.Random()``
+    # silently wall-clock-seeded for library-API users, producing
+    # non-reproducible .data payloads — a silent footgun. CLI callers
+    # always pass rng=self.rng; this guard only catches the misuse.
+    if rng is None:
+        raise ValueError(
+            "gen_data_page() requires an explicit rng= for reproducible "
+            "output (was previously wall-clock-seeded if omitted)."
+        )
     lines: list[str] = []
 
     for region in regions:

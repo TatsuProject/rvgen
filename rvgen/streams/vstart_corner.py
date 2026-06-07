@@ -72,7 +72,11 @@ class VstartCornerInstrStream(DirectedInstrStream):
 
     num_pairs: int = 0
 
-    _CORNERS = (0, 1, 2, 4, 8, 16)
+    # Includes a value > 16 so the vec_vstart_cg ``max`` bin can fire.
+    # 31 is legal under any vlen >= 256 at SEW=8/LMUL=1 (vlmax >= 32);
+    # under tighter configs the implementation either clips or treats
+    # vstart > vlmax-1 as a corner — both are useful stresses.
+    _CORNERS = (0, 1, 2, 4, 8, 16, 31)
 
     def build(self) -> None:
         if not self.cfg.enable_vector_extension or self.cfg.vector_cfg is None:
