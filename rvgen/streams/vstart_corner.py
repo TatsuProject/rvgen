@@ -69,6 +69,11 @@ class VstartCornerInstrStream(DirectedInstrStream):
 
     # The stream is a CSR-write stress test; honor the user's no_csr_instr.
     BANNED_BY: ClassVar[tuple[str, ...]] = ("no_csr_instr",)
+    # Visibility: vstart corner pairs emit `csrwi vstart, N` each pair.
+    # Surfaced as INFO when the user's include_write_csr whitelist
+    # doesn't include VSTART — directed streams are exempt from the
+    # whitelist but the verif engineer should know what moves.
+    WRITES_CSRS: ClassVar[tuple[str, ...]] = ("VSTART",)
 
     num_pairs: int = 0
 

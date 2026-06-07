@@ -336,6 +336,23 @@ class AsmProgramGen:
                     name, banned_by,
                 )
                 continue
+            # M10 (informational): if the stream writes CSRs that aren't
+            # in cfg.include_write_csr, log it once per stream. Directed
+            # streams are NOT gated by the whitelist — the whitelist
+            # controls only the random CSR walker — but the verif
+            # engineer should know which CSRs moved that they thought
+            # were locked down.
+            outside = getattr(
+                stream_cls, "csrs_outside_whitelist", lambda _c: ()
+            )(self.cfg)
+            if outside:
+                import logging as _logging2
+                _logging2.getLogger("rvgen.cli").info(
+                    "directed stream %s writes CSR(s) %s outside "
+                    "include_write_csr whitelist (directed streams are "
+                    "exempt; add +include_write_reg=%s to whitelist them)",
+                    name, ",".join(outside), ",".join(outside),
+                )
             for _ in range(max(count, 1)):
                 i = stream_counter.get(name, 0)
                 stream_counter[name] = i + 1

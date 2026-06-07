@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from typing import ClassVar
 
 from rvgen.isa.base import Instr
 from rvgen.isa.enums import RiscvReg
@@ -123,6 +124,11 @@ class VsetvliStressInstrStream(DirectedInstrStream):
 
     ``num_blocks`` controls how many transitions get emitted.
     """
+
+    # vsetvli writes vtype and vl as a side effect (not via CSRRW —
+    # they're encoded into the V opcode). Surface this for visibility
+    # against include_write_csr.
+    WRITES_CSRS: ClassVar[tuple[str, ...]] = ("VTYPE", "VL")
 
     num_blocks: int = 0
 

@@ -31,6 +31,16 @@ class DirectedInstrStream:
     # subclasses override with a plain class-level assignment.
     BANNED_BY: ClassVar[tuple[str, ...]] = ()
 
+    # CSR symbolic names this stream writes as a side effect (e.g. the
+    # vstart-corner stream writes VSTART; the vsetvli-stress stream
+    # writes VTYPE + VL via vsetvli's implicit semantics).
+    # ``cfg.include_write_csr`` controls the RANDOM CSR walker; directed
+    # streams are EXEMPT (the user explicitly requested them). The
+    # splicer logs INFO when a stream's WRITES_CSRS isn't a subset of
+    # the configured whitelist, so the verif engineer can see why
+    # write counters they thought were locked down moved.
+    WRITES_CSRS: ClassVar[tuple[str, ...]] = ()
+
     cfg: Config
     avail: AvailableInstrs
     rng: random.Random
@@ -57,6 +67,21 @@ class DirectedInstrStream:
             if getattr(cfg, knob, False):
                 return knob
         return None
+
+    @classmethod
+    def csrs_outside_whitelist(cls, cfg: Config) -> tuple[str, ...]:
+        """Return CSRs this stream writes that are NOT in
+        ``cfg.include_write_csr``. Empty tuple means "stream's CSR
+        writes are all whitelisted" (or the stream writes no CSRs).
+
+        Used by the splicer for an INFO log only — directed streams
+        are EXEMPT from the whitelist (the user explicitly requested
+        them). The log is for visibility, not for gating.
+        """
+        if not cls.WRITES_CSRS:
+            return ()
+        whitelist = {s.upper() for s in getattr(cfg, "include_write_csr", ()) or ()}
+        return tuple(c for c in cls.WRITES_CSRS if c.upper() not in whitelist)
 
     def build(self) -> None:
         """Populate :attr:`instr_list`. Subclasses override."""
